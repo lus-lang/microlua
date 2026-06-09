@@ -11,6 +11,39 @@
 
 /* GCRef functions moved to MLuaAlloc.c */
 
+/*
+ * Optional GC phase tracing for debugging (debug builds link libc).
+ * Enable with -DMLUA_GC_TRACE.
+ */
+#ifdef MLUA_GC_TRACE
+#include <stdio.h>
+#define GC_TRACE(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define GC_TRACE(...) ((void)0)
+#endif
+
+#ifdef MLUA_GC_TRACE
+/* Debug: walk the heap verifying header sanity; report the first bad one */
+int MLuaGCVerifyHeap(MLuaState *L, const char *where) {
+  U8 *scan = L->HeapBase + MLuaFirstObjOffset(L);
+  U8 *heapEnd = L->HeapBase + L->HeapTop;
+  while (scan < heapEnd) {
+    MLuaGCHeader *obj = (MLuaGCHeader *)scan;
+    Size objSize = obj->CachedSize;
+    U8 type = MLUA_OBJTYPE(obj);
+    if (objSize == 0 || objSize > L->HeapSize || type == 0 || type > 0x09) {
+      fprintf(stderr,
+              "[gc] HEAP CORRUPT at %s: off=%lu flags=0x%02x size=%lu\n",
+              where, (unsigned long)(scan - L->HeapBase), obj->Flags,
+              (unsigned long)objSize);
+      return 0;
+    }
+    scan += objSize;
+  }
+  return 1;
+}
+#endif
+
 /* ========================================================================== */
 /* GC Control                                                                 */
 /* ========================================================================== */
@@ -35,6 +68,18 @@ static void SetMarked(MLuaGCHeader *obj) { obj->Flags |= GCFLAG_MARKED; }
 
 static void ClearMarked(MLuaGCHeader *obj) { obj->Flags &= ~GCFLAG_MARKED; }
 
+/*
+ * Mark a raw (OBJTYPE_RAW) buffer live via its owner. Raw buffers carry no
+ * references; an unmarked raw buffer at collection time is garbage (its
+ * owner died, or it was transient scratch — safepoint collection guarantees
+ * no C operation is mid-flight holding it).
+ */
+static void MarkRaw(MLuaState *L, void *buffer) {
+  if (buffer) {
+    MLuaGCMarkObject(L, MLUA_OBJHEADER(buffer));
+  }
+}
+
 void MLuaGCMarkObject(MLuaState *L, MLuaGCHeader *obj) {
   U8 objType;
 
@@ -58,6 +103,9 @@ void MLuaGCMarkObject(MLuaState *L, MLuaGCHeader *obj) {
     /* Mark table keys and values */
     MLuaTableHeader *th = MLUA_TABLEHEADER(obj);
     Size i;
+    /* The array/node buffers are owned raw allocations */
+    MarkRaw(L, th->Array);
+    MarkRaw(L, th->Nodes);
     /* Mark array part */
     for (i = 0; i < th->ArraySize; i++) {
       MLuaGCMark(L, th->Array[i]);
@@ -79,6 +127,10 @@ void MLuaGCMarkObject(MLuaState *L, MLuaGCHeader *obj) {
     Size i;
     /* Mark environment */
     MLuaGCMark(L, cl->Env);
+    /* Mark the prototype (a GC object in its own right) */
+    if (cl->Proto) {
+      MLuaGCMarkObject(L, MLUA_OBJHEADER(cl->Proto));
+    }
     /* Mark upvalues */
     for (i = 0; i < cl->NumUpvalues; i++) {
       MLuaUpvalue *uv = MLUA_CLOSURE_UPVALS(cl)[i];
@@ -86,7 +138,28 @@ void MLuaGCMarkObject(MLuaState *L, MLuaGCHeader *obj) {
         MLuaGCMarkObject(L, &uv->Header);
       }
     }
-    /* Note: Proto is allocated separately and needs marking via pool */
+    break;
+  }
+  case OBJTYPE_PROTO: {
+    /* Mark the prototype's GC references (source name, constants, nested
+     * prototypes) and its owned raw buffers (code, pools, debug info). */
+    MLuaProto *proto = (MLuaProto *)MLUA_OBJDATA(obj);
+    Size i;
+    MarkRaw(L, proto->Code);
+    MarkRaw(L, proto->Constants);
+    MarkRaw(L, proto->Protos);
+    MarkRaw(L, proto->Upvalues);
+    MarkRaw(L, proto->LineInfo);
+    MarkRaw(L, proto->LineMap);
+    MLuaGCMark(L, proto->Source);
+    for (i = 0; i < proto->ConstantsSize; i++) {
+      MLuaGCMark(L, proto->Constants[i]);
+    }
+    for (i = 0; i < proto->ProtosSize; i++) {
+      if (proto->Protos[i]) {
+        MLuaGCMarkObject(L, MLUA_OBJHEADER(proto->Protos[i]));
+      }
+    }
     break;
   }
   case OBJTYPE_UPVALUE: {
@@ -101,6 +174,17 @@ void MLuaGCMarkObject(MLuaState *L, MLuaGCHeader *obj) {
     /* Mark the thread's full suspended context */
     MLuaThread *th = MLUA_THREAD(obj);
     Size i;
+    if (th == L->CurrentThread) {
+      /* The RUNNING thread's context lives in L's registers (marked as
+       * roots); its Ctx snapshot here is stale — possibly holding buffer
+       * pointers from before an earlier compaction. Don't touch it. */
+      break;
+    }
+    /* The context buffers are owned raw allocations */
+    MarkRaw(L, th->Ctx.EvalStack);
+    MarkRaw(L, th->Ctx.Locals);
+    MarkRaw(L, th->Ctx.Args);
+    MarkRaw(L, th->Ctx.Frames);
     for (i = 0; i < th->Ctx.EvalTop; i++) {
       MLuaGCMark(L, th->Ctx.EvalStack[i]);
     }
@@ -124,8 +208,9 @@ void MLuaGCMarkObject(MLuaState *L, MLuaGCHeader *obj) {
     break;
   }
   case OBJTYPE_STRING:
-  case OBJTYPE_PROTO:
   case OBJTYPE_USERDATA:
+  case OBJTYPE_NUMBER:
+  case OBJTYPE_RAW:
     /* These don't contain GC references */
     break;
   }
@@ -204,14 +289,12 @@ static void MarkRoots(MLuaState *L) {
   MLuaGCMark(L, L->Registry);
   MLuaGCMark(L, L->Globals);
 
-  /* Mark string table entries */
-  if (L->StringTable) {
-    for (i = 0; i < L->StringTableCap; i++) {
-      if (!IsNil(L->StringTable[i])) {
-        MLuaGCMark(L, L->StringTable[i]);
-      }
-    }
-  }
+  /* The string intern table is WEAK: it never keeps a string alive by
+   * itself. Unreachable strings are tombstoned during the update phase so
+   * the open-addressing probe chains stay intact. The table's backing
+   * ARRAY is state-owned, though, as is the light-function registry. */
+  MarkRaw(L, L->StringTable);
+  MarkRaw(L, L->LightFuncs);
 
   /* Mark all GCRefs from C code */
   for (ref = L->GCRefHead; ref != NULL; ref = ref->Next) {
@@ -224,13 +307,20 @@ static void MarkRoots(MLuaState *L) {
 /* ========================================================================== */
 
 /*
- * Forwarding pointer storage:
- * During compaction, we need to store where each object will move.
- * We store this in the first bytes of the object's data area.
- * This is safe because we don't need the data during the update phase.
+ * Forwarding addresses live in the header's dedicated Forward field
+ * (Lisp-2's "extra field"), so computing addresses never clobbers object
+ * data that the update phase still needs (upvalue Locations, closure
+ * Protos, table headers, ...).
+ *
+ * Pinned objects (RAW payloads) never move and act as sliding barriers:
+ * live objects compact leftwards between pins.
  */
 
-#define FORWARD_PTR(obj) (*((U8 **)(((U8 *)(obj)) + sizeof(MLuaGCHeader))))
+#define FORWARD_PTR(obj) ((obj)->Forward)
+
+static Bool IsPinned(MLuaGCHeader *obj) {
+  return (obj->Flags & GCFLAG_PINNED) != 0;
+}
 
 static Size ComputeAddresses(MLuaState *L) {
   U8 *scan;
@@ -252,11 +342,17 @@ static Size ComputeAddresses(MLuaState *L) {
       break; /* Corrupted or end of objects */
     }
 
-    if (MLuaGCIsMarked(obj)) {
+    if (IsPinned(obj) && MLuaGCIsMarked(obj)) {
+      /* Live pin: stays in place; later objects slide to just past it */
+      FORWARD_PTR(obj) = scan;
+      freePtr = scan + objSize;
+    } else if (MLuaGCIsMarked(obj)) {
       /* Store forwarding pointer */
       FORWARD_PTR(obj) = freePtr;
       freePtr += objSize;
     }
+    /* Unmarked objects — including DEAD pins (raw buffers whose owner
+     * died, or transient scratch) — are garbage and slide away. */
 
     scan += objSize;
   }
@@ -271,7 +367,7 @@ static Size ComputeAddresses(MLuaState *L) {
 
 static MLuaValue UpdateValue(MLuaState *L, MLuaValue value) {
   MLuaGCHeader *obj;
-  U8 *newAddr;
+  void *newAddr;
 
   UNUSED(L);
 
@@ -289,12 +385,16 @@ static MLuaValue UpdateValue(MLuaState *L, MLuaValue value) {
     return MLUA_NIL; /* Object is garbage, return nil */
   }
 
+  if (IsPinned(obj)) {
+    return value; /* Live pinned objects don't move */
+  }
+
   /* Get forwarding pointer */
   newAddr = FORWARD_PTR(obj);
   return MakePtr(newAddr);
 }
 
-/* Update a raw pointer (not wrapped in MLuaValue) */
+/* Update a raw pointer to a GC header (not wrapped in MLuaValue) */
 static void *UpdatePtr(MLuaState *L, void *ptr) {
   MLuaGCHeader *obj = (MLuaGCHeader *)ptr;
 
@@ -312,7 +412,23 @@ static void *UpdatePtr(MLuaState *L, void *ptr) {
     return NULL; /* Object is garbage */
   }
 
-  return (void *)FORWARD_PTR(obj);
+  if (IsPinned(obj)) {
+    return ptr; /* Live pinned objects don't move */
+  }
+
+  return FORWARD_PTR(obj);
+}
+
+/* Update a pointer to object DATA (header-prefixed), e.g. MLuaProto* */
+static void *UpdateDataPtr(MLuaState *L, void *dataPtr) {
+  MLuaGCHeader *newHdr;
+
+  if (!dataPtr) {
+    return NULL;
+  }
+
+  newHdr = (MLuaGCHeader *)UpdatePtr(L, MLUA_OBJHEADER(dataPtr));
+  return newHdr ? MLUA_OBJDATA(newHdr) : NULL;
 }
 
 static void UpdateReferences(MLuaState *L) {
@@ -321,11 +437,28 @@ static void UpdateReferences(MLuaState *L) {
 
   /* Update EvalStack values */
   for (i = 0; i < L->EvalTop; i++) {
+#ifdef MLUA_GC_TRACE
+    if (IsPtr(L->EvalStack[i]) &&
+        !MLuaGCIsMarked((MLuaGCHeader *)GetPtr(L->EvalStack[i]))) {
+      GC_TRACE("[gc] !! EvalStack[%lu] unmarked (type 0x%x)\n",
+               (unsigned long)i,
+               MLUA_OBJTYPE((MLuaGCHeader *)GetPtr(L->EvalStack[i])));
+    }
+#endif
     L->EvalStack[i] = UpdateValue(L, L->EvalStack[i]);
   }
 
   /* Update Locals values (including the current frame) */
   for (i = 0; i < L->LocalsTop; i++) {
+#ifdef MLUA_GC_TRACE
+    if (IsPtr(L->Locals[i]) &&
+        !MLuaGCIsMarked((MLuaGCHeader *)GetPtr(L->Locals[i]))) {
+      GC_TRACE("[gc] !! Locals[%lu] unmarked (type 0x%x, base=%lu top=%lu)\n",
+               (unsigned long)i,
+               MLUA_OBJTYPE((MLuaGCHeader *)GetPtr(L->Locals[i])),
+               (unsigned long)L->LocalsBase, (unsigned long)L->LocalsTop);
+    }
+#endif
     L->Locals[i] = UpdateValue(L, L->Locals[i]);
   }
 
@@ -341,11 +474,15 @@ static void UpdateReferences(MLuaState *L) {
   L->Registry = UpdateValue(L, L->Registry);
   L->Globals = UpdateValue(L, L->Globals);
 
-  /* Update string table entries */
+  /* Update string table entries (weak: dead strings become tombstones).
+   * MLUA_FALSE keeps the linear-probe chain walkable — lookups skip
+   * non-pointer slots — and resize drops tombstones when rehashing. */
   if (L->StringTable) {
     for (i = 0; i < L->StringTableCap; i++) {
-      if (!IsNil(L->StringTable[i])) {
-        L->StringTable[i] = UpdateValue(L, L->StringTable[i]);
+      MLuaValue v = L->StringTable[i];
+      if (!IsNil(v) && IsPtr(v)) {
+        MLuaValue updated = UpdateValue(L, v);
+        L->StringTable[i] = IsNil(updated) ? MLUA_FALSE : updated;
       }
     }
   }
@@ -383,6 +520,8 @@ static void UpdateReferences(MLuaState *L) {
       case OBJTYPE_TABLE: {
         MLuaTableHeader *th = MLUA_TABLEHEADER(obj);
         Size i;
+        /* Contents are updated through the OLD buffer (they move with it);
+         * the buffer pointers are then remapped to the new locations. */
         for (i = 0; i < th->ArraySize; i++) {
           th->Array[i] = UpdateValue(L, th->Array[i]);
         }
@@ -391,12 +530,15 @@ static void UpdateReferences(MLuaState *L) {
           th->Nodes[i].Value = UpdateValue(L, th->Nodes[i].Value);
         }
         th->Forward = UpdateValue(L, th->Forward);
+        th->Array = (MLuaValue *)UpdateDataPtr(L, th->Array);
+        th->Nodes = (MLuaTableNode *)UpdateDataPtr(L, th->Nodes);
         break;
       }
       case OBJTYPE_FUNCTION: {
         MLuaClosure *cl = MLUA_CLOSURE(obj);
         Size i;
         cl->Env = UpdateValue(L, cl->Env);
+        cl->Proto = (MLuaProto *)UpdateDataPtr(L, cl->Proto);
         for (i = 0; i < cl->NumUpvalues; i++) {
           MLuaUpvalue **uvPtr = &MLUA_CLOSURE_UPVALS(cl)[i];
           if (*uvPtr) {
@@ -405,15 +547,94 @@ static void UpdateReferences(MLuaState *L) {
         }
         break;
       }
+      case OBJTYPE_PROTO: {
+        MLuaProto *proto = (MLuaProto *)MLUA_OBJDATA(obj);
+        Size i;
+        proto->Source = UpdateValue(L, proto->Source);
+        for (i = 0; i < proto->ConstantsSize; i++) {
+          proto->Constants[i] = UpdateValue(L, proto->Constants[i]);
+        }
+        for (i = 0; i < proto->ProtosSize; i++) {
+          proto->Protos[i] = (MLuaProto *)UpdateDataPtr(L, proto->Protos[i]);
+        }
+        /* Remap the owned raw buffers (movable; the VM re-derives pc from
+         * Code at every safepoint/frame reload) */
+        proto->Code = (U8 *)UpdateDataPtr(L, proto->Code);
+        proto->Constants = (MLuaValue *)UpdateDataPtr(L, proto->Constants);
+        proto->Protos = (MLuaProto **)UpdateDataPtr(L, proto->Protos);
+        proto->Upvalues = (MLuaUpvalDesc *)UpdateDataPtr(L, proto->Upvalues);
+        proto->LineInfo = (U8 *)UpdateDataPtr(L, proto->LineInfo);
+        proto->LineMap = UpdateDataPtr(L, proto->LineMap);
+        break;
+      }
       case OBJTYPE_UPVALUE: {
         MLuaUpvalue *uv = MLUA_UPVALUE(obj);
         if (uv->Location == &uv->Closed) {
-          /* Closed upvalue - update the closed value */
+          /* Closed upvalue: update the value AND recompute the
+           * self-pointer against the object's post-move address */
+          MLuaUpvalue *newUv = (MLuaUpvalue *)FORWARD_PTR(obj);
           uv->Closed = UpdateValue(L, uv->Closed);
+          uv->Location = &newUv->Closed;
         }
-        /* Open upvalues' Location points into the Locals array, which never
+        /* Open upvalues' Location points into a Locals array, which never
          * moves — no update needed. The Next chain may move, though. */
         uv->Next = (MLuaUpvalue *)UpdatePtr(L, uv->Next);
+        break;
+      }
+      case OBJTYPE_THREAD: {
+        MLuaThread *th = MLUA_THREAD(obj);
+        Size i;
+        MLuaValue *oldLocals;
+        MLuaValue *newLocals;
+        MLuaUpvalue *uv;
+
+        if (th == L->CurrentThread) {
+          /* The RUNNING thread's buffers are L's live arrays: its contents
+           * and pointers are handled at the root level (its Ctx snapshot is
+           * stale and gets overwritten by SaveCtx on suspend). Updating it
+           * here too would double-update values — unsafe mid-cycle. */
+          th->Resumer = (struct MLuaThread *)UpdateDataPtr(L, th->Resumer);
+          break;
+        }
+
+        oldLocals = th->Ctx.Locals;
+        newLocals = (MLuaValue *)UpdateDataPtr(L, oldLocals);
+
+        /* Contents are updated through the OLD buffers (they move with
+         * their buffer); pointers are remapped afterwards. */
+        for (i = 0; i < th->Ctx.EvalTop; i++) {
+          th->Ctx.EvalStack[i] = UpdateValue(L, th->Ctx.EvalStack[i]);
+        }
+        for (i = 0; i < th->Ctx.LocalsTop; i++) {
+          th->Ctx.Locals[i] = UpdateValue(L, th->Ctx.Locals[i]);
+        }
+        for (i = 0; i < th->Ctx.ArgsTop; i++) {
+          th->Ctx.Args[i] = UpdateValue(L, th->Ctx.Args[i]);
+        }
+        for (i = 0; i < th->Ctx.FrameTop; i++) {
+          th->Ctx.Frames[i].Func = UpdateValue(L, th->Ctx.Frames[i].Func);
+        }
+
+        /* Open upvalues point into this thread's (old) Locals buffer:
+         * rebase them against the buffer's new address. The upvalue
+         * objects themselves are updated in their own OBJTYPE_UPVALUE
+         * pass; here we only fix the Location pointers. */
+        if (newLocals && newLocals != oldLocals) {
+          for (uv = th->Ctx.OpenUpvalues; uv != NULL; uv = uv->Next) {
+            if (uv->Location >= oldLocals &&
+                uv->Location < oldLocals + th->Ctx.LocalsSize) {
+              uv->Location = newLocals + (uv->Location - oldLocals);
+            }
+          }
+        }
+
+        th->Ctx.EvalStack = (MLuaValue *)UpdateDataPtr(L, th->Ctx.EvalStack);
+        th->Ctx.Locals = newLocals;
+        th->Ctx.Args = (MLuaValue *)UpdateDataPtr(L, th->Ctx.Args);
+        th->Ctx.Frames = (MLuaFrame *)UpdateDataPtr(L, th->Ctx.Frames);
+        th->Ctx.OpenUpvalues =
+            (struct MLuaUpvalue *)UpdatePtr(L, th->Ctx.OpenUpvalues);
+        th->Resumer = (struct MLuaThread *)UpdateDataPtr(L, th->Resumer);
         break;
       }
       default:
@@ -422,6 +643,60 @@ static void UpdateReferences(MLuaState *L) {
 
       scan += objSize;
     }
+  }
+
+  /* State-owned raw buffers move like everything else: remap their roots */
+  L->StringTable = (MLuaValue *)UpdateDataPtr(L, L->StringTable);
+  L->LightFuncs = (void **)UpdateDataPtr(L, L->LightFuncs);
+
+  /* Live execution registers and saved contexts */
+  for (i = 0; i < L->FrameTop; i++) {
+    L->Frames[i].Func = UpdateValue(L, L->Frames[i].Func);
+  }
+  if (L->CurrentThread) {
+    /* Main's context is parked: its arrays are the carved-out (non-heap)
+     * ones, so only their CONTENTS need updating. */
+    for (i = 0; i < L->MainCtx.EvalTop; i++) {
+      L->MainCtx.EvalStack[i] = UpdateValue(L, L->MainCtx.EvalStack[i]);
+    }
+    for (i = 0; i < L->MainCtx.LocalsTop; i++) {
+      L->MainCtx.Locals[i] = UpdateValue(L, L->MainCtx.Locals[i]);
+    }
+    for (i = 0; i < L->MainCtx.ArgsTop; i++) {
+      L->MainCtx.Args[i] = UpdateValue(L, L->MainCtx.Args[i]);
+    }
+    for (i = 0; i < L->MainCtx.FrameTop; i++) {
+      L->MainCtx.Frames[i].Func = UpdateValue(L, L->MainCtx.Frames[i].Func);
+    }
+    L->MainCtx.OpenUpvalues =
+        (struct MLuaUpvalue *)UpdatePtr(L, L->MainCtx.OpenUpvalues);
+
+    /* The RUNNING thread's buffers (live in L) are heap raws that MOVE:
+     * rebase open-upvalue Locations into the live Locals buffer, then
+     * remap L's array pointers. (When main runs, L's arrays are the carved
+     * ones and must not be touched.) */
+    {
+      MLuaValue *oldLocals = L->Locals;
+      MLuaValue *newLocals = (MLuaValue *)UpdateDataPtr(L, oldLocals);
+      MLuaUpvalue *uv;
+
+      if (newLocals && newLocals != oldLocals) {
+        for (uv = L->OpenUpvalues; uv != NULL; uv = uv->Next) {
+          if (uv->Location >= oldLocals &&
+              uv->Location < oldLocals + L->LocalsSize) {
+            uv->Location = newLocals + (uv->Location - oldLocals);
+          }
+        }
+      }
+
+      L->EvalStack = (MLuaValue *)UpdateDataPtr(L, L->EvalStack);
+      L->Locals = newLocals;
+      L->Args = (MLuaValue *)UpdateDataPtr(L, L->Args);
+      L->Frames = (MLuaFrame *)UpdateDataPtr(L, L->Frames);
+    }
+
+    L->CurrentThread =
+        (struct MLuaThread *)UpdateDataPtr(L, L->CurrentThread);
   }
 }
 
@@ -437,6 +712,19 @@ static void Compact(MLuaState *L, Size newHeapTop) {
   U8 *newAddr;
   Size firstObjOffset = MLuaFirstObjOffset(L);
 
+  /*
+   * The compacted heap must stay WALKABLE: every byte below HeapTop belongs
+   * to some header-prefixed span. Sliding stops short of live pins, which
+   * would leave unwritten gap bytes the next walk misreads as headers — so
+   * each gap is plugged: with a filler RAW header (unmarked, unpinned: it
+   * reads as garbage and heals away next cycle), or, when the gap is
+   * smaller than a header, by extending the previously placed object's
+   * span. A sub-header gap always has a predecessor: with nothing placed
+   * yet the gap consists of whole dead objects (each >= header size).
+   */
+  U8 *lastEnd = L->HeapBase + firstObjOffset;
+  MLuaGCHeader *lastPlaced = NULL;
+
   scan = L->HeapBase + firstObjOffset;
   heapEnd = L->HeapBase + L->HeapTop;
 
@@ -448,16 +736,35 @@ static void Compact(MLuaState *L, Size newHeapTop) {
       break;
     }
 
-    if (MLuaGCIsMarked(obj)) {
+    if (IsPinned(obj)) {
+      if (MLuaGCIsMarked(obj)) {
+        /* Live pin: plug the gap between the last placement and it */
+        Size gap = (Size)(scan - lastEnd);
+        if (gap >= sizeof(MLuaGCHeader)) {
+          MLuaGCHeader *filler = (MLuaGCHeader *)lastEnd;
+          filler->Flags = OBJTYPE_RAW; /* unpinned+unmarked => garbage */
+          filler->CachedSize = gap;
+          filler->Forward = NULL;
+        } else if (gap > 0 && lastPlaced) {
+          lastPlaced->CachedSize += gap;
+        }
+        ClearMarked(obj);
+        lastEnd = scan + objSize;
+        lastPlaced = obj;
+      }
+      /* Dead pin: abandoned; later placements slide over it */
+    } else if (MLuaGCIsMarked(obj)) {
       newAddr = FORWARD_PTR(obj);
 
-      if (newAddr != scan) {
+      if (newAddr != (void *)scan) {
         /* Move the object */
         MemMove(newAddr, scan, objSize);
       }
 
       /* Clear mark bit on the moved object */
       ClearMarked((MLuaGCHeader *)newAddr);
+      lastEnd = (U8 *)newAddr + objSize;
+      lastPlaced = (MLuaGCHeader *)newAddr;
     }
 
     scan += objSize;
@@ -478,27 +785,50 @@ void MLuaGCCollect(MLuaState *L) {
     return;
   }
 
+  /* Vector mode has no walkable heap: nothing to compact */
+  if (L->AllocFunc) {
+    return;
+  }
+
   L->GCPhase = GC_PHASE_MARK;
+
+GC_TRACE("[gc] mark (top=%lu)\n", (unsigned long)L->HeapTop);
+#ifdef MLUA_GC_TRACE
+  MLuaGCVerifyHeap(L, "mark-start");
+#endif
 
   /* Phase 1: Mark all reachable objects */
   MarkRoots(L);
 
   L->GCPhase = GC_PHASE_COMPUTE;
+GC_TRACE("[gc] compute%s\n", "");
 
   /* Phase 2: Compute new addresses */
   newHeapTop = ComputeAddresses(L);
 
   L->GCPhase = GC_PHASE_UPDATE;
+GC_TRACE("[gc] update (newtop=%lu)\n", (unsigned long)newHeapTop);
+#ifdef MLUA_GC_TRACE
+  MLuaGCVerifyHeap(L, "after-compute");
+#endif
 
   /* Phase 3: Update all references */
   UpdateReferences(L);
 
   L->GCPhase = GC_PHASE_COMPACT;
+GC_TRACE("[gc] compact%s\n", "");
+#ifdef MLUA_GC_TRACE
+  MLuaGCVerifyHeap(L, "after-update");
+#endif
 
   /* Phase 4: Move objects */
   Compact(L, newHeapTop);
 
   L->GCPhase = GC_PHASE_IDLE;
+GC_TRACE("[gc] done (top=%lu)\n", (unsigned long)L->HeapTop);
+#ifdef MLUA_GC_TRACE
+  MLuaGCVerifyHeap(L, "collect-end");
+#endif
 
   /* Update GC threshold based on new usage */
   L->GCThreshold = L->HeapTop + (L->HeapSize - L->HeapTop) / 2;

@@ -721,7 +721,10 @@ static void ParsePrefix(MLuaParser *p) {
 
   default:
     Error(p, "unexpected token in expression");
-    /* Push nil as fallback */
+    /* CONSUME the offending token so the parser always makes progress
+     * (otherwise an unexpected token loops the statement parser forever),
+     * and push nil as a placeholder value. */
+    Advance(p);
     MLuaEmitOp(fs, OP_LOADNIL);
     StackPush(p, 1);
     break;
@@ -1878,6 +1881,210 @@ static void ParseBreak(MLuaParser *p) {
   PushPatch(p, EmitFwdJump(p, OP_JMP));
 }
 
+/*
+ * Multiple assignment: t1, t2, ... = e1, e2, ...
+ *
+ * Index targets evaluate their [table, key] pair up front (stacked in
+ * declaration order). The value list is normalized to exactly N values,
+ * stashed in hidden temp locals, then stores run LAST target first so each
+ * index target's pair surfaces at the stack top exactly when needed.
+ * Temps also give `a, b = b, a` correct swap semantics.
+ */
+#define MAX_ASSIGN_TARGETS 8
+
+static void ParseMultiAssign(MLuaParser *p, AccessInfo firstInfo,
+                             const char *firstName, Size firstNameLen) {
+  MLuaFuncState *fs = p->FS;
+  enum { T_LOCAL, T_UPVAL, T_GLOBAL, T_INDEX };
+  struct {
+    U8 Kind;
+    U8 Idx;    /* local slot / upvalue index */
+    int NameK; /* global name constant */
+  } targets[MAX_ASSIGN_TARGETS];
+  int n = 0;
+  int values = 0;
+  U8 tempBase;
+  int i;
+
+  /* Normalize the already-parsed first target */
+  if (firstInfo.accessType == 1) {
+    targets[n++].Kind = T_INDEX; /* [t, k] already on the stack */
+  } else if (firstInfo.accessType == 2) {
+    MLuaEmitOpB(fs, OP_LOADK, (U8)firstInfo.fieldConstIdx); /* t -> [t, k] */
+    StackPush(p, 1);
+    targets[n++].Kind = T_INDEX;
+  } else if (firstName) {
+    int idx;
+    /* The name's value was pushed by ParsePrefix and is unused: drop it */
+    MLuaEmitOpB(fs, OP_POP, 1);
+    StackPop(p, 1);
+    switch (ResolveVar(p, fs, firstName, firstNameLen, &idx)) {
+    case VAR_LOCAL:
+      targets[n].Kind = T_LOCAL;
+      targets[n].Idx = (U8)idx;
+      break;
+    case VAR_UPVAL:
+      targets[n].Kind = T_UPVAL;
+      targets[n].Idx = (U8)idx;
+      break;
+    default:
+      targets[n].Kind = T_GLOBAL;
+      targets[n].NameK = MLuaAddStringK(fs, firstName, firstNameLen);
+      break;
+    }
+    n++;
+  } else {
+    Error(p, "invalid assignment target");
+    return;
+  }
+
+  /* Remaining targets */
+  while (Match(p, TK_COMMA)) {
+    const char *tname;
+    Size tlen;
+
+    if (n >= MAX_ASSIGN_TARGETS) {
+      Error(p, "too many assignment targets (max 8)");
+      return;
+    }
+    if (!Check(p, TK_NAME)) {
+      Error(p, "expected assignment target");
+      return;
+    }
+    tname = p->Lex.Token.Value.String.Data;
+    tlen = p->Lex.Token.Value.String.Length;
+    Advance(p);
+
+    if (Check(p, TK_DOT) || Check(p, TK_LBRACKET)) {
+      /* Indexed target: evaluate the access chain, leaving [t, k] */
+      EmitGetVar(p, tname, tlen);
+      StackPush(p, 1);
+      for (;;) {
+        if (Match(p, TK_DOT)) {
+          int k;
+          if (!Check(p, TK_NAME)) {
+            Error(p, "expected field name");
+            return;
+          }
+          k = MLuaAddStringK(fs, p->Lex.Token.Value.String.Data,
+                             p->Lex.Token.Value.String.Length);
+          Advance(p);
+          MLuaEmitOpB(fs, OP_LOADK, (U8)k);
+          StackPush(p, 1);
+          if (Check(p, TK_DOT) || Check(p, TK_LBRACKET)) {
+            MLuaEmitOp(fs, OP_GETTABLE); /* Intermediate access */
+            StackPop(p, 1);
+          } else {
+            break; /* Final: [t, k] stays */
+          }
+        } else if (Match(p, TK_LBRACKET)) {
+          ParseExpr(p);
+          AdjustTo1(p);
+          Expect(p, TK_RBRACKET);
+          if (Check(p, TK_DOT) || Check(p, TK_LBRACKET)) {
+            MLuaEmitOp(fs, OP_GETTABLE);
+            StackPop(p, 1);
+          } else {
+            break; /* Final: [t, k] stays */
+          }
+        } else {
+          Error(p, "expected assignment target");
+          return;
+        }
+      }
+      targets[n++].Kind = T_INDEX;
+    } else {
+      int idx;
+      switch (ResolveVar(p, fs, tname, tlen, &idx)) {
+      case VAR_LOCAL:
+        targets[n].Kind = T_LOCAL;
+        targets[n].Idx = (U8)idx;
+        break;
+      case VAR_UPVAL:
+        targets[n].Kind = T_UPVAL;
+        targets[n].Idx = (U8)idx;
+        break;
+      default:
+        targets[n].Kind = T_GLOBAL;
+        targets[n].NameK = MLuaAddStringK(fs, tname, tlen);
+        break;
+      }
+      n++;
+    }
+  }
+
+  Expect(p, TK_ASSIGN);
+
+  /* Value list, normalized to exactly n values */
+  for (;;) {
+    ParseExpr(p);
+    values++;
+    if (!Match(p, TK_COMMA)) {
+      break;
+    }
+    AdjustTo1(p);
+  }
+  {
+    Bool multret = EndsWithMultret(fs);
+    if (values <= n) {
+      int missing = n - values;
+      if (multret) {
+        MLuaEmitOpB(fs, OP_ADJUST, (U8)(missing + 1));
+        StackPush(p, missing);
+      } else {
+        for (i = 0; i < missing; i++) {
+          MLuaEmitOp(fs, OP_LOADNIL);
+          StackPush(p, 1);
+        }
+      }
+    } else {
+      if (multret) {
+        MLuaEmitOpB(fs, OP_ADJUST, 1);
+      }
+      MLuaEmitOpB(fs, OP_POP, (U8)(values - n));
+      StackPop(p, values - n);
+    }
+  }
+
+  /* Stash the values into hidden temp locals (popped in reverse) */
+  tempBase = fs->NumLocals;
+  for (i = 0; i < n; i++) {
+    AddLocal(p, "(assign tmp)", 12);
+  }
+  for (i = n - 1; i >= 0; i--) {
+    MLuaEmitOpB(fs, OP_SETLOCAL, (U8)(tempBase + i));
+    StackPop(p, 1);
+  }
+
+  /* Store back, LAST target first */
+  for (i = n - 1; i >= 0; i--) {
+    MLuaEmitOpB(fs, OP_GETLOCAL, (U8)(tempBase + i));
+    switch (targets[i].Kind) {
+    case T_LOCAL:
+      MLuaEmitOpB(fs, OP_SETLOCAL, targets[i].Idx);
+      break;
+    case T_UPVAL:
+      MLuaEmitOpB(fs, OP_SETUPVAL, targets[i].Idx);
+      break;
+    case T_GLOBAL:
+      MLuaEmitOpB(fs, OP_LOADK, (U8)targets[i].NameK);
+      MLuaEmitOp(fs, OP_SWAP);
+      MLuaEmitOp(fs, OP_SETGLOBAL);
+      break;
+    case T_INDEX:
+      /* Stack: [..., t, k, v]; SETTABLE leaves t — drop it */
+      MLuaEmitOp(fs, OP_SETTABLE);
+      MLuaEmitOpB(fs, OP_POP, 1);
+      StackPop(p, 2);
+      break;
+    }
+  }
+
+  /* Release the temp slots (frame space stays reserved via MaxLocals) */
+  fs->NumLocals -= (U8)n;
+  fs->LocalsSize -= (Size)n;
+}
+
 static void ParseExprStat(MLuaParser *p) {
   MLuaFuncState *fs = p->FS;
   const char *name = NULL;
@@ -1895,6 +2102,12 @@ static void ParseExprStat(MLuaParser *p) {
 
   /* Parse suffixes, potentially leaving a pending table access */
   accessInfo = ParseSuffixForAssign(p);
+
+  if (Check(p, TK_COMMA)) {
+    /* Multiple assignment: a, b, ... = ... */
+    ParseMultiAssign(p, accessInfo, name, nameLen);
+    return;
+  }
 
   if (Check(p, TK_ASSIGN)) {
     /* Assignment */

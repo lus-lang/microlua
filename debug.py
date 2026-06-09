@@ -16,11 +16,21 @@ except subprocess.CalledProcessError:
 
 import lldb
 
-# --- HARDCODED CONFIGURATION ---
+# --- CONFIGURATION ---
+# Usage: python3 debug.py [--timeout N] [exe [args...]]
+# Defaults preserve the original behavior (REPL + /tmp/test_while.lua).
 EXE_PATH = "./builddir/mlua"
 ARGS = ["/tmp/test_while.lua"]
 TIMEOUT_SECONDS = 2  # How long to wait before interrupting
-# -------------------------------
+
+_argv = sys.argv[1:]
+if _argv and _argv[0] == "--timeout":
+    TIMEOUT_SECONDS = int(_argv[1])
+    _argv = _argv[2:]
+if _argv:
+    EXE_PATH = _argv[0]
+    ARGS = _argv[1:]
+# ----------------------
 
 def run_debugger():
     # 1. Initialize Debugger

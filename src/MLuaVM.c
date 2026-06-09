@@ -693,7 +693,23 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
   RELOAD_FRAME();
 
   for (;;) {
-    U8 op = READ_BYTE();
+    U8 op;
+
+    /*
+     * GC safepoint. Allocations never collect directly (they only set
+     * GCPending), so C library code and the parser never see objects move
+     * mid-operation. Here, between instructions, every live pointer is
+     * reloadable from the frames: save the PC offset, collect, reload.
+     * (pc itself stays valid — code buffers are pinned — but proto/cl move.)
+     */
+    if (L->GCPending) {
+      L->GCPending = FALSE;
+      L->Frames[L->FrameTop - 1].PC = (Size)(pc - proto->Code);
+      MLuaGCCollect(L);
+      RELOAD_FRAME();
+    }
+
+    op = READ_BYTE();
 
     switch (op) {
     case OP_NOP:

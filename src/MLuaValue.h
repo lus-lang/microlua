@@ -267,6 +267,9 @@ static inline double GetDouble(MLuaValue v) {
 #define OBJTYPE_UPVALUE 0x06  /* Open upvalue */
 #define OBJTYPE_THREAD 0x07   /* Coroutine */
 #define OBJTYPE_NUMBER 0x08   /* Heap-allocated floating point */
+#define OBJTYPE_RAW 0x09      /* Raw buffer (MLuaAlloc payload): pinned,
+                                 always live, no references — makes the GC
+                                 heap walk well-defined */
 
 /* Flag bits in header byte */
 #define GCFLAG_TYPE_MASK 0x0F /* Low 4 bits: type */
@@ -275,13 +278,17 @@ static inline double GetDouble(MLuaValue v) {
 #define GCFLAG_ROM 0x80       /* Bit 7: read-only memory */
 
 /*
- * GC Object Header - single byte followed by varint size.
- * We store the parsed size alongside for runtime efficiency.
+ * GC Object Header.
+ * CachedSize is the full ALIGNED span the object occupies (header + data +
+ * padding) so the linear heap walk steps exactly to the next header.
+ * Forward holds the relocation target during a mark-compact cycle; keeping
+ * it in the header (Lisp-2's "extra field") means computing addresses never
+ * clobbers object data the update phase still needs (Location, Proto, ...).
  */
 typedef struct {
   U8 Flags; /* [7:ROM][6:Pinned][5:Marked][4:Reserved][3-0:Type] */
-  /* Size follows as varint in serialized form; we cache it here */
-  Size CachedSize; /* Total object size including header */
+  Size CachedSize; /* Total aligned span including header */
+  void *Forward;   /* Compaction forwarding address (GC use only) */
 } MLuaGCHeader;
 
 /* Minimum alignment for heap objects */

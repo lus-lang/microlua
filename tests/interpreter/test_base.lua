@@ -107,4 +107,48 @@ test.describe("pairs/ipairs", function()
     end)
 end)
 
+test.describe("multiple assignment", function()
+    test.it("swaps locals", function()
+        local a, b = 1, 2
+        a, b = b, a
+        test.expect(a).toBe(2)
+        test.expect(b).toBe(1)
+    end)
+
+    test.it("assigns from a multi-result call", function()
+        local function two() return 10, 20 end
+        local a, b
+        a, b = two()
+        test.expect(a).toBe(10)
+        test.expect(b).toBe(20)
+    end)
+
+    test.it("nil-pads missing values", function()
+        local a, b, c
+        a, b, c = 1
+        test.expect(a).toBe(1)
+        test.expect(b).toBeNil()
+        test.expect(c).toBeNil()
+    end)
+
+    test.it("assigns table fields and indices", function()
+        local t = {}
+        local u = {}
+        t.x, u[1], t.y = 5, 6, 7
+        test.expect(t.x).toBe(5)
+        test.expect(u[1]).toBe(6)
+        test.expect(t.y).toBe(7)
+    end)
+
+    test.it("mixes locals, globals and fields", function()
+        local t = {}
+        local loc
+        MULTI_G, loc, t.f = "g", "l", "f"
+        test.expect(MULTI_G).toBe("g")
+        test.expect(loc).toBe("l")
+        test.expect(t.f).toBe("f")
+        MULTI_G = nil
+    end)
+end)
+
 test.run()

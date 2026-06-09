@@ -86,3 +86,11 @@ test_lib = executable('test_lib', 'TestLib.c',
 )
 test('TestLib', test_lib)
 
+
+# Test for coroutines and GC under memory pressure
+test_coro = executable('test_coro', 'TestCoro.c',
+    include_directories: test_inc,
+    link_with: microlua_lib,
+    c_args: test_c_args
+)
+test('TestCoro', test_coro)

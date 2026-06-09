@@ -16,6 +16,7 @@ static void InitStateCommon(MLuaState *L, Size heapSize) {
 
   /* Initialize GC */
   L->GCEnabled = TRUE;
+  L->GCPending = FALSE;
   L->GCThreshold = (heapSize * MLUA_DEFAULT_GC_THRESHOLD_PERCENT) / 100;
   L->GCPhase = 0;
   L->GCGrayQueue = 0;
@@ -272,7 +273,14 @@ Size MLuaMemoryTotal(MLuaState *L) { return L->HeapSize; }
 /* Bump-Pointer Allocation                                                    */
 /* ========================================================================== */
 
-void *MLuaAlloc(MLuaState *L, Size size) {
+/*
+ * Core allocation: vector-mode delegates to the custom allocator;
+ * constrained mode bump-allocates from the heap. Returns zeroed memory.
+ *
+ * Every constrained-mode allocation is header-prefixed by the callers
+ * below, so the GC's linear heap walk always lands on valid headers.
+ */
+static void *CoreAlloc(MLuaState *L, Size size) {
   Size aligned;
   Size newTop;
   void *ptr;
@@ -293,28 +301,19 @@ void *MLuaAlloc(MLuaState *L, Size size) {
   /* Constrained mode: bump-pointer allocation */
   aligned = ALIGN_UP(size, MLUA_ALIGNMENT);
 
-  /* Check if we need to run GC */
+  /*
+   * Crossing the threshold only REQUESTS a collection: the VM collects at
+   * its next safepoint (instruction boundary), where every live pointer is
+   * reloadable from the frames. Collecting here would move objects out
+   * from under C code mid-operation.
+   */
   if (L->GCEnabled && L->HeapTop + aligned > L->GCThreshold) {
-    MLuaGCCollect(L);
-
-    /* If still not enough space after GC, fail */
-    if (L->HeapTop + aligned > L->HeapSize) {
-      return NULL; /* Out of memory */
-    }
+    L->GCPending = TRUE;
   }
 
   newTop = L->HeapTop + aligned;
-
-  /* Final check */
   if (newTop > L->HeapSize) {
-    /* Try GC one more time */
-    if (L->GCEnabled) {
-      MLuaGCCollect(L);
-      newTop = L->HeapTop + aligned;
-    }
-    if (newTop > L->HeapSize) {
-      return NULL; /* Out of memory */
-    }
+    return NULL; /* Out of memory (a pending GC may free space later) */
   }
 
   ptr = L->HeapBase + L->HeapTop;
@@ -324,6 +323,35 @@ void *MLuaAlloc(MLuaState *L, Size size) {
   MemSet(ptr, 0, aligned);
 
   return ptr;
+}
+
+void *MLuaAlloc(MLuaState *L, Size size) {
+  MLuaGCHeader *header;
+  Size totalSize;
+
+  if (size == 0) {
+    return NULL;
+  }
+
+  /*
+   * Raw payloads (code buffers, table storage, thread stacks, parser
+   * scratch, ...) get an OBJTYPE_RAW header so the heap walk can step over
+   * them. They are MOVABLE: each owner marks its buffers live and remaps
+   * its pointers during the update phase (a pinned buffer at the heap top
+   * would make compaction useless for a bump allocator). Unmarked raw
+   * buffers — transient scratch, dead owners — are reclaimed.
+   */
+  totalSize = sizeof(MLuaGCHeader) + size;
+  header = (MLuaGCHeader *)CoreAlloc(L, totalSize);
+  if (!header) {
+    return NULL;
+  }
+
+  header->Flags = (U8)OBJTYPE_RAW;
+  header->CachedSize = ALIGN_UP(totalSize, MLUA_ALIGNMENT);
+  header->Forward = NULL;
+
+  return MLUA_OBJDATA(header);
 }
 
 /* ========================================================================== */
@@ -337,14 +365,16 @@ MLuaGCHeader *MLuaAllocObject(MLuaState *L, U8 objType, Size dataSize) {
   /* Calculate total size: header + data */
   totalSize = sizeof(MLuaGCHeader) + dataSize;
 
-  header = (MLuaGCHeader *)MLuaAlloc(L, totalSize);
+  header = (MLuaGCHeader *)CoreAlloc(L, totalSize);
   if (!header) {
     return NULL;
   }
 
-  /* Initialize header with packed type in flags */
+  /* Initialize header with packed type in flags. CachedSize is the full
+   * ALIGNED span so the heap walk steps exactly to the next header. */
   header->Flags = objType & GCFLAG_TYPE_MASK;
-  header->CachedSize = totalSize;
+  header->CachedSize = ALIGN_UP(totalSize, MLUA_ALIGNMENT);
+  header->Forward = NULL;
 
   return header;
 }

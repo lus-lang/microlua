@@ -175,6 +175,9 @@ struct MLuaState {
   /* GC State */
   U8 GCPhase;                  /* Current GC phase */
   U8 GCEnabled;                /* Is GC enabled? */
+  Bool GCPending;              /* Threshold crossed: collect at the next VM
+                                  safepoint (allocations never move objects
+                                  out from under running C code) */
   Size GCThreshold;            /* Trigger GC when HeapTop exceeds this */
   Size GCGrayQueue;            /* Offset to head of gray object queue */
   struct MLuaGCRef *GCRefHead; /* Head of C-side GCRef list */
