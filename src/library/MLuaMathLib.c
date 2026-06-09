@@ -130,6 +130,17 @@ static int MathFmodF(MLuaState *L) {
 }
 
 /* ========================================================================== */
+/* math.pow (Lua 5.1)                                                         */
+/* ========================================================================== */
+
+static int MathPowF(MLuaState *L) {
+  double x = GetArg(L, 1);
+  double y = GetArg(L, 2);
+  MLuaPush(L, MLuaMakeNumber(L, MathPow(x, y)));
+  return 1;
+}
+
+/* ========================================================================== */
 /* math.frexp                                                                 */
 /* ========================================================================== */
 
@@ -388,6 +399,7 @@ static const MLuaLibEntry MathLibEntries[] = {{"abs", MathAbs},
                                               {"log", MathLogF},
                                               {"max", MathMax},
                                               {"min", MathMin},
+                                              {"pow", MathPowF},
                                               {"modf", MathModfF},
                                               {"rad", MathRad},
                                               {"random", MathRandom},

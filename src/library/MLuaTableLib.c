@@ -299,16 +299,65 @@ static int TableForwardF(MLuaState *L) {
 }
 
 /* ========================================================================== */
+/* table.maxn (Lua 5.1)                                                       */
+/* ========================================================================== */
+
+static int TableMaxn(MLuaState *L) {
+  MLuaValue tbl = MLuaGetStack(L, 1);
+  MLuaTableHeader *th;
+  double maxn = 0.0;
+  Size i;
+
+  if (!IsPtr(tbl)) {
+    MLuaPush(L, MakeInt(0));
+    return 1;
+  }
+  th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl));
+
+  for (i = 0; i < th->ArrayLen; i++) {
+    if (!IsNil(th->Array[i]) && (double)(i + 1) > maxn) {
+      maxn = (double)(i + 1);
+    }
+  }
+  for (i = 0; i < th->NodeCapacity; i++) {
+    if (!IsNil(th->Nodes[i].Key) && !IsNil(th->Nodes[i].Value)) {
+      MLuaValue k = th->Nodes[i].Key;
+      if (IsInt(k)) {
+        if ((double)GetInt(k) > maxn) {
+          maxn = (double)GetInt(k);
+        }
+      } else if (MLuaIsNumber(k)) {
+        double kn = MLuaToNumber(k);
+        if (kn > maxn) {
+          maxn = kn;
+        }
+      }
+    }
+  }
+
+  if (maxn == (double)(I32)maxn) {
+    MLuaPush(L, MakeInt((I32)maxn));
+  } else {
+    MLuaPush(L, MLuaMakeNumber(L, maxn));
+  }
+  return 1;
+}
+
+/* ========================================================================== */
 /* Library Registration                                                       */
 /* ========================================================================== */
 
 static const MLuaLibEntry TableLibEntries[] = {
     {"concat", TableConcat}, {"forward", TableForwardF},
-    {"insert", TableInsert}, {"pack", TablePack},
-    {"remove", TableRemove}, {"sort", TableSort},
-    {"unpack", TableUnpack}, {NULL, NULL}};
+    {"insert", TableInsert}, {"maxn", TableMaxn},
+    {"pack", TablePack},     {"remove", TableRemove},
+    {"sort", TableSort},     {"unpack", TableUnpack},
+    {NULL, NULL}};
 
 void MLuaOpenTable(MLuaState *L) {
   MLuaValue lib = MLuaNewLib(L, "table");
   MLuaRegisterLib(L, lib, TableLibEntries);
+
+  /* Lua 5.1 global alias */
+  MLuaRegisterGlobal(L, "unpack", TableUnpack);
 }

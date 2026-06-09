@@ -392,12 +392,18 @@ Bool MLuaCompare(MLuaState *L, MLuaOpCode op, MLuaValue a, MLuaValue b) {
     }
   }
 
-  /* Value equality (strings are interned: pointer equality is value
-   * equality, and short strings compare by their packed bits) */
-  if (op == OP_EQ)
-    return a == b;
-  if (op == OP_NEQ)
-    return a != b;
+  /* Numeric equality crosses the int/float divide (5 == 5.0 in Lua) */
+  if (op == OP_EQ || op == OP_NEQ) {
+    Bool aNum = IsInt(a) || MLuaIsNumber(a);
+    Bool bNum = IsInt(b) || MLuaIsNumber(b);
+    if (aNum && bNum) {
+      Bool eq = ToNumber(a) == ToNumber(b);
+      return (op == OP_EQ) ? eq : !eq;
+    }
+    /* Value equality otherwise (strings are interned: pointer equality
+     * is value equality; short strings compare by their packed bits) */
+    return (op == OP_EQ) ? (a == b) : (a != b);
+  }
 
   /* Lexicographic byte comparison for two strings */
   aStr = IsString(a) || IsShortStr(a);

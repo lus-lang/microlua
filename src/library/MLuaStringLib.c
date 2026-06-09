@@ -9,6 +9,7 @@
 #include "../MLuaCore.h"
 #include "../MLuaFunc.h"
 #include "../MLuaString.h"
+#include "../MLuaUTF8.h"
 #include "../MLuaVM.h"
 
 /* ========================================================================== */
@@ -30,41 +31,54 @@ static int StringByte(MLuaState *L) {
   Size len;
   const char *s = GetStrArg(L, 1, &len);
   int top = MLuaGetTop(L);
-  Size i, j;
+  IPtr i = 1;
+  IPtr j;
+  IPtr total;
+  const char *p;
+  const char *end;
   Size count;
 
   if (!s || len == 0) {
     return 0;
   }
 
-  /* Default: i=1, j=i */
-  i = 1;
-  j = 1;
-
   if (top >= 2) {
     MLuaValue vi = MLuaGetStack(L, 2);
-    i = (Size)GetInt(vi);
+    i = GetInt(vi);
   }
   if (top >= 3) {
     MLuaValue vj = MLuaGetStack(L, 3);
-    j = (Size)GetInt(vj);
+    j = GetInt(vj);
   } else {
     j = i;
   }
 
-  /* Adjust for 1-based indexing */
+  /* Unicode-aware: positions are codepoint indices, results are CODEPOINTS */
+  total = (IPtr)MLuaUTF8Len(s, len);
+  if (i < 0)
+    i = total + i + 1;
+  if (j < 0)
+    j = total + j + 1;
   if (i < 1)
     i = 1;
-  if (j > len)
-    j = len;
-  if (i > j || i > len)
+  if (j > total)
+    j = total;
+  if (i > j)
     return 0;
 
-  /* Return byte values */
+  p = s + MLuaUTF8Offset(s, len, (Size)(i - 1));
+  end = s + len;
   count = 0;
-  for (; i <= j && i <= len; i++) {
-    MLuaPush(L, MakeInt((I32)(U8)s[i - 1]));
+  while (i <= j && p < end) {
+    U32 cp;
+    Size consumed = MLuaUTF8Decode(p, end, &cp);
+    if (consumed == 0) {
+      break;
+    }
+    MLuaPush(L, MakeInt((I32)cp));
     count++;
+    p += consumed;
+    i++;
   }
   return (int)count;
 }
@@ -75,20 +89,22 @@ static int StringByte(MLuaState *L) {
 
 static int StringChar(MLuaState *L) {
   int top = MLuaGetTop(L);
-  char buf[256];
+  char buf[1024]; /* up to 256 codepoints x 4 UTF-8 bytes */
+  Size pos = 0;
   int i;
 
   if (top > 256) {
     top = 256;
   }
 
+  /* Unicode-aware: arguments are CODEPOINTS, encoded as UTF-8 */
   for (i = 0; i < top; i++) {
     MLuaValue v = MLuaGetStack(L, i + 1);
-    I32 c = GetInt(v);
-    buf[i] = (char)(U8)c;
+    U32 cp = (U32)GetInt(v);
+    pos += MLuaUTF8Encode(cp, buf + pos);
   }
 
-  MLuaPush(L, MLuaStringNew(L, buf, (Size)top));
+  MLuaPush(L, MLuaStringNew(L, buf, pos));
   return 1;
 }
 
@@ -605,8 +621,10 @@ static int StringFormat(MLuaState *L) {
 
 static int StringLen(MLuaState *L) {
   Size len;
-  GetStrArg(L, 1, &len);
-  MLuaPush(L, MakeInt((I32)len));
+  const char *s = GetStrArg(L, 1, &len);
+
+  /* Unicode-aware: the length of a string is its CODEPOINT count */
+  MLuaPush(L, MakeInt(s ? (I32)MLuaUTF8Len(s, len) : 0));
   return 1;
 }
 
@@ -617,7 +635,7 @@ static int StringLen(MLuaState *L) {
 static int StringLower(MLuaState *L) {
   Size len;
   const char *s = GetStrArg(L, 1, &len);
-  char buf[1024];
+  char *buf;
   Size i;
 
   if (!s || len == 0) {
@@ -625,8 +643,13 @@ static int StringLower(MLuaState *L) {
     return 1;
   }
 
-  if (len > sizeof(buf)) {
-    len = sizeof(buf);
+  /* Heap scratch (no silent truncation); ASCII-only case mapping — full
+   * Unicode case tables are out of budget for a tiny runtime. UTF-8
+   * continuation bytes are > 0x7F and pass through untouched. */
+  buf = (char *)MLuaAlloc(L, len);
+  if (!buf) {
+    L->ErrorMsg = "out of memory";
+    return -1;
   }
 
   for (i = 0; i < len; i++) {
@@ -914,20 +937,28 @@ static int StringRep(MLuaState *L) {
   const char *s = GetStrArg(L, 1, &len);
   MLuaValue vn = MLuaGetStack(L, 2);
   I32 n = GetInt(vn);
-  char buf[1024];
+  char *buf;
+  Size total;
   Size bufpos = 0;
   I32 i;
 
-  if (!s || n <= 0) {
+  if (!s || n <= 0 || len == 0) {
     MLuaPush(L, MLuaStringNew(L, "", 0));
     return 1;
   }
 
-  for (i = 0; i < n && bufpos + len < sizeof(buf); i++) {
-    Size j;
-    for (j = 0; j < len; j++) {
-      buf[bufpos++] = s[j];
-    }
+  /* Heap scratch sized exactly (no silent truncation); reclaimed at the
+   * next collection */
+  total = len * (Size)n;
+  buf = (char *)MLuaAlloc(L, total);
+  if (!buf) {
+    L->ErrorMsg = "out of memory";
+    return -1;
+  }
+
+  for (i = 0; i < n; i++) {
+    MemCpy(buf + bufpos, s, len);
+    bufpos += len;
   }
 
   MLuaPush(L, MLuaStringNew(L, buf, bufpos));
@@ -941,23 +972,39 @@ static int StringRep(MLuaState *L) {
 static int StringReverse(MLuaState *L) {
   Size len;
   const char *s = GetStrArg(L, 1, &len);
-  char buf[1024];
-  Size i;
+  char *buf;
+  const char *p;
+  const char *end;
+  Size out;
 
   if (!s || len == 0) {
     MLuaPush(L, MLuaStringNew(L, "", 0));
     return 1;
   }
 
-  if (len > sizeof(buf)) {
-    len = sizeof(buf);
+  /* Unicode-aware: reverse the CODEPOINT sequence (multibyte sequences
+   * stay intact). Transient heap scratch; reclaimed at the next collect. */
+  buf = (char *)MLuaAlloc(L, len);
+  if (!buf) {
+    L->ErrorMsg = "out of memory";
+    return -1;
   }
 
-  for (i = 0; i < len; i++) {
-    buf[i] = s[len - 1 - i];
+  p = s;
+  end = s + len;
+  out = len;
+  while (p < end) {
+    U32 cp;
+    Size consumed = MLuaUTF8Decode(p, end, &cp);
+    if (consumed == 0) {
+      consumed = 1; /* Invalid byte: treat as a single unit */
+    }
+    out -= consumed;
+    MemCpy(buf + out, p, consumed);
+    p += consumed;
   }
 
-  MLuaPush(L, MLuaStringNew(L, buf, len));
+  MLuaPush(L, MLuaStringNew(L, buf + out, len - out));
   return 1;
 }
 
@@ -970,6 +1017,9 @@ static int StringSub(MLuaState *L) {
   const char *s = GetStrArg(L, 1, &len);
   IPtr i = 1;
   IPtr j = -1;
+  IPtr total;
+  Size byteStart;
+  Size byteEnd;
 
   if (MLuaGetTop(L) >= 2) {
     MLuaValue vi = MLuaGetStack(L, 2);
@@ -985,22 +1035,27 @@ static int StringSub(MLuaState *L) {
     return 1;
   }
 
+  /* Unicode-aware: i and j are CODEPOINT indices */
+  total = (IPtr)MLuaUTF8Len(s, len);
+
   /* Handle negative indices */
   if (i < 0)
-    i = (IPtr)len + i + 1;
+    i = total + i + 1;
   if (j < 0)
-    j = (IPtr)len + j + 1;
+    j = total + j + 1;
 
   /* Clamp */
   if (i < 1)
     i = 1;
-  if (j > (IPtr)len)
-    j = (IPtr)len;
+  if (j > total)
+    j = total;
 
   if (i > j) {
     MLuaPush(L, MLuaStringNew(L, "", 0));
   } else {
-    MLuaPush(L, MLuaStringNew(L, s + i - 1, (Size)(j - i + 1)));
+    byteStart = MLuaUTF8Offset(s, len, (Size)(i - 1));
+    byteEnd = MLuaUTF8Offset(s, len, (Size)j);
+    MLuaPush(L, MLuaStringNew(L, s + byteStart, byteEnd - byteStart));
   }
   return 1;
 }
@@ -1147,7 +1202,7 @@ static int StringUnpack(MLuaState *L) {
 static int StringUpper(MLuaState *L) {
   Size len;
   const char *s = GetStrArg(L, 1, &len);
-  char buf[1024];
+  char *buf;
   Size i;
 
   if (!s || len == 0) {
@@ -1155,8 +1210,13 @@ static int StringUpper(MLuaState *L) {
     return 1;
   }
 
-  if (len > sizeof(buf)) {
-    len = sizeof(buf);
+  /* Heap scratch (no silent truncation); ASCII-only case mapping — full
+   * Unicode case tables are out of budget for a tiny runtime. UTF-8
+   * continuation bytes are > 0x7F and pass through untouched. */
+  buf = (char *)MLuaAlloc(L, len);
+  if (!buf) {
+    L->ErrorMsg = "out of memory";
+    return -1;
   }
 
   for (i = 0; i < len; i++) {

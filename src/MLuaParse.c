@@ -565,14 +565,20 @@ static void ParsePrefix(MLuaParser *p) {
 
   case TK_NUMBER: {
     double num = p->Lex.Token.Value.Number;
+    Bool isFloat = p->Lex.Token.NumberIsFloat;
     Advance(p);
 
-    /* Check if fits in 8-bit signed int */
-    if (num == (double)(I32)num && (I32)num >= -128 && (I32)num <= 127) {
-      MLuaEmitOpB(fs, OP_LOADINT, (U8)(I8)(I32)num);
+    if (!isFloat && num == (double)(I32)num) {
+      /* Integer literal */
+      if ((I32)num >= -128 && (I32)num <= 127) {
+        MLuaEmitOpB(fs, OP_LOADINT, (U8)(I8)(I32)num);
+      } else {
+        int k = MLuaAddConstant(fs, MakeInt((I32)num));
+        MLuaEmitOpB(fs, OP_LOADK, (U8)k);
+      }
     } else {
-      /* Add to constant pool */
-      int k = MLuaAddConstant(fs, MakeInt((I32)num));
+      /* Float literal (or integer too large for I32): float constant */
+      int k = MLuaAddConstant(fs, MLuaMakeNumber(p->L, num));
       MLuaEmitOpB(fs, OP_LOADK, (U8)k);
     }
     StackPush(p, 1);

@@ -370,6 +370,7 @@ void MLuaOpenBase(MLuaState *L) {
   MLuaRegisterGlobal(L, "assert", BaseAssert);
   MLuaRegisterGlobal(L, "error", BaseError);
   MLuaRegisterGlobal(L, "load", BaseLoad);
+  MLuaRegisterGlobal(L, "loadstring", BaseLoad); /* Lua 5.1 alias */
   MLuaRegisterGlobal(L, "next", BaseNext);
   MLuaRegisterGlobal(L, "pairs", BasePairs);
   MLuaRegisterGlobal(L, "ipairs", BaseIpairs);

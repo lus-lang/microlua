@@ -20,6 +20,7 @@
 
 #include "MLuaAlloc.h"
 #include "MLuaCore.h"
+#include "MLuaStdLib.h"
 #include "MLuaString.h"
 #include "MLuaVM.h"
 
@@ -287,8 +288,10 @@ int main(int argc, char **argv) {
   MLuaSetOutput(L, ReplOutput);
   MLuaSetRequirer(L, ReplRequire);
 
-  /* Open standard libraries */
+  /* Open standard libraries + the optional io/os extension (footnote 2 of
+   * the README: the repl provides these) */
   MLuaOpenLibs(L);
+  MLuaOpenStdLib(L);
 
   /* Set up arg table */
   {

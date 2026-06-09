@@ -46,9 +46,10 @@ microlua_lib = static_library('microlua', microlua_sources,
     install: true
 )
 
-# REPL binary - always uses libc for I/O
-repl_c_args = []
-executable('mlua', 'src/MLuaRepl.c',
+# REPL binary - always uses libc for I/O. It also links the OPTIONAL io/os
+# extension (libc-dependent, deliberately NOT part of the freestanding core).
+repl_c_args = ['-DMLUA_PTR_SIZE=8']
+executable('mlua', ['src/MLuaRepl.c', 'src/extensions/MLuaStdLib.c'],
     include_directories: microlua_inc,
     link_with: microlua_lib,
     c_args: repl_c_args,

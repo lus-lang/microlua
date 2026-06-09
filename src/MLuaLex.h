@@ -89,6 +89,10 @@ typedef struct {
   Size Line;   /* Line number (1-indexed) */
   Size Column; /* Column number (1-indexed) */
 
+  /* TK_NUMBER: literal had a decimal point or exponent (Lua 5.3 int/float
+   * distinction: 1 is an integer, 1.0 is a float) */
+  Bool NumberIsFloat;
+
   /* Token value (depends on type) */
   union {
     double Number; /* For TK_NUMBER */

@@ -250,9 +250,9 @@ static void ScanNumber(MLuaLexer *lex) {
     }
   }
 
-  /* Parse the number */
-  UNUSED(hasDecimal);
-  UNUSED(hasExp);
+  /* Lua 5.3 semantics: a literal with a decimal point or exponent is a
+   * FLOAT even when its value is integral (math.type(1.0) == "float") */
+  lex->Token.NumberIsFloat = hasDecimal || hasExp;
 
   /* Simple parsing - atof equivalent */
   {
