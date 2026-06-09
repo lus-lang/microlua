@@ -33,7 +33,12 @@ static void InitStateCommon(MLuaState *L, Size heapSize) {
   L->Panic = NULL;
   L->ErrorMsg = NULL;
 
-  L->CallStackTop = 0;
+  L->FrameTop = 0;
+  L->CCallDepth = 0;
+  L->YieldFlag = FALSE;
+  L->InCCall = FALSE;
+  L->CurrentThread = NULL;
+  L->LastCallResults = 0;
 
   /* GC references list starts empty */
   L->GCRefHead = NULL;
@@ -58,11 +63,20 @@ static void InitStateCommon(MLuaState *L, Size heapSize) {
   }
 }
 
+Size MLuaFirstObjOffset(MLuaState *L) {
+  Size off = ALIGN_UP(sizeof(MLuaState), MLUA_ALIGNMENT);
+  off += ALIGN_UP(L->EvalStackSize * sizeof(MLuaValue), MLUA_ALIGNMENT);
+  off += ALIGN_UP(L->LocalsSize * sizeof(MLuaValue), MLUA_ALIGNMENT);
+  off += ALIGN_UP(L->ArgsSize * sizeof(MLuaValue), MLUA_ALIGNMENT);
+  off += ALIGN_UP(L->FrameCap * sizeof(MLuaFrame), MLUA_ALIGNMENT);
+  return off;
+}
+
 MLuaState *MLuaNewConstrainedState(void *memory, Size size) {
   U8 *base;
   MLuaState *L;
   Size stateSize;
-  Size evalBytes, localsBytes, argsBytes;
+  Size evalBytes, localsBytes, argsBytes, framesBytes;
   Size remaining;
 
   if (!memory || size < 4096) {
@@ -101,9 +115,11 @@ MLuaState *MLuaNewConstrainedState(void *memory, Size size) {
   localsBytes = ALIGN_UP(localsBytes, MLUA_ALIGNMENT);
   argsBytes = 64 * sizeof(MLuaValue); /* Smaller args array */
   argsBytes = ALIGN_UP(argsBytes, MLUA_ALIGNMENT);
+  framesBytes = 64 * sizeof(MLuaFrame);
+  framesBytes = ALIGN_UP(framesBytes, MLUA_ALIGNMENT);
 
   remaining = size - L->HeapTop;
-  if (remaining < evalBytes + localsBytes + argsBytes + 512) {
+  if (remaining < evalBytes + localsBytes + argsBytes + framesBytes + 512) {
     return NULL; /* Not enough space for arrays */
   }
 
@@ -123,8 +139,16 @@ MLuaState *MLuaNewConstrainedState(void *memory, Size size) {
   /* Allocate Args */
   L->Args = (MLuaValue *)(base + L->HeapTop);
   L->ArgsSize = 64;
+  L->ArgsBase = 0;
+  L->ArgsTop = 0;
   L->ArgsCount = 0;
   L->HeapTop += argsBytes;
+
+  /* Allocate Frames */
+  L->Frames = (MLuaFrame *)(base + L->HeapTop);
+  L->FrameCap = 64;
+  L->FrameTop = 0;
+  L->HeapTop += framesBytes;
 
   InitStateCommon(L, size);
 
@@ -194,7 +218,23 @@ MLuaState *MLuaNewVectorState(void *ctx, MLuaAllocFunc allocFn,
     return NULL;
   }
   L->ArgsSize = 64;
+  L->ArgsBase = 0;
+  L->ArgsTop = 0;
   L->ArgsCount = 0;
+
+  /* Allocate Frames */
+  L->Frames = (MLuaFrame *)allocFn(L, ctx, 64 * sizeof(MLuaFrame));
+  if (!L->Frames) {
+    if (freeFn) {
+      freeFn(L, ctx, L->Args);
+      freeFn(L, ctx, L->Locals);
+      freeFn(L, ctx, L->EvalStack);
+      freeFn(L, ctx, L);
+    }
+    return NULL;
+  }
+  L->FrameCap = 64;
+  L->FrameTop = 0;
 
   /* Initialize arrays with nil */
   for (i = 0; i < L->EvalStackSize; i++) {

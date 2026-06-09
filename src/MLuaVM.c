@@ -19,34 +19,18 @@
 /* ========================================================================== */
 
 /*
- * VM_FAIL: Like M_FAIL but captures line info from current execution context.
- * Must be used inside MLuaExecute where proto, pc are in scope.
- * Computes PC offset and looks up line number before returning error.
- * Also builds stacktrace for multi-level error reporting.
+ * VM error handling. Used inside RunVM where proto, pc and baseFrame are in
+ * scope. On error: capture line + stack trace while the frames are intact,
+ * then unwind every frame this RunVM owns (closing upvalues per frame) and
+ * return the status. The C caller (MLuaCall) restores its own registers.
  */
-/*
- * VM_UNWIND: Frame cleanup shared by every error exit from MLuaExecute.
- * Closes any upvalues still pointing at this (or a deeper, abandoned) frame
- * so they cannot alias slots reused by later calls, then restores the
- * caller's locals window and call stack.
- */
-#define VM_UNWIND(L)                                                           \
-  do {                                                                         \
-    if ((L)->OpenUpvalues) {                                                   \
-      MLuaCloseUpvalues((L), &(L)->Locals[(L)->LocalsBase]);                   \
-    }                                                                          \
-    (L)->LocalsBase = savedLocalsBase;                                         \
-    (L)->LocalsTop = savedLocalsTop;                                           \
-    (L)->CallStackTop = savedCallStackTop;                                     \
-  } while (0)
-
 #define VM_FAIL(L, code, msg)                                                  \
   do {                                                                         \
     Size _pc = (Size)(pc - proto->Code);                                       \
     (L)->ErrorMsg = (msg);                                                     \
     (L)->ErrorLine = MLuaGetLine(proto, _pc);                                  \
     (L)->StackTrace = BuildStackTrace(L, proto, _pc);                          \
-    VM_UNWIND(L);                                                              \
+    UnwindFrames(L, baseFrame);                                                \
     return (code);                                                             \
   } while (0)
 
@@ -61,7 +45,7 @@
       Size _pc = (Size)(pc - proto->Code);                                     \
       L->ErrorLine = MLuaGetLine(proto, _pc);                                  \
       L->StackTrace = BuildStackTrace(L, proto, _pc);                          \
-      VM_UNWIND(L);                                                            \
+      UnwindFrames(L, baseFrame);                                              \
       return _s;                                                               \
     }                                                                          \
   } while (0)
@@ -76,7 +60,7 @@
       Size _pc = (Size)(pc - proto->Code);                                     \
       L->ErrorLine = MLuaGetLine(proto, _pc);                                  \
       L->StackTrace = BuildStackTrace(L, proto, _pc);                          \
-      VM_UNWIND(L);                                                            \
+      UnwindFrames(L, baseFrame);                                              \
       return MLUA_ERR_RUNTIME;                                                 \
     }                                                                          \
   } while (0)
@@ -102,10 +86,10 @@ MLuaValue MLuaPop(MLuaState *L) {
   return L->EvalStack[--L->EvalTop];
 }
 
-/* Get argument from Args array (for C function calls) */
+/* Get argument from the current frame's Args window (0-based) */
 MLuaValue MLuaGetArg(MLuaState *L, int index) {
   if (index >= 0 && (Size)index < L->ArgsCount) {
-    return L->Args[index];
+    return L->Args[L->ArgsBase + (Size)index];
   }
   return MLUA_NIL;
 }
@@ -115,11 +99,21 @@ int MLuaGetArgCount(MLuaState *L) { return (int)L->ArgsCount; }
 /* Push result to EvalStack (for C function returns) */
 void MLuaPushResult(MLuaState *L, MLuaValue v) { MLuaPush(L, v); }
 
-/* Legacy stack access for compatibility (now uses EvalStack) */
+/*
+ * Stack access. Inside a light C function (InCCall), positive indices
+ * address the call's arguments — Lua-style: index 1 is the first argument.
+ * Outside any C call (embedding code), positive indices address the
+ * EvalStack from its bottom. Negative indices always address the EvalStack
+ * from its top.
+ */
 MLuaValue MLuaGetStack(MLuaState *L, int index) {
   if (index > 0) {
-    /* Positive: relative from start of Args (for C functions) */
-    return MLuaGetArg(L, index - 1);
+    if (L->InCCall) {
+      return MLuaGetArg(L, index - 1);
+    }
+    if ((Size)index <= L->EvalTop) {
+      return L->EvalStack[index - 1];
+    }
   } else if (index < 0) {
     /* Negative: relative from EvalTop */
     int absIdx = (int)L->EvalTop + index;
@@ -132,9 +126,14 @@ MLuaValue MLuaGetStack(MLuaState *L, int index) {
 
 void MLuaSetStack(MLuaState *L, int index, MLuaValue v) {
   if (index > 0) {
-    /* Positive: set in Args */
-    if ((Size)(index - 1) < L->ArgsSize) {
-      L->Args[index - 1] = v;
+    if (L->InCCall) {
+      if ((Size)(index - 1) < L->ArgsCount) {
+        L->Args[L->ArgsBase + (Size)(index - 1)] = v;
+      }
+      return;
+    }
+    if ((Size)index <= L->EvalTop) {
+      L->EvalStack[index - 1] = v;
     }
   } else if (index < 0) {
     /* Negative: relative from EvalTop */
@@ -145,7 +144,9 @@ void MLuaSetStack(MLuaState *L, int index, MLuaValue v) {
   }
 }
 
-int MLuaGetTop(MLuaState *L) { return (int)L->ArgsCount; }
+int MLuaGetTop(MLuaState *L) {
+  return L->InCCall ? (int)L->ArgsCount : (int)L->EvalTop;
+}
 
 void MLuaSetTop(MLuaState *L, int index) {
   if (index >= 0) {
@@ -220,8 +221,7 @@ static const char *BuildStackTrace(MLuaState *L, MLuaProto *currentProto,
     Size line = MLuaGetLine(currentProto, currentPC);
     const char *src = "?";
     Size srcLen = 1;
-    const char *label =
-        (L->CallStackTop == 1) ? "in main chunk" : "in function";
+    const char *label = (L->FrameTop <= 1) ? "in main chunk" : "in function";
 
     /* Get source name if available */
     if (IsString(currentProto->Source)) {
@@ -241,19 +241,25 @@ static const char *BuildStackTrace(MLuaState *L, MLuaProto *currentProto,
     }
   }
 
-  /* Walk call stack (most recent first, but we show bottom-up) */
-  for (i = L->CallStackTop; i > 0; i--) {
-    MLuaProto *proto = (MLuaProto *)L->CallStack[i - 1].Proto;
-    Size framePC = L->CallStack[i - 1].PC;
+  /* Walk the caller frames (most recent first); the topmost frame is the
+   * current one and was reported above with its precise PC */
+  for (i = L->FrameTop > 0 ? L->FrameTop - 1 : 0; i > 0; i--) {
+    MLuaFrame *f = &L->Frames[i - 1];
+    MLuaProto *proto;
     Size line;
     const char *src = "?";
     Size srcLen = 1;
     const char *label = (i == 1) ? "in main chunk" : "in function";
 
-    if (!proto)
+    if (!IsPtr(f->Func)) {
       continue;
+    }
+    proto = MLUA_CLOSURE((MLuaGCHeader *)GetPtr(f->Func))->Proto;
+    if (!proto) {
+      continue;
+    }
 
-    line = MLuaGetLine(proto, framePC);
+    line = MLuaGetLine(proto, f->PC);
 
     /* Get source name if available */
     if (IsString(proto->Source)) {
@@ -554,70 +560,137 @@ MLuaValue MLuaConcat(MLuaState *L, int count) {
 #define STACK_POP() EVAL_POP()
 #define STACK_TOP() EVAL_TOP()
 
-MLuaStatus MLuaExecute(MLuaState *L, MLuaClosure *cl, int nargs, int nresults) {
-  const U8 *pc;
-  MLuaProto *proto;
-  Size savedLocalsBase;
-  Size savedLocalsTop;
-  Size savedCallStackTop;
-  int i;
+/* ========================================================================== */
+/* Frame Management                                                           */
+/* ========================================================================== */
 
-  UNUSED(nresults);
+/*
+ * Push a Lua call frame. The callable Lua closure sits at EvalStack[funcPos]
+ * with its nargs arguments above it. On success the func+args are popped,
+ * the args copied into a fresh Args window, locals initialized at LocalsTop,
+ * and L's frame registers switched to the new frame. ErrorMsg is set on
+ * failure.
+ */
+static MLuaStatus PushFrame(MLuaState *L, Size funcPos, Size nargs) {
+  MLuaValue func = L->EvalStack[funcPos];
+  MLuaClosure *cl = MLUA_CLOSURE((MLuaGCHeader *)GetPtr(func));
+  MLuaProto *proto = cl->Proto;
+  MLuaFrame *f;
+  Size newBase;
+  Size win;
+  Size i;
 
-  if (!cl || !cl->Proto) {
-    L->ErrorMsg = "attempt to execute an invalid closure";
+  if (L->FrameTop >= L->FrameCap) {
+    L->ErrorMsg = "call stack overflow";
     return MLUA_ERRRUN;
   }
 
-  proto = cl->Proto;
-  pc = proto->Code;
-
-  /*
-   * Three-array architecture:
-   * - Arguments come from Args array (set by caller before CALL)
-   * - Locals are stored in Locals array starting at LocalsBase
-   * - Expression values go on EvalStack
-   *
-   * Every frame is allocated at LocalsTop, the first free slot above ALL
-   * live frames. This holds for OP_CALL recursion and equally for calls
-   * entering through the C boundary (pcall, require, the REPL): they must
-   * not overwrite the locals of the frame that happens to be current.
-   */
-  savedLocalsBase = L->LocalsBase;
-  savedLocalsTop = L->LocalsTop;
-  savedCallStackTop = L->CallStackTop;
-
-  /* Push call frame for stacktrace (if room) */
-  if (L->CallStackTop < 64) {
-    L->CallStack[L->CallStackTop].Proto = proto;
-    L->CallStack[L->CallStackTop].PC = 0; /* Will be updated on call/error */
-    L->CallStackTop++;
+  newBase = L->LocalsTop;
+  if (newBase + proto->NumLocals >= L->LocalsSize) {
+    L->ErrorMsg = "stack overflow (too many locals)";
+    return MLUA_ERRRUN;
   }
 
-  /* Set up new Locals frame for this function */
-  {
-    Size newBase = L->LocalsTop; /* First free slot above live frames */
-    Size needed = newBase + proto->NumLocals;
-
-    if (needed >= L->LocalsSize) {
-      L->CallStackTop = savedCallStackTop; /* Cleanup on error */
-      L->ErrorMsg = "stack overflow (too many locals)";
-      return MLUA_ERRRUN;
-    }
-
-    /* Copy arguments from Args to Locals (first nargs slots) */
-    for (i = 0; i < nargs && (Size)i < proto->NumLocals; i++) {
-      L->Locals[newBase + i] = (Size)i < L->ArgsCount ? L->Args[i] : MLUA_NIL;
-    }
-
-    /* Initialize remaining locals to nil */
-    for (; (Size)i < proto->NumLocals; i++) {
-      L->Locals[newBase + i] = MLUA_NIL;
-    }
-
-    L->LocalsBase = newBase;
-    L->LocalsTop = needed;
+  win = L->ArgsTop;
+  if (win + nargs > L->ArgsSize) {
+    L->ErrorMsg = "argument stack overflow";
+    return MLUA_ERRRUN;
   }
+
+  /* Copy arguments into this frame's window */
+  for (i = 0; i < nargs; i++) {
+    L->Args[win + i] = L->EvalStack[funcPos + 1 + i];
+  }
+
+  f = &L->Frames[L->FrameTop++];
+  f->Func = func;
+  f->PC = 0;
+  f->LocalsBase = newBase;
+  f->EvalBase = funcPos;
+  f->ArgsBase = win;
+  f->ArgsCount = nargs;
+
+  /* Pop func+args; the callee's results will land at funcPos */
+  L->EvalTop = funcPos;
+
+  /* Initialize locals: parameters first, then nil */
+  for (i = 0; i < proto->NumLocals; i++) {
+    L->Locals[newBase + i] = (i < nargs) ? L->Args[win + i] : MLUA_NIL;
+  }
+
+  L->LocalsBase = newBase;
+  L->LocalsTop = newBase + proto->NumLocals;
+  L->ArgsBase = win;
+  L->ArgsCount = nargs;
+  L->ArgsTop = win + nargs;
+
+  return MLUA_OK;
+}
+
+/*
+ * Pop the top frame: close upvalues pointing into it, release its Args
+ * window and Locals span, and restore the caller frame's registers (when
+ * one exists within the current context; at a C boundary the caller
+ * restores its own snapshot).
+ */
+static void PopFrame(MLuaState *L) {
+  MLuaFrame *f = &L->Frames[L->FrameTop - 1];
+
+  if (L->OpenUpvalues) {
+    MLuaCloseUpvalues(L, &L->Locals[f->LocalsBase]);
+  }
+
+  L->ArgsTop = f->ArgsBase;
+  L->LocalsTop = f->LocalsBase;
+  L->FrameTop--;
+
+  if (L->FrameTop > 0) {
+    MLuaFrame *pf = &L->Frames[L->FrameTop - 1];
+    L->LocalsBase = pf->LocalsBase;
+    L->ArgsBase = pf->ArgsBase;
+    L->ArgsCount = pf->ArgsCount;
+  }
+}
+
+/* Unwind every frame above baseFrame (error path) */
+static void UnwindFrames(MLuaState *L, Size baseFrame) {
+  while (L->FrameTop > baseFrame) {
+    PopFrame(L);
+  }
+}
+
+/* ========================================================================== */
+/* The Dispatch Loop                                                          */
+/* ========================================================================== */
+
+/*
+ * Run the VM until the frame stack returns to baseFrame (the function whose
+ * frame is at baseFrame has returned), an error unwinds to it, or a yield
+ * suspends execution (frames are left intact for resume).
+ *
+ * The loop is frame-iterative: OP_CALL of a Lua closure pushes a frame and
+ * continues in the same C invocation. C recursion only happens at genuine
+ * C boundaries (pcall, require, library callbacks via MLuaCall) — which is
+ * exactly where yielding is forbidden.
+ */
+static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
+  const U8 *pc;
+  MLuaProto *proto;
+  MLuaClosure *cl;
+
+  /* Load (or reload after resume) the top frame's execution registers */
+#define RELOAD_FRAME()                                                         \
+  do {                                                                         \
+    MLuaFrame *_f = &L->Frames[L->FrameTop - 1];                               \
+    cl = MLUA_CLOSURE((MLuaGCHeader *)GetPtr(_f->Func));                       \
+    proto = cl->Proto;                                                         \
+    pc = proto->Code + _f->PC;                                                 \
+    L->LocalsBase = _f->LocalsBase;                                            \
+    L->ArgsBase = _f->ArgsBase;                                                \
+    L->ArgsCount = _f->ArgsCount;                                              \
+  } while (0)
+
+  RELOAD_FRAME();
 
   for (;;) {
     U8 op = READ_BYTE();
@@ -1035,105 +1108,136 @@ MLuaStatus MLuaExecute(MLuaState *L, MLuaClosure *cl, int nargs, int nresults) {
       break;
     }
 
-    case OP_CALL: {
+    case OP_CALL:
+    case OP_CALLM:
+    case OP_TAILCALL: {
       /*
-       * Three-array architecture: Function call.
-       * Stack has: [..., func, arg1, arg2, ...argN]
-       * 1. Pop function and args from EvalStack
-       * 2. Copy args to Args array
-       * 3. Call function
-       * 4. Result is pushed back to EvalStack
+       * Function call. Stack: [..., func, arg1 .. argN].
+       * OP_CALL:     N = operand.
+       * OP_CALLM:    N = operand fixed args + the last call's results
+       *              (supports f(g()) and f(...) passing everything).
+       * OP_TAILCALL: like OP_CALL but the current frame is replaced, so
+       *              tail-recursive Lua code runs in constant frame space.
        */
-      U8 nargs_call = READ_BYTE();
-      int i;
-
-      /* Get function from EvalStack (it's below the args) */
+      U8 operand = READ_BYTE();
+      Size nargs_call = (op == OP_CALLM)
+                            ? (Size)operand + L->LastCallResults
+                            : (Size)operand;
       Size funcPos = L->EvalTop - nargs_call - 1;
       MLuaValue func = L->EvalStack[funcPos];
-      MLuaDebugPrint("OP_CALL nargs=%d func=%llx\n", nargs_call,
-                     (unsigned long long)func);
-
-      /* Copy args from EvalStack to Args array */
-      for (i = 0; i < nargs_call && i < (int)L->ArgsSize; i++) {
-        L->Args[i] = L->EvalStack[funcPos + 1 + i];
-      }
-      L->ArgsCount = nargs_call;
-
-      /* Pop function and args from EvalStack (will push results later) */
-      L->EvalTop = funcPos;
 
       if (IsLightFunc(func)) {
-        /* Light C function */
+        /* Light C function: give it a fresh Args window */
         Size funcIdx = GetLightFuncIdx(func);
-        MLuaDebugPrint("OP_CALL LightFunc idx=%zu\n", funcIdx);
-        if (funcIdx < L->LightFuncCount && L->LightFuncs) {
-          MLuaCFunction cfunc = (MLuaCFunction)L->LightFuncs[funcIdx];
-          int results = cfunc(L);
+        if (funcIdx >= L->LightFuncCount || !L->LightFuncs) {
+          VM_FAIL(L, MLUA_ERR_RUNTIME, "attempt to call an invalid function");
+        }
 
-          /* Check for error (negative return value) */
+        {
+          MLuaCFunction cfunc = (MLuaCFunction)L->LightFuncs[funcIdx];
+          Size win = L->ArgsTop;
+          Bool savedInC;
+          int results;
+          Size i;
+
+          if (win + nargs_call > L->ArgsSize) {
+            VM_FAIL(L, MLUA_ERR_RUNTIME, "argument stack overflow");
+          }
+          for (i = 0; i < nargs_call; i++) {
+            L->Args[win + i] = L->EvalStack[funcPos + 1 + i];
+          }
+          L->EvalTop = funcPos;
+          L->ArgsBase = win;
+          L->ArgsCount = nargs_call;
+          L->ArgsTop = win + nargs_call;
+
+          savedInC = L->InCCall;
+          L->InCCall = TRUE;
+          results = cfunc(L);
+          L->InCCall = savedInC;
+
+          /* Yield requested (only coroutine.yield sets this): save the
+           * resume point and suspend. The yield args stay reserved in
+           * their Args window for the resumer to collect. */
+          if (L->YieldFlag) {
+            L->YieldFlag = FALSE;
+            L->Frames[L->FrameTop - 1].PC = (Size)(pc - proto->Code);
+            {
+              MLuaFrame *cf = &L->Frames[L->FrameTop - 1];
+              L->ArgsBase = cf->ArgsBase;
+              L->ArgsCount = cf->ArgsCount;
+            }
+            return MLUA_YIELD;
+          }
+
+          /* Release the C call's window, restore this frame's */
+          L->ArgsTop = win;
+          {
+            MLuaFrame *cf = &L->Frames[L->FrameTop - 1];
+            L->ArgsBase = cf->ArgsBase;
+            L->ArgsCount = cf->ArgsCount;
+          }
+
           if (results < 0) {
             /* C function signaled error - L->ErrorMsg should be set */
             VM_TRY(MLUA_ERRRUN);
           }
-
-          /* C function pushes results to EvalStack via MLuaPush/MLuaPushResult
-           */
-          /* If no results, push nil */
           if (results == 0) {
             STACK_PUSH(MLUA_NIL);
           }
           L->LastCallResults = (results == 0) ? 1 : (Size)results;
-        } else {
-          /* Invalid function index */
-          VM_FAIL(L, MLUA_ERR_RUNTIME, "attempt to call an invalid function");
-        }
-      } else if (IsPtr(func)) {
-        /* Full closure */
-        MLuaGCHeader *h = (MLuaGCHeader *)GetPtr(func);
-        if (MLUA_OBJTYPE(h) == OBJTYPE_FUNCTION) {
-          MLuaClosure *calledCl = MLUA_CLOSURE(h);
-          if (calledCl->Proto) {
-            /* For Lua closure, args are already in Args array;
-             * MLuaExecute allocates the callee frame at LocalsTop and
-             * copies them to Locals. */
-            Size evalTopBeforeCall =
-                L->EvalTop; /* Save to check for results after */
-            MLuaStatus callStatus;
 
-            /* Update our frame's PC for stacktrace (call site) */
-            if (L->CallStackTop > 0) {
-              L->CallStack[L->CallStackTop - 1].PC = (Size)(pc - proto->Code);
-            }
-
-            callStatus = MLuaExecute(L, calledCl, nargs_call, 1);
-
-            /* Propagate error from callee (it already unwound itself;
-             * unwind our own frame too) */
-            if (callStatus != MLUA_OK) {
-              VM_UNWIND(L);
-              return callStatus;
-            }
-
-            /* Result should be on EvalStack now */
-            /* If EvalTop hasn't increased, no result was pushed - push nil */
-            if (L->EvalTop <= evalTopBeforeCall) {
-              STACK_PUSH(MLUA_NIL);
-            }
-            L->LastCallResults = L->EvalTop - evalTopBeforeCall;
-          } else {
-            /* Not a Lua proto - invalid closure */
-            VM_FAIL(L, MLUA_ERR_RUNTIME, "attempt to call an invalid closure");
+          /* A tail call to a C function is call + immediate return */
+          if (op == OP_TAILCALL) {
+            goto do_return;
           }
-        } else {
-          /* Pointer but not a function object */
-          VM_FAIL(L, MLUA_ERR_RUNTIME, "attempt to call a non-function value");
         }
-      } else {
-        /* Not callable - error with type info */
+        break;
+      }
+
+      if (!IsPtr(func) ||
+          MLUA_OBJTYPE((MLuaGCHeader *)GetPtr(func)) != OBJTYPE_FUNCTION ||
+          !MLUA_CLOSURE((MLuaGCHeader *)GetPtr(func))->Proto) {
         VM_FAIL(L, MLUA_ERR_RUNTIME,
                 IsNil(func) ? "attempt to call a nil value"
                             : "attempt to call a non-function value");
       }
+
+      /* Lua closure: push (or replace, for tail calls) a frame and keep
+       * dispatching — no C recursion. */
+      if (op == OP_TAILCALL && L->FrameTop > baseFrame) {
+        /* Replace the current frame: free its locals/window and slide the
+         * func+args down to where our results were expected. */
+        MLuaFrame dying = L->Frames[L->FrameTop - 1];
+        Size span = nargs_call + 1;
+        Size i;
+
+        if (L->OpenUpvalues) {
+          MLuaCloseUpvalues(L, &L->Locals[dying.LocalsBase]);
+        }
+        L->FrameTop--;
+        L->ArgsTop = dying.ArgsBase;
+        L->LocalsTop = dying.LocalsBase;
+
+        if (funcPos != dying.EvalBase) {
+          for (i = 0; i < span; i++) {
+            L->EvalStack[dying.EvalBase + i] = L->EvalStack[funcPos + i];
+          }
+        }
+        L->EvalTop = dying.EvalBase + span;
+        funcPos = dying.EvalBase;
+      } else {
+        /* Save the return point in the calling frame */
+        L->Frames[L->FrameTop - 1].PC = (Size)(pc - proto->Code);
+      }
+
+      {
+        MLuaStatus st = PushFrame(L, funcPos, nargs_call);
+        if (st != MLUA_OK) {
+          VM_TRY(st);
+        }
+      }
+      RELOAD_FRAME();
       break;
     }
 
@@ -1226,54 +1330,103 @@ MLuaStatus MLuaExecute(MLuaState *L, MLuaClosure *cl, int nargs, int nresults) {
 
     case OP_VARARG: {
       /*
-       * Three-array architecture: Push varargs from Args array.
-       * Varargs are Args[NumParams .. ArgsCount-1]
+       * Push varargs from this frame's Args window.
+       * Varargs are Args[ArgsBase + NumParams .. ArgsBase + ArgsCount).
+       * want > 0: push exactly that many (nil-padded).
+       * want == 0: push ALL varargs and set LastCallResults, so the
+       *            multi-result machinery (ADJUST/CALLM/APPENDM) applies.
        */
       U8 want = READ_BYTE();
       int varargCount = (int)L->ArgsCount - (int)proto->NumParams;
-      Size varargStart = proto->NumParams;
+      Size varargStart = L->ArgsBase + proto->NumParams;
       Size i;
 
       if (varargCount < 0) {
         varargCount = 0;
       }
 
-      /* Push requested varargs (or nil if not enough) */
-      for (i = 0; i < want; i++) {
-        if ((int)i < varargCount) {
+      if (want == 0) {
+        for (i = 0; i < (Size)varargCount; i++) {
           STACK_PUSH(L->Args[varargStart + i]);
-        } else {
-          STACK_PUSH(MLUA_NIL);
+        }
+        L->LastCallResults = (Size)varargCount;
+      } else {
+        for (i = 0; i < want; i++) {
+          if ((int)i < varargCount) {
+            STACK_PUSH(L->Args[varargStart + i]);
+          } else {
+            STACK_PUSH(MLUA_NIL);
+          }
         }
       }
       break;
     }
 
-    case OP_RET: {
-      U8 nret = READ_BYTE();
+    case OP_ADJUST: {
+      /* Normalize the last call's results to exactly 'want' values */
+      U8 want = READ_BYTE();
+      Size have = L->LastCallResults;
+
+      while (have > want && L->EvalTop > 0) {
+        L->EvalTop--;
+        have--;
+      }
+      while (have < want) {
+        STACK_PUSH(MLUA_NIL);
+        have++;
+      }
+      L->LastCallResults = want;
+      break;
+    }
+
+    case OP_APPENDM: {
+      /* Append the last call's results to the table beneath them */
+      Size n = L->LastCallResults;
+      MLuaValue tbl = L->EvalStack[L->EvalTop - n - 1];
+      Size i;
+
+      for (i = 0; i < n; i++) {
+        MLuaTableAppend(L, tbl, L->EvalStack[L->EvalTop - n + i]);
+      }
+      L->EvalTop -= n;
+      break;
+    }
+
+    case OP_RET:
+    case OP_RET0:
+    case OP_RET1: {
+      U8 nret;
+
+      if (op == OP_RET) {
+        nret = READ_BYTE();
+      } else {
+        nret = (op == OP_RET1) ? 1 : 0;
+      }
+
       /*
-       * Three-array architecture:
-       * Return values are already on EvalStack (top nret values).
-       * The caller will handle cleanup and receive results.
-       *
-       * If nret is 0, push nil (Lua convention: function returns nil).
+       * Return values are already on the EvalStack above this frame's
+       * EvalBase. If nothing was returned, push nil (Lua convention:
+       * every call yields at least one value).
        */
       if (nret == 0) {
         STACK_PUSH(MLUA_NIL);
       }
 
-      /* Close any upvalues still pointing into this frame (cheap NULL
-       * check when nothing was captured) */
-      if (L->OpenUpvalues) {
-        MLuaCloseUpvalues(L, &L->Locals[L->LocalsBase]);
+    do_return : {
+      MLuaFrame *f = &L->Frames[L->FrameTop - 1];
+      L->LastCallResults = L->EvalTop - f->EvalBase;
+
+      PopFrame(L);
+
+      if (L->FrameTop == baseFrame) {
+        /* This RunVM invocation's work is done; the C caller restores
+         * its own register snapshot. */
+        return MLUA_OK;
       }
 
-      /* Pop frame: restore caller's locals window and call stack */
-      L->LocalsBase = savedLocalsBase;
-      L->LocalsTop = savedLocalsTop;
-      L->CallStackTop = savedCallStackTop;
-
-      return MLUA_OK;
+      RELOAD_FRAME();
+      break;
+    }
     }
 
     default:
@@ -1294,60 +1447,134 @@ MLuaStatus MLuaCall(MLuaState *L, int nargs, int nresults) {
 
   UNUSED(nresults);
 
-  /*
-   * Three-array architecture: Function is at EvalTop - 1 - nargs.
-   * Copy args to Args array, then call.
-   */
   if (L->EvalTop < (Size)(nargs + 1)) {
-    return MLUA_ERRRUN; /* Not enough values on stack */
+    L->ErrorMsg = "not enough values on the stack";
+    return MLUA_ERRRUN;
   }
 
   funcPos = L->EvalTop - nargs - 1;
   func = L->EvalStack[funcPos];
 
-  /* Copy args to Args array */
-  {
-    int i;
-    for (i = 0; i < nargs && i < (int)L->ArgsSize; i++) {
-      L->Args[i] = L->EvalStack[funcPos + 1 + i];
-    }
-    L->ArgsCount = nargs;
-  }
-
-  /* Pop func and args from EvalStack */
-  L->EvalTop = funcPos;
-
   if (IsLightFunc(func)) {
-    /* Light C function: mirror OP_CALL's light path */
+    /* Light C function called from the C boundary */
     Size funcIdx = GetLightFuncIdx(func);
     if (funcIdx < L->LightFuncCount && L->LightFuncs) {
       MLuaCFunction cfunc = (MLuaCFunction)L->LightFuncs[funcIdx];
-      int results = cfunc(L);
+      Size win = L->ArgsTop;
+      Size savedArgsBase = L->ArgsBase;
+      Size savedArgsCount = L->ArgsCount;
+      Bool savedInC = L->InCCall;
+      int results;
+      int i;
+
+      if (win + (Size)nargs > L->ArgsSize) {
+        L->ErrorMsg = "argument stack overflow";
+        return MLUA_ERRRUN;
+      }
+      for (i = 0; i < nargs; i++) {
+        L->Args[win + (Size)i] = L->EvalStack[funcPos + 1 + (Size)i];
+      }
+      L->EvalTop = funcPos;
+      L->ArgsBase = win;
+      L->ArgsCount = (Size)nargs;
+      L->ArgsTop = win + (Size)nargs;
+
+      L->InCCall = TRUE;
+      results = cfunc(L);
+      L->InCCall = savedInC;
+
+      L->ArgsTop = win;
+      L->ArgsBase = savedArgsBase;
+      L->ArgsCount = savedArgsCount;
+
       if (results < 0) {
         return MLUA_ERRRUN; /* ErrorMsg set by the C function */
       }
       if (results == 0) {
         MLuaPush(L, MLUA_NIL);
       }
+      L->LastCallResults = (results == 0) ? 1 : (Size)results;
       return MLUA_OK;
     }
     L->ErrorMsg = "attempt to call an invalid function";
     return MLUA_ERRRUN;
   }
 
-  if (IsPtr(func)) {
-    MLuaGCHeader *h = (MLuaGCHeader *)GetPtr(func);
-    if (MLUA_OBJTYPE(h) == OBJTYPE_FUNCTION) {
-      MLuaClosure *cl = MLUA_CLOSURE(h);
-      if (cl->Proto) {
-        return MLuaExecute(L, cl, nargs, nresults);
-      }
+  if (IsPtr(func) &&
+      MLUA_OBJTYPE((MLuaGCHeader *)GetPtr(func)) == OBJTYPE_FUNCTION &&
+      MLUA_CLOSURE((MLuaGCHeader *)GetPtr(func))->Proto) {
+    /* Lua closure: enter the frame machine. This is the C boundary —
+     * yields cannot cross it. */
+    Size savedLocalsBase = L->LocalsBase;
+    Size savedArgsBase = L->ArgsBase;
+    Size savedArgsCount = L->ArgsCount;
+    Bool savedInC = L->InCCall;
+    Size evalBase = funcPos;
+    MLuaStatus st;
+
+    L->InCCall = FALSE; /* Lua code is running, not C */
+    L->CCallDepth++;
+
+    st = PushFrame(L, funcPos, (Size)nargs);
+    if (st == MLUA_OK) {
+      st = RunVM(L, L->FrameTop - 1);
     }
+
+    L->CCallDepth--;
+    L->InCCall = savedInC;
+
+    if (st == MLUA_OK) {
+      L->LastCallResults = L->EvalTop - evalBase;
+    }
+
+    /* On MLUA_YIELD the frames stay suspended (the thread context snapshot
+     * picks them up); the register restore below is still correct because
+     * RunVM reloads them from the frame on resume. */
+    L->LocalsBase = savedLocalsBase;
+    L->ArgsBase = savedArgsBase;
+    L->ArgsCount = savedArgsCount;
+
+    return st;
   }
 
   L->ErrorMsg = IsNil(func) ? "attempt to call a nil value"
                             : "attempt to call a non-function value";
   return MLUA_ERRRUN;
+}
+
+/*
+ * Re-enter the dispatch loop for a suspended thread context whose frames
+ * are already in place (resume-after-yield). Runs until frame 0 returns.
+ */
+MLuaStatus MLuaRunSuspended(MLuaState *L) {
+  if (L->FrameTop == 0) {
+    L->ErrorMsg = "no suspended frames to resume";
+    return MLUA_ERRRUN;
+  }
+  return RunVM(L, 0);
+}
+
+/*
+ * Legacy execution entry: run a closure with nargs arguments pre-loaded in
+ * the current Args window (Args[ArgsBase..ArgsBase+nargs)). Kept for the
+ * embedding API and internal tests; new code should push func+args on the
+ * EvalStack and use MLuaCall.
+ */
+MLuaStatus MLuaExecute(MLuaState *L, MLuaClosure *cl, int nargs,
+                       int nresults) {
+  int i;
+
+  if (!cl || !cl->Proto) {
+    L->ErrorMsg = "attempt to execute an invalid closure";
+    return MLUA_ERRRUN;
+  }
+
+  MLuaPush(L, MakePtr(cl));
+  for (i = 0; i < nargs; i++) {
+    MLuaPush(L, MLuaGetArg(L, i));
+  }
+
+  return MLuaCall(L, nargs, nresults);
 }
 
 MLuaStatus MLuaPCall(MLuaState *L, int nargs, int nresults, int errfunc) {

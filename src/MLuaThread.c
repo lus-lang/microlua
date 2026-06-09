@@ -1,6 +1,13 @@
 /*
  * MicroLua - MLuaThread.c
  * Coroutine implementation
+ *
+ * Each coroutine owns a complete execution context (MLuaExecCtx). Resuming
+ * saves the resumer's context (main's into L->MainCtx, a parent coroutine's
+ * into its own thread object), loads the target's context into L, and runs
+ * the frame machine. Yielding sets L->YieldFlag; the dispatch loop saves
+ * the resume point and returns MLUA_YIELD up to MLuaThreadResume, which
+ * swaps the contexts back and hands the yielded values to the resumer.
  */
 
 #include "MLuaThread.h"
@@ -9,13 +16,71 @@
 #include "MLuaVM.h"
 
 /* ========================================================================== */
+/* Context Save/Load                                                          */
+/* ========================================================================== */
+
+static void SaveCtx(MLuaState *L, MLuaExecCtx *c) {
+  c->EvalStack = L->EvalStack;
+  c->EvalStackSize = L->EvalStackSize;
+  c->EvalTop = L->EvalTop;
+
+  c->Locals = L->Locals;
+  c->LocalsSize = L->LocalsSize;
+  c->LocalsBase = L->LocalsBase;
+  c->LocalsTop = L->LocalsTop;
+
+  c->Args = L->Args;
+  c->ArgsSize = L->ArgsSize;
+  c->ArgsBase = L->ArgsBase;
+  c->ArgsTop = L->ArgsTop;
+  c->ArgsCount = L->ArgsCount;
+
+  c->Frames = L->Frames;
+  c->FrameCap = L->FrameCap;
+  c->FrameTop = L->FrameTop;
+
+  c->OpenUpvalues = L->OpenUpvalues;
+}
+
+static void LoadCtx(MLuaState *L, const MLuaExecCtx *c) {
+  L->EvalStack = c->EvalStack;
+  L->EvalStackSize = c->EvalStackSize;
+  L->EvalTop = c->EvalTop;
+
+  L->Locals = c->Locals;
+  L->LocalsSize = c->LocalsSize;
+  L->LocalsBase = c->LocalsBase;
+  L->LocalsTop = c->LocalsTop;
+
+  L->Args = c->Args;
+  L->ArgsSize = c->ArgsSize;
+  L->ArgsBase = c->ArgsBase;
+  L->ArgsTop = c->ArgsTop;
+  L->ArgsCount = c->ArgsCount;
+
+  L->Frames = c->Frames;
+  L->FrameCap = c->FrameCap;
+  L->FrameTop = c->FrameTop;
+
+  L->OpenUpvalues = c->OpenUpvalues;
+}
+
+/* The context that describes the CURRENT thread of execution */
+static MLuaExecCtx *OwnerCtx(MLuaState *L) {
+  return L->CurrentThread ? &L->CurrentThread->Ctx : &L->MainCtx;
+}
+
+/* ========================================================================== */
 /* Thread Creation                                                            */
 /* ========================================================================== */
 
 MLuaValue MLuaThreadNew(MLuaState *L, MLuaValue func) {
   MLuaGCHeader *gch;
   MLuaThread *th;
-  Size stackBytes;
+  MLuaValue *eval;
+  MLuaValue *locals;
+  MLuaValue *args;
+  MLuaFrame *frames;
   Size i;
 
   /* Validate that func is a function */
@@ -23,38 +88,63 @@ MLuaValue MLuaThreadNew(MLuaState *L, MLuaValue func) {
     return MLUA_NIL;
   }
 
-  /* Allocate thread object */
+  /* Allocate the context buffers FIRST (raw heap allocations that never
+   * move), keeping the thread object allocation last so 'func' need not
+   * survive an allocation while unanchored — pre-Phase-3 the GC cannot
+   * relocate, and post-Phase-3 these are pinned RAW objects. */
+  eval = (MLuaValue *)MLuaAlloc(L, MLUA_THREAD_EVAL_SIZE * sizeof(MLuaValue));
+  locals =
+      (MLuaValue *)MLuaAlloc(L, MLUA_THREAD_LOCALS_SIZE * sizeof(MLuaValue));
+  args = (MLuaValue *)MLuaAlloc(L, MLUA_THREAD_ARGS_SIZE * sizeof(MLuaValue));
+  frames =
+      (MLuaFrame *)MLuaAlloc(L, MLUA_THREAD_FRAMES_SIZE * sizeof(MLuaFrame));
+  if (!eval || !locals || !args || !frames) {
+    return MLUA_NIL;
+  }
+
   gch = MLuaAllocObject(L, OBJTYPE_THREAD, sizeof(MLuaThread));
   if (!gch) {
     return MLUA_NIL;
   }
 
   th = MLUA_THREAD(gch);
-  th->MainState = L;
+
+  th->Ctx.EvalStack = eval;
+  th->Ctx.EvalStackSize = MLUA_THREAD_EVAL_SIZE;
+  th->Ctx.Locals = locals;
+  th->Ctx.LocalsSize = MLUA_THREAD_LOCALS_SIZE;
+  th->Ctx.Args = args;
+  th->Ctx.ArgsSize = MLUA_THREAD_ARGS_SIZE;
+  th->Ctx.Frames = frames;
+  th->Ctx.FrameCap = MLUA_THREAD_FRAMES_SIZE;
+
+  for (i = 0; i < MLUA_THREAD_EVAL_SIZE; i++) {
+    eval[i] = MLUA_NIL;
+  }
+  for (i = 0; i < MLUA_THREAD_LOCALS_SIZE; i++) {
+    locals[i] = MLUA_NIL;
+  }
+  for (i = 0; i < MLUA_THREAD_ARGS_SIZE; i++) {
+    args[i] = MLUA_NIL;
+  }
+
+  /* Not started: the function waits at EvalStack[0], FrameTop == 0 */
+  th->Ctx.EvalStack[0] = func;
+  th->Ctx.EvalTop = 1;
+  th->Ctx.LocalsBase = 0;
+  th->Ctx.LocalsTop = 0;
+  th->Ctx.ArgsBase = 0;
+  th->Ctx.ArgsTop = 0;
+  th->Ctx.ArgsCount = 0;
+  th->Ctx.FrameTop = 0;
+  th->Ctx.OpenUpvalues = NULL;
+
   th->Status = THREAD_SUSPENDED;
-  th->PC = NULL;
-  th->FP = 0;
-  th->CallStackTop = 0;
-  th->OpenUpvalues = NULL;
+  th->Resumer = NULL;
+  th->BaseCCalls = 0;
+  th->XferBase = 0;
+  th->XferCount = 0;
   th->ErrorMsg = NULL;
-
-  /* Allocate thread's stack */
-  stackBytes = MLUA_THREAD_STACK_SIZE * sizeof(MLuaValue);
-  th->Stack = (MLuaValue *)MLuaAlloc(L, stackBytes);
-  if (!th->Stack) {
-    return MLUA_NIL;
-  }
-
-  th->StackSize = MLUA_THREAD_STACK_SIZE;
-  th->StackTop = 0;
-
-  /* Initialize stack with nil */
-  for (i = 0; i < th->StackSize; i++) {
-    th->Stack[i] = MLUA_NIL;
-  }
-
-  /* Push the function as first element (to be called on first resume) */
-  th->Stack[th->StackTop++] = func;
 
   return MakePtr(gch);
 }
@@ -63,17 +153,15 @@ MLuaValue MLuaThreadNew(MLuaState *L, MLuaValue func) {
 /* Thread Resume                                                              */
 /* ========================================================================== */
 
-int MLuaThreadResume(MLuaState *L, MLuaValue thread, int nargs) {
+int MLuaThreadResume(MLuaState *L, MLuaValue thread, const MLuaValue *argv,
+                     int nargs, Size *nres) {
   MLuaGCHeader *gch;
   MLuaThread *th;
+  MLuaThread *prev;
+  MLuaStatus status;
   Size i;
-  int result;
-  /* Three-array architecture: save EvalStack state, not Stack */
-  MLuaValue *savedEvalStack;
-  Size savedEvalTop;
-  Size savedEvalStackSize;
-  Size savedCallTop;
-  struct MLuaUpvalue *savedOpenUpvalues;
+
+  *nres = 0;
 
   if (!MLuaIsThread(thread)) {
     L->ErrorMsg = "cannot resume non-thread";
@@ -83,99 +171,100 @@ int MLuaThreadResume(MLuaState *L, MLuaValue thread, int nargs) {
   gch = (MLuaGCHeader *)GetPtr(thread);
   th = MLUA_THREAD(gch);
 
-  /* Check status */
   if (th->Status == THREAD_DEAD) {
     L->ErrorMsg = "cannot resume dead coroutine";
     return MLUA_ERRRUN;
   }
-
-  if (th->Status == THREAD_RUNNING) {
-    L->ErrorMsg = "cannot resume running coroutine";
+  if (th->Status != THREAD_SUSPENDED) {
+    L->ErrorMsg = "cannot resume non-suspended coroutine";
     return MLUA_ERRRUN;
   }
 
-  /* Transfer arguments from L's EvalStack to thread's Stack */
-  for (i = 0; i < (Size)nargs && L->EvalTop > 0; i++) {
-    L->EvalTop--;
-    if (th->StackTop < th->StackSize) {
-      th->Stack[th->StackTop++] = L->EvalStack[L->EvalTop];
-    }
+  /* Save the resumer's context and switch over */
+  SaveCtx(L, OwnerCtx(L));
+
+  prev = L->CurrentThread;
+  th->Resumer = prev;
+  if (prev) {
+    prev->Status = THREAD_NORMAL;
   }
-
-  /* Save main state's execution context (EvalStack) */
-  savedEvalStack = L->EvalStack;
-  savedEvalTop = L->EvalTop;
-  savedEvalStackSize = L->EvalStackSize;
-  savedCallTop = L->CallStackTop;
-  savedOpenUpvalues = L->OpenUpvalues;
-
-  /* Switch to thread's context: thread uses its own Stack as EvalStack */
-  L->EvalStack = th->Stack;
-  L->EvalTop = th->StackTop;
-  L->EvalStackSize = th->StackSize;
-  L->CallStackTop = th->CallStackTop;
-  L->OpenUpvalues = th->OpenUpvalues;
-
-  /* Track coroutine state */
   L->CurrentThread = th;
-  L->InCoroutine = TRUE;
-
-  /* Mark as running */
   th->Status = THREAD_RUNNING;
 
-  /* Execute: if first resume, call the function; otherwise continue */
-  if (th->PC == NULL) {
-    /* First resume: call the function at stack[0] */
-    MLuaValue func = th->Stack[0];
-    Size numArgs = th->StackTop - 1; /* Everything above the function */
+  LoadCtx(L, &th->Ctx);
 
-    /* Move function to proper position */
-    /* Stack layout: [func, arg1, arg2, ...] */
-    result = MLuaCall(L, func, numArgs);
+  if (th->Ctx.FrameTop == 0) {
+    /* First resume: the function sits at EvalStack[0]; arguments follow */
+    if ((Size)nargs + 1 > L->EvalStackSize) {
+      nargs = (int)(L->EvalStackSize - 1);
+    }
+    for (i = 0; i < (Size)nargs; i++) {
+      L->EvalStack[1 + i] = argv[i];
+    }
+    L->EvalTop = 1 + (Size)nargs;
+
+    /* MLuaCall increments CCallDepth itself; the body runs at depth+1 */
+    th->BaseCCalls = L->CCallDepth + 1;
+    status = MLuaCall(L, nargs, -1);
   } else {
-    /* Continuing from yield - the VM would need to restore PC/FP */
-    /* For now, simplified: we don't support yield-in-middle */
-    result = MLUA_OK;
+    /* Resuming after a yield: release the yield-args window reserved at
+     * suspension, then push the resume arguments as the pending yield
+     * call's results. */
+    L->ArgsTop = th->XferBase;
+
+    if (nargs == 0) {
+      MLuaPush(L, MLUA_NIL); /* >=1-result call convention */
+      L->LastCallResults = 1;
+    } else {
+      for (i = 0; i < (Size)nargs; i++) {
+        MLuaPush(L, argv[i]);
+      }
+      L->LastCallResults = (Size)nargs;
+    }
+
+    /* Re-entering the suspended frames is a C boundary too */
+    L->CCallDepth++;
+    th->BaseCCalls = L->CCallDepth;
+    status = MLuaRunSuspended(L);
+    L->CCallDepth--;
   }
 
-  /* Save thread's state back (from EvalStack which was pointing to th->Stack)
-   */
-  th->Stack = L->EvalStack;
-  th->StackTop = L->EvalTop;
-  th->StackSize = L->EvalStackSize;
-  th->CallStackTop = L->CallStackTop;
-  th->OpenUpvalues = L->OpenUpvalues;
+  /* Capture the thread's final state, switch back to the resumer */
+  SaveCtx(L, &th->Ctx);
 
-  /* Restore main state's context */
-  L->EvalStack = savedEvalStack;
-  L->EvalTop = savedEvalTop;
-  L->EvalStackSize = savedEvalStackSize;
-  L->CallStackTop = savedCallTop;
-  L->OpenUpvalues = savedOpenUpvalues;
+  L->CurrentThread = prev;
+  if (prev) {
+    prev->Status = THREAD_RUNNING;
+  }
+  LoadCtx(L, OwnerCtx(L));
 
-  /* Reset coroutine tracking to main thread */
-  L->CurrentThread = NULL;
-  L->InCoroutine = FALSE;
-
-  /* Update status based on result */
-  if (result == MLUA_YIELD) {
+  if (status == MLUA_YIELD) {
     th->Status = THREAD_SUSPENDED;
-    /* Transfer yielded values back to L's EvalStack */
-    for (i = 0; i < th->StackTop && L->EvalTop < L->EvalStackSize; i++) {
-      L->EvalStack[L->EvalTop++] = th->Stack[i];
+
+    /* Hand the yielded values (the yield call's arguments) to the resumer */
+    for (i = 0; i < th->XferCount; i++) {
+      MLuaPush(L, th->Ctx.Args[th->XferBase + i]);
     }
-  } else if (result == MLUA_OK) {
-    th->Status = THREAD_DEAD;
-    /* Transfer return values back to L's EvalStack */
-    for (i = 0; i < th->StackTop && L->EvalTop < L->EvalStackSize; i++) {
-      L->EvalStack[L->EvalTop++] = th->Stack[i];
-    }
-  } else {
-    th->Status = THREAD_DEAD;
-    th->ErrorMsg = L->ErrorMsg;
+    *nres = th->XferCount;
+    return MLUA_YIELD;
   }
 
-  return result;
+  if (status == MLUA_OK) {
+    /* Finished: frame 0's EvalBase is 0, so the return values are exactly
+     * EvalStack[0..EvalTop) of the thread's context. */
+    th->Status = THREAD_DEAD;
+    for (i = 0; i < th->Ctx.EvalTop; i++) {
+      MLuaPush(L, th->Ctx.EvalStack[i]);
+    }
+    *nres = th->Ctx.EvalTop;
+    th->Ctx.EvalTop = 0;
+    return MLUA_OK;
+  }
+
+  /* Error: the thread dies; its frames were already unwound by RunVM */
+  th->Status = THREAD_DEAD;
+  th->ErrorMsg = L->ErrorMsg;
+  return status;
 }
 
 /* ========================================================================== */
@@ -183,17 +272,27 @@ int MLuaThreadResume(MLuaState *L, MLuaValue thread, int nargs) {
 /* ========================================================================== */
 
 int MLuaThreadYield(MLuaState *L, int nresults) {
-  /*
-   * Yield implementation:
-   * In a full implementation, this would set a flag that the VM checks
-   * and saves its state (PC, FP, etc.) before returning MLUA_YIELD.
-   *
-   * For now, we use a simplified approach where yield is a status return.
-   * The VM loop checks for this and unwinds appropriately.
-   */
+  MLuaThread *th = L->CurrentThread;
+
   UNUSED(nresults);
-  L->ErrorMsg = NULL;
-  return MLUA_YIELD;
+
+  if (!th) {
+    L->ErrorMsg = "attempt to yield from outside a coroutine";
+    return MLUA_ERRRUN;
+  }
+
+  if (L->CCallDepth != th->BaseCCalls) {
+    L->ErrorMsg = "attempt to yield across a C-call boundary";
+    return MLUA_ERRRUN;
+  }
+
+  /* The yield values are exactly this C call's arguments: hand the window
+   * over to the resumer (the dispatch loop keeps it reserved). */
+  th->XferBase = L->ArgsBase;
+  th->XferCount = L->ArgsCount;
+
+  L->YieldFlag = TRUE;
+  return MLUA_OK;
 }
 
 /* ========================================================================== */

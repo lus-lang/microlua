@@ -61,11 +61,17 @@ typedef enum {
   /* ===== Upvalue Lifetime (0x1D) ===== */
   OP_CLOSE = 0x1D, /* 2B: B — : Close open upvalues at local slots >= B */
 
-  /* ===== Tables (0x20-0x23) ===== */
+  /* ===== Multi-Result Adjustment (0x1E) ===== */
+  OP_ADJUST = 0x1E, /* 2B: B results → vals : Truncate/nil-pad the last
+                       call's results (LastCallResults) to exactly B */
+
+  /* ===== Tables (0x20-0x24) ===== */
   OP_NEWTABLE = 0x20, /* 1B: → tbl    : Create and push empty table */
   OP_GETTABLE = 0x21, /* 1B: t k → v  : v = t[k] */
   OP_SETTABLE = 0x22, /* 1B: t k v →  : t[k] = v */
   OP_APPEND = 0x23,   /* 1B: t v →    : t[#t + 1] = v */
+  OP_APPENDM = 0x24,  /* 1B: t vals → : Append the last call's results
+                         (LastCallResults values) in order */
 
   /* ===== Logic (0x30-0x34) ===== */
   OP_NOT = 0x30, /* 1B: v → bool   : Push true if v is nil/false */
@@ -120,8 +126,12 @@ typedef enum {
   OP_RET = 0x73,       /* 2B: B vals →    : Return B values */
   OP_RET0 = 0x74,      /* 1B: —           : Return 0 values */
   OP_RET1 = 0x75,      /* 1B: val →       : Return 1 value */
-  OP_VARARG = 0x76,    /* 2B: B → vals    : Push B varargs */
-  OP_TAILCALL = 0x77,  /* 2B: B fn args → : Tail call with B args */
+  OP_VARARG = 0x76,    /* 2B: B → vals    : B>0: push B varargs (nil-pad);
+                          B==0: push ALL varargs, set LastCallResults */
+  OP_TAILCALL = 0x77,  /* 2B: B fn args → : Tail call with B args (reuses
+                          the current frame) */
+  OP_CALLM = 0x78,     /* 2B: B fn args+ → : Call; arg count is B fixed args
+                          plus the last call's results (LastCallResults) */
 
   /* ===== String (0x80) ===== */
   OP_CONCAT = 0x80, /* 2B: B strs → str : Concatenate top B strings */
@@ -255,6 +265,12 @@ struct MLuaFuncState {
   /* Highest local slot of THIS function captured by any nested function,
    * or -1 if none. Lets loops skip OP_CLOSE when nothing is captured. */
   int MaxCapturedSlot;
+
+  /* Code position right after the most recently emitted multi-result
+   * instruction (OP_CALL/OP_CALLM/OP_VARARG-all), or 0. When this equals
+   * the current position, the expression just parsed ends in a call and
+   * may produce any number of values. */
+  Size LastCallEnd;
 
   /* Set when a jump offset exceeded the I8 range (checked at body end) */
   Bool JumpOverflow;

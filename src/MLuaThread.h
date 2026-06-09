@@ -2,8 +2,12 @@
  * MicroLua - MLuaThread.h
  * Coroutine (thread) implementation
  *
- * Coroutines in MicroLua are cooperative threads with their own stacks.
- * Each coroutine shares the same heap but has its own value stack.
+ * Coroutines are cooperative threads. Each owns a full execution context
+ * (EvalStack, Locals, Args, Frames, open upvalues); resuming swaps the
+ * context into the shared MLuaState, suspending swaps it back out. Because
+ * the VM is frame-iterative, a coroutine can yield from arbitrary Lua call
+ * depth; the only restriction is Lua 5.1's: you cannot yield across a
+ * C-call boundary (e.g. from inside a pcall'd function).
  *
  * Note: coroutine.wrap is not supported because light C functions cannot
  * have upvalues to store the wrapped thread state.
@@ -31,37 +35,37 @@ typedef enum {
 /* ========================================================================== */
 
 /*
- * Thread (coroutine) structure, stored as a heap object.
- * Each thread has its own stack but shares the main state's heap.
+ * Thread (coroutine) structure, stored as a heap object. The context's
+ * arrays are separate raw heap allocations (they never move, preserving
+ * open-upvalue Location pointers into Locals).
+ *
+ * Not-started is encoded as Ctx.FrameTop == 0 with the function value at
+ * Ctx.EvalStack[0].
  */
 typedef struct MLuaThread {
-  MLuaState *MainState; /* Reference to main state (for heap access) */
-
-  /* Thread's own stack */
-  MLuaValue *Stack;
-  Size StackSize;
-  Size StackTop;
-
-  /* Call stack */
-  Size CallStackTop;
-
-  /* Execution state */
-  U8 *PC;  /* Current program counter (if suspended) */
-  Size FP; /* Frame pointer at suspension */
+  MLuaExecCtx Ctx; /* Full execution context */
   MLuaThreadStatus Status;
 
-  /* Upvalues belonging to this thread */
-  struct MLuaUpvalue *OpenUpvalues;
+  struct MLuaThread *Resumer; /* Who resumed us (NULL = main thread) */
+  Size BaseCCalls;            /* L->CCallDepth at this thread's entry; yield
+                                 is only legal when depth equals this */
 
-  /* Error message if dead with error */
-  const char *ErrorMsg;
+  /* Yield-value hand-off: the yield call's argument window inside Ctx.Args
+     (stays reserved while suspended; released on the next resume) */
+  Size XferBase;
+  Size XferCount;
+
+  const char *ErrorMsg; /* Error message if dead with error */
 } MLuaThread;
 
 /* Get thread header from GC header */
 #define MLUA_THREAD(gch) ((MLuaThread *)MLUA_OBJDATA(gch))
 
-/* Default thread stack size */
-#define MLUA_THREAD_STACK_SIZE 64
+/* Per-thread context sizes (entries, not bytes) */
+#define MLUA_THREAD_EVAL_SIZE 64
+#define MLUA_THREAD_LOCALS_SIZE 64
+#define MLUA_THREAD_ARGS_SIZE 32
+#define MLUA_THREAD_FRAMES_SIZE 16
 
 /* ========================================================================== */
 /* Thread API                                                                 */
@@ -70,36 +74,34 @@ typedef struct MLuaThread {
 /*
  * Create a new coroutine from a function.
  * @param L     Main state
- * @param func  The function to run in the coroutine (must be on stack)
+ * @param func  The function to run in the coroutine
  * @return      Thread value, or nil on failure
  */
 MLuaValue MLuaThreadNew(MLuaState *L, MLuaValue func);
 
 /*
  * Resume a suspended coroutine.
- * @param L       Main state
+ * @param L       State (with the resumer's context live)
  * @param thread  The thread to resume
- * @param nargs   Number of arguments on L's stack to pass
- * @return        Status code (MLUA_OK, MLUA_YIELD, or error)
- *
- * On success, the return values are on L's stack.
+ * @param argv    Resume arguments (copied before any context switch)
+ * @param nargs   Number of arguments
+ * @param nres    Out: number of values transferred onto the resumer's
+ *                EvalStack (yield values or return values)
+ * @return        MLUA_YIELD (suspended), MLUA_OK (finished) or error code
  */
-int MLuaThreadResume(MLuaState *L, MLuaValue thread, int nargs);
+int MLuaThreadResume(MLuaState *L, MLuaValue thread, const MLuaValue *argv,
+                     int nargs, Size *nres);
 
 /*
- * Yield from the currently running coroutine.
- * @param L       The coroutine's state
- * @param nresults Number of results to yield
- * @return        This function does not return normally; it longjmps
- *
- * Note: MicroLua uses status propagation, so yield sets a flag and returns.
+ * Request a yield from the currently running coroutine. Returns MLUA_OK and
+ * sets L->YieldFlag on success (the dispatch loop suspends after the
+ * current C function returns); returns MLUA_ERRRUN with ErrorMsg set when
+ * yielding is illegal (main thread, or across a C-call boundary).
  */
 int MLuaThreadYield(MLuaState *L, int nresults);
 
 /*
  * Get the status of a coroutine.
- * @param thread  The thread to query
- * @return        Status enum value
  */
 MLuaThreadStatus MLuaThreadGetStatus(MLuaValue thread);
 

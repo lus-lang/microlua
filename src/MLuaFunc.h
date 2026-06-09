@@ -78,22 +78,7 @@ struct MLuaCClosure {
 #define MLUA_CCLOSURE_UPVALS(cc)                                               \
   ((MLuaValue *)((U8 *)(cc) + sizeof(MLuaCClosure)))
 
-/* ========================================================================== */
-/* Call Stack Frame                                                           */
-/* ========================================================================== */
-
-/*
- * Call info - represents a function call on the call stack.
- */
-typedef struct MLuaCallInfo MLuaCallInfo;
-struct MLuaCallInfo {
-  MLuaValue *Base; /* Base of this frame's stack slots */
-  MLuaValue *Top;  /* Top of this frame's stack */
-  MLuaValue Func;  /* Function being called */
-  const U8 *PC;    /* Program counter (for Lua functions) */
-  Size NumResults; /* Number of expected results */
-  Size NumVarargs; /* Number of vararg values */
-};
+/* (Call frames are MLuaFrame in MLuaAlloc.h — the VM is frame-iterative.) */
 
 /* ========================================================================== */
 /* Closure API                                                                */

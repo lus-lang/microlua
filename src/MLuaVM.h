@@ -58,6 +58,11 @@ MLuaValue MLuaGetArg(MLuaState *L, int index);
 int MLuaGetArgCount(MLuaState *L);
 
 /*
+ * Re-enter the dispatch loop for a suspended context (coroutine resume).
+ */
+MLuaStatus MLuaRunSuspended(MLuaState *L);
+
+/*
  * Set stack top (expand or shrink).
  */
 void MLuaSetTop(MLuaState *L, int index);

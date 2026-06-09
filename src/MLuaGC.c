@@ -98,15 +98,24 @@ void MLuaGCMarkObject(MLuaState *L, MLuaGCHeader *obj) {
     break;
   }
   case OBJTYPE_THREAD: {
-    /* Mark thread's stack */
+    /* Mark the thread's full suspended context */
     MLuaThread *th = MLUA_THREAD(obj);
     Size i;
-    for (i = 0; i < th->StackTop; i++) {
-      MLuaGCMark(L, th->Stack[i]);
+    for (i = 0; i < th->Ctx.EvalTop; i++) {
+      MLuaGCMark(L, th->Ctx.EvalStack[i]);
+    }
+    for (i = 0; i < th->Ctx.LocalsTop; i++) {
+      MLuaGCMark(L, th->Ctx.Locals[i]);
+    }
+    for (i = 0; i < th->Ctx.ArgsTop; i++) {
+      MLuaGCMark(L, th->Ctx.Args[i]);
+    }
+    for (i = 0; i < th->Ctx.FrameTop; i++) {
+      MLuaGCMark(L, th->Ctx.Frames[i].Func);
     }
     /* Mark open upvalues belonging to this thread */
     {
-      MLuaUpvalue *uv = th->OpenUpvalues;
+      MLuaUpvalue *uv = th->Ctx.OpenUpvalues;
       while (uv) {
         MLuaGCMarkObject(L, &uv->Header);
         uv = uv->Next;
@@ -157,9 +166,38 @@ static void MarkRoots(MLuaState *L) {
     MLuaGCMarkObject(L, &uv->Header);
   }
 
-  /* Mark Args values */
-  for (i = 0; i < L->ArgsCount; i++) {
+  /* Mark Args values: every live window, not just the current frame's */
+  for (i = 0; i < L->ArgsTop; i++) {
     MLuaGCMark(L, L->Args[i]);
+  }
+
+  /* Mark live call frames' functions */
+  for (i = 0; i < L->FrameTop; i++) {
+    MLuaGCMark(L, L->Frames[i].Func);
+  }
+
+  /* When a coroutine is running, the main thread's context is parked in
+   * MainCtx and the resume chain is only reachable through it: mark both. */
+  if (L->CurrentThread) {
+    struct MLuaThread *t;
+    for (i = 0; i < L->MainCtx.EvalTop; i++) {
+      MLuaGCMark(L, L->MainCtx.EvalStack[i]);
+    }
+    for (i = 0; i < L->MainCtx.LocalsTop; i++) {
+      MLuaGCMark(L, L->MainCtx.Locals[i]);
+    }
+    for (i = 0; i < L->MainCtx.ArgsTop; i++) {
+      MLuaGCMark(L, L->MainCtx.Args[i]);
+    }
+    for (i = 0; i < L->MainCtx.FrameTop; i++) {
+      MLuaGCMark(L, L->MainCtx.Frames[i].Func);
+    }
+    for (uv = L->MainCtx.OpenUpvalues; uv != NULL; uv = uv->Next) {
+      MLuaGCMarkObject(L, &uv->Header);
+    }
+    for (t = L->CurrentThread; t != NULL; t = t->Resumer) {
+      MLuaGCMarkObject(L, MLUA_OBJHEADER(t));
+    }
   }
 
   /* Mark registry and globals */
@@ -200,14 +238,7 @@ static Size ComputeAddresses(MLuaState *L) {
   U8 *heapEnd;
   MLuaGCHeader *obj;
   Size objSize;
-  Size firstObjOffset;
-
-  /* First object starts after state + three arrays */
-  firstObjOffset = ALIGN_UP(sizeof(MLuaState), MLUA_ALIGNMENT);
-  firstObjOffset +=
-      ALIGN_UP(L->EvalStackSize * sizeof(MLuaValue), MLUA_ALIGNMENT);
-  firstObjOffset += ALIGN_UP(L->LocalsSize * sizeof(MLuaValue), MLUA_ALIGNMENT);
-  firstObjOffset += ALIGN_UP(L->ArgsSize * sizeof(MLuaValue), MLUA_ALIGNMENT);
+  Size firstObjOffset = MLuaFirstObjOffset(L);
 
   scan = L->HeapBase + firstObjOffset;
   freePtr = scan;
@@ -328,12 +359,7 @@ static void UpdateReferences(MLuaState *L) {
   {
     U8 *scan;
     U8 *heapEnd;
-    Size firstObjOffset = ALIGN_UP(sizeof(MLuaState), MLUA_ALIGNMENT);
-    firstObjOffset +=
-        ALIGN_UP(L->EvalStackSize * sizeof(MLuaValue), MLUA_ALIGNMENT);
-    firstObjOffset +=
-        ALIGN_UP(L->LocalsSize * sizeof(MLuaValue), MLUA_ALIGNMENT);
-    firstObjOffset += ALIGN_UP(L->ArgsSize * sizeof(MLuaValue), MLUA_ALIGNMENT);
+    Size firstObjOffset = MLuaFirstObjOffset(L);
     scan = L->HeapBase + firstObjOffset;
     heapEnd = L->HeapBase + L->HeapTop;
 
@@ -409,13 +435,7 @@ static void Compact(MLuaState *L, Size newHeapTop) {
   MLuaGCHeader *obj;
   Size objSize;
   U8 *newAddr;
-  Size firstObjOffset;
-
-  firstObjOffset = ALIGN_UP(sizeof(MLuaState), MLUA_ALIGNMENT);
-  firstObjOffset +=
-      ALIGN_UP(L->EvalStackSize * sizeof(MLuaValue), MLUA_ALIGNMENT);
-  firstObjOffset += ALIGN_UP(L->LocalsSize * sizeof(MLuaValue), MLUA_ALIGNMENT);
-  firstObjOffset += ALIGN_UP(L->ArgsSize * sizeof(MLuaValue), MLUA_ALIGNMENT);
+  Size firstObjOffset = MLuaFirstObjOffset(L);
 
   scan = L->HeapBase + firstObjOffset;
   heapEnd = L->HeapBase + L->HeapTop;

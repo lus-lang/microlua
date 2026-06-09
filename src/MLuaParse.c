@@ -403,6 +403,38 @@ static void EmitCloseIfCaptured(MLuaParser *p, U8 base) {
   }
 }
 
+/* ========================================================================== */
+/* Multi-Result Handling                                                      */
+/* ========================================================================== */
+
+/*
+ * Calls (and `...`) can produce any number of values at runtime. The parser
+ * marks where the last such instruction ended; a context that needs an
+ * exact count emits OP_ADJUST right after it, while MULTRET contexts
+ * (final call argument, final return expression, final constructor element)
+ * use the CALLM/APPENDM forms or the natural return flow instead.
+ */
+
+/* Emit a call-family instruction and remember that the expression ends
+ * with a multi-result producer */
+static void EmitCallOp(MLuaParser *p, MLuaOpCode op, U8 operand) {
+  MLuaFuncState *fs = p->FS;
+  MLuaEmitOpB(fs, op, operand);
+  fs->LastCallEnd = MLuaCodePos(fs);
+}
+
+/* Does the code emitted so far end exactly with a multi-result producer? */
+static Bool EndsWithMultret(MLuaFuncState *fs) {
+  return fs->LastCallEnd != 0 && fs->LastCallEnd == MLuaCodePos(fs);
+}
+
+/* In a single-value context: pin a trailing call to exactly one result */
+static void AdjustTo1(MLuaParser *p) {
+  if (EndsWithMultret(p->FS)) {
+    MLuaEmitOpB(p->FS, OP_ADJUST, 1);
+  }
+}
+
 /*
  * Emit the read of a named variable using full lexical resolution.
  */
@@ -570,6 +602,8 @@ static void ParsePrefix(MLuaParser *p) {
     Advance(p);
     ParseExpr(p);
     Expect(p, TK_RPAREN);
+    /* Lua: a parenthesized expression is exactly one value */
+    AdjustTo1(p);
     break;
 
   case TK_LBRACE:
@@ -585,9 +619,11 @@ static void ParsePrefix(MLuaParser *p) {
           /* [key] = value */
           Advance(p);
           ParseExpr(p); /* key */
+          AdjustTo1(p);
           Expect(p, TK_RBRACKET);
           Expect(p, TK_ASSIGN);
           ParseExpr(p); /* value */
+          AdjustTo1(p);
           MLuaEmitOp(fs, OP_SETTABLE);
           StackPop(p, 2);
         } else if (Check(p, TK_NAME) && MLuaLexPeek(&p->Lex) == TK_ASSIGN) {
@@ -597,16 +633,36 @@ static void ParsePrefix(MLuaParser *p) {
           Advance(p); /* name */
           Advance(p); /* = */
           ParseExpr(p);
+          AdjustTo1(p);
           MLuaEmitOpB(fs, OP_LOADK, (U8)(U16)k);
           MLuaEmitOp(fs, OP_SWAP);
           MLuaEmitOp(fs, OP_SETTABLE);
           StackPop(p, 1);
         } else {
-          /* Array element */
+          /* Array element. The FINAL element expands all its call/vararg
+           * results (Lua semantics); non-final ones contribute one value. */
+          Bool multret;
+          Bool sep;
+
           ParseExpr(p);
-          MLuaEmitOp(fs, OP_APPEND);
+          multret = EndsWithMultret(fs);
+          sep = Match(p, TK_COMMA) || Match(p, TK_SEMICOLON);
+
+          if (multret && (!sep || Check(p, TK_RBRACE))) {
+            MLuaEmitOp(fs, OP_APPENDM);
+          } else {
+            if (multret) {
+              MLuaEmitOpB(fs, OP_ADJUST, 1);
+            }
+            MLuaEmitOp(fs, OP_APPEND);
+          }
           StackPop(p, 1);
           count++;
+
+          if (!sep) {
+            break;
+          }
+          continue; /* Separator already consumed */
         }
 
         if (!Match(p, TK_COMMA) && !Match(p, TK_SEMICOLON)) {
@@ -621,18 +677,21 @@ static void ParsePrefix(MLuaParser *p) {
   case TK_MINUS:
     Advance(p);
     ParseSubExpr(p, PREC_UNARY);
+    AdjustTo1(p);
     MLuaEmitOp(fs, OP_UNM);
     break;
 
   case TK_NOT:
     Advance(p);
     ParseSubExpr(p, PREC_UNARY);
+    AdjustTo1(p);
     MLuaEmitOp(fs, OP_NOT);
     break;
 
   case TK_HASH:
     Advance(p);
     ParseSubExpr(p, PREC_UNARY);
+    AdjustTo1(p);
     MLuaEmitOp(fs, OP_LEN);
     break;
 
@@ -653,9 +712,9 @@ static void ParsePrefix(MLuaParser *p) {
       Error(p, "'...' used outside vararg function");
     }
     Advance(p);
-    /* Emit OP_VARARG to push varargs to stack */
-    /* For now, push 1 value (first vararg) */
-    MLuaEmitOpB(fs, OP_VARARG, 1);
+    /* Push ALL varargs; treated like a call's results so the surrounding
+     * context truncates (ADJUST 1) or expands (CALLM/APPENDM/return) it. */
+    EmitCallOp(p, OP_VARARG, 0);
     StackPush(p, 1);
     break;
   }
@@ -719,6 +778,7 @@ static AccessInfo ParseSuffixForAssign(MLuaParser *p) {
 
       Advance(p);
       ParseExpr(p);
+      AdjustTo1(p);
       Expect(p, TK_RBRACKET);
       info.accessType = 1; /* table[key] access */
       info.fieldConstIdx = 0;
@@ -743,9 +803,16 @@ static AccessInfo ParseSuffixForAssign(MLuaParser *p) {
         argCount++;
         if (!Match(p, TK_COMMA))
           break;
+        /* Non-final argument: exactly one value */
+        AdjustTo1(p);
       }
       Expect(p, TK_RPAREN);
-      MLuaEmitOpB(fs, OP_CALL, (U8)argCount);
+      if (argCount > 0 && EndsWithMultret(fs)) {
+        /* Final argument expands: pass all of its results */
+        EmitCallOp(p, OP_CALLM, (U8)(argCount - 1));
+      } else {
+        EmitCallOp(p, OP_CALL, (U8)argCount);
+      }
       StackPop(p, argCount);
       break;
     }
@@ -766,7 +833,7 @@ static AccessInfo ParseSuffixForAssign(MLuaParser *p) {
       Advance(p);
       MLuaEmitOpB(fs, OP_LOADK, (U8)k);
       StackPush(p, 1);
-      MLuaEmitOpB(fs, OP_CALL, 1);
+      EmitCallOp(p, OP_CALL, 1);
       StackPop(p, 1);
       break;
     }
@@ -783,7 +850,7 @@ static AccessInfo ParseSuffixForAssign(MLuaParser *p) {
       info.accessType = 0;
 
       ParsePrefix(p);
-      MLuaEmitOpB(fs, OP_CALL, 1);
+      EmitCallOp(p, OP_CALL, 1);
       StackPop(p, 1);
       break;
     }
@@ -829,6 +896,8 @@ static AccessInfo ParseSuffixForAssign(MLuaParser *p) {
           argCount++;
           if (!Match(p, TK_COMMA))
             break;
+          /* Non-final argument: exactly one value */
+          AdjustTo1(p);
         }
         Expect(p, TK_RPAREN);
       } else if (Check(p, TK_STRING)) {
@@ -846,7 +915,11 @@ static AccessInfo ParseSuffixForAssign(MLuaParser *p) {
         return info;
       }
 
-      MLuaEmitOpB(fs, OP_CALL, (U8)argCount);
+      if (argCount > 1 && EndsWithMultret(fs)) {
+        EmitCallOp(p, OP_CALLM, (U8)(argCount - 1));
+      } else {
+        EmitCallOp(p, OP_CALL, (U8)argCount);
+      }
       StackPop(p, argCount);
       break;
     }
@@ -883,6 +956,9 @@ static void ParseSubExpr(MLuaParser *p, Precedence minPrec) {
     Precedence prec = GetPrecedence(op);
     Precedence nextPrec = IsRightAssoc(op) ? prec : (Precedence)(prec + 1);
 
+    /* The lhs operand of any operator is a single value */
+    AdjustTo1(p);
+
     /* Handle short-circuit operators specially.
      * The condition value IS the result when the jump is taken, but
      * JMPF/JMPT pop their operand — so test a DUP of it. */
@@ -896,6 +972,7 @@ static void ParseSubExpr(MLuaParser *p, Precedence minPrec) {
       MLuaEmitOpB(fs, OP_POP, 1); /* Discard lhs, rhs replaces it */
       StackPop(p, 1);
       ParseSubExpr(p, nextPrec);
+      AdjustTo1(p);
       PatchFwdJump(p, jmp, MLuaCodePos(fs));
     } else if (op == TK_OR) {
       MLuaFwdJump jmp;
@@ -907,17 +984,20 @@ static void ParseSubExpr(MLuaParser *p, Precedence minPrec) {
       MLuaEmitOpB(fs, OP_POP, 1); /* Discard lhs, rhs replaces it */
       StackPop(p, 1);
       ParseSubExpr(p, nextPrec);
+      AdjustTo1(p);
       PatchFwdJump(p, jmp, MLuaCodePos(fs));
     } else if (op == TK_CONCAT) {
       /* Collect all concatenations */
       int count = 1;
       Advance(p);
       ParseSubExpr(p, nextPrec);
+      AdjustTo1(p);
       count++;
 
       while (Check(p, TK_CONCAT)) {
         Advance(p);
         ParseSubExpr(p, nextPrec);
+        AdjustTo1(p);
         count++;
       }
 
@@ -931,6 +1011,7 @@ static void ParseSubExpr(MLuaParser *p, Precedence minPrec) {
       Advance(p);
 
       ParseSubExpr(p, nextPrec);
+      AdjustTo1(p);
 
       /* a > b  ==  b < a: with [a, b] on the stack, SWAP yields [b, a]
        * and OP_LT then computes b < a. Same for >= via OP_LE. */
@@ -992,40 +1073,44 @@ static void ParseLocal(MLuaParser *p) {
   } while (Match(p, TK_COMMA));
 
   /* = expr [, expr]* */
-  int lastExprIsCall = 0; /* Track if last expr was a function call */
   if (Match(p, TK_ASSIGN)) {
-    do {
-      /* Check if this is a function call by looking at suffix */
-      Size savedPos = MLuaCodePos(fs);
+    for (;;) {
       ParseExpr(p);
-      /* If the expression generated an OP_CALL, it's a function call */
-      /* Simple heuristic: check if the last opcode is OP_CALL (0x71) */
-      if (MLuaCodePos(fs) > savedPos) {
-        Size lastPos = MLuaCodePos(fs) - 1;
-        /* OP_CALL is 2 bytes: opcode + nargs, so check position - 2 */
-        if (lastPos >= 1) {
-          U8 lastOp = fs->Proto->Code[lastPos - 1];
-          lastExprIsCall = (lastOp == OP_CALL);
-        }
-      }
       exprCount++;
-    } while (Match(p, TK_COMMA) && exprCount < varCount);
+      if (!Match(p, TK_COMMA)) {
+        break;
+      }
+      /* Non-final expression: exactly one value */
+      AdjustTo1(p);
+    }
   }
 
-  /* Assign values to locals (in reverse to match stack order) */
+  /* Normalize the value list to exactly varCount values */
   {
     int i;
-    /* Fill missing values with nil - BUT skip if last expr was a call */
-    /* Function calls can return multiple values at runtime */
-    if (!lastExprIsCall) {
-      for (i = exprCount; i < varCount; i++) {
-        MLuaEmitOp(fs, OP_LOADNIL);
-        StackPush(p, 1);
-        exprCount++;
+    Bool multret = (exprCount > 0) && EndsWithMultret(fs);
+
+    if (exprCount <= varCount) {
+      int missing = varCount - exprCount;
+      if (multret) {
+        /* The final call provides its 1 counted slot plus the missing
+         * values: pin it to exactly that many */
+        MLuaEmitOpB(fs, OP_ADJUST, (U8)(missing + 1));
+        StackPush(p, missing);
+      } else {
+        for (i = 0; i < missing; i++) {
+          MLuaEmitOp(fs, OP_LOADNIL);
+          StackPush(p, 1);
+        }
       }
+      exprCount = varCount;
     } else {
-      /* For function calls, assume it returns enough values */
-      /* Adjust exprCount to match varCount so we pop the right number */
+      /* More expressions than variables: evaluate and discard extras */
+      if (multret) {
+        MLuaEmitOpB(fs, OP_ADJUST, 1);
+      }
+      MLuaEmitOpB(fs, OP_POP, (U8)(exprCount - varCount));
+      StackPop(p, exprCount - varCount);
       exprCount = varCount;
     }
 
@@ -1043,6 +1128,7 @@ static void ParseAssignment(MLuaParser *p, const char *name, Size len) {
 
   Expect(p, TK_ASSIGN);
   ParseExpr(p);
+  AdjustTo1(p);
 
   switch (ResolveVar(p, fs, name, len, &idx)) {
   case VAR_LOCAL:
@@ -1070,10 +1156,24 @@ static void ParseReturn(MLuaParser *p) {
 
   if (!Check(p, TK_END) && !Check(p, TK_ELSE) && !Check(p, TK_ELSEIF) &&
       !Check(p, TK_UNTIL) && !Check(p, TK_EOF) && !Check(p, TK_SEMICOLON)) {
-    do {
+    for (;;) {
       ParseExpr(p);
       retCount++;
-    } while (Match(p, TK_COMMA));
+      if (!Match(p, TK_COMMA)) {
+        break;
+      }
+      /* Non-final return expression: exactly one value (the final one
+       * naturally returns everything — OP_RET passes the whole stack) */
+      AdjustTo1(p);
+    }
+  }
+
+  /* `return f(...)`: turn the final OP_CALL into a tail call so the frame
+   * is reused (constant frame space for tail recursion). Only the plain
+   * OP_CALL form, in clean return position, is flipped. */
+  if (retCount == 1 && EndsWithMultret(fs) && fs->LastCallEnd >= 2 &&
+      fs->Proto->Code[fs->LastCallEnd - 2] == OP_CALL) {
+    fs->Proto->Code[fs->LastCallEnd - 2] = OP_TAILCALL;
   }
 
   MLuaEmitOpB(fs, OP_RET, (U8)retCount);
@@ -1089,6 +1189,7 @@ static void ParseIf(MLuaParser *p) {
   Advance(p); /* Skip 'if' */
 
   ParseExpr(p);
+  AdjustTo1(p);
   Expect(p, TK_THEN);
 
   jmpToElse = EmitFwdJump(p, OP_JMPF);
@@ -1140,6 +1241,7 @@ static void ParseWhile(MLuaParser *p) {
   Advance(p); /* Skip 'while' */
 
   ParseExpr(p);
+  AdjustTo1(p);
   Expect(p, TK_DO);
 
   jmpToEnd = EmitFwdJump(p, OP_JMPF);
@@ -1176,6 +1278,7 @@ static void ParseRepeat(MLuaParser *p) {
   /* The until-condition can still see (and capture) body locals, so the
    * per-iteration close goes after the condition but before the jump. */
   ParseExpr(p);
+  AdjustTo1(p);
   EmitCloseIfCaptured(p, bodyBase);
 
   /* Jump back if condition is false */
@@ -1233,15 +1336,18 @@ static void ParseFor(MLuaParser *p) {
 
     /* Push start onto stack */
     ParseExpr(p);
+    AdjustTo1(p);
 
     Expect(p, TK_COMMA);
 
     /* Push limit onto stack */
     ParseExpr(p);
+    AdjustTo1(p);
 
     /* Push step onto stack (default 1) */
     if (Match(p, TK_COMMA)) {
       ParseExpr(p);
+      AdjustTo1(p);
     } else {
       MLuaEmitOpB(fs, OP_LOADINT, 1);
       StackPush(p, 1);
@@ -1376,25 +1482,14 @@ static void ParseFor(MLuaParser *p) {
     AddLocal(p, "(for control)", 13);  /* v */
 
     /* Parse iterator expression(s) and store in local slots */
-    /* We expect 1-3 expressions (or a single call that returns 3) */
-    Size savedPos = MLuaCodePos(fs);
+    /* We expect 1-3 expressions (or a single call that returns up to 3) */
     ParseExpr(p);
 
-    /* Check if the expression was a function call */
-    int iterExprIsCall = 0;
-    if (MLuaCodePos(fs) > savedPos) {
-      Size lastPos = MLuaCodePos(fs) - 1;
-      if (lastPos >= 1) {
-        U8 lastOp = fs->Proto->Code[lastPos - 1];
-        iterExprIsCall = (lastOp == OP_CALL);
-      }
-    }
-
     /* Store iterator results (f, s, v) to shadow locals */
-    if (iterExprIsCall) {
-      /* Function call (like pairs(t)) returns 3 values, store in reverse order
-       */
-      /* Stack has: [f, s, v] with v on top */
+    if (EndsWithMultret(fs)) {
+      /* A call like pairs(t): normalize to exactly 3 values (f, s, v) and
+       * store them in reverse order. Stack has [f, s, v] with v on top. */
+      MLuaEmitOpB(fs, OP_ADJUST, 3);
       MLuaEmitOpB(fs, OP_SETLOCAL, iterSlot + 2); /* Store v (control) */
       StackPop(p, 1);
       MLuaEmitOpB(fs, OP_SETLOCAL, iterSlot + 1); /* Store s (state) */
@@ -1408,6 +1503,7 @@ static void ParseFor(MLuaParser *p) {
 
       if (Match(p, TK_COMMA)) {
         ParseExpr(p);
+        AdjustTo1(p);
         MLuaEmitOpB(fs, OP_SETLOCAL, iterSlot + 1); /* Store s */
         StackPop(p, 1);
       } else {
@@ -1419,6 +1515,7 @@ static void ParseFor(MLuaParser *p) {
 
       if (Match(p, TK_COMMA)) {
         ParseExpr(p);
+        AdjustTo1(p);
         MLuaEmitOpB(fs, OP_SETLOCAL, iterSlot + 2); /* Store v */
         StackPop(p, 1);
       } else {
@@ -1806,6 +1903,7 @@ static void ParseExprStat(MLuaParser *p) {
        * SETTABLE leaves t on the stack; drop it. */
       Advance(p);
       ParseExpr(p);
+      AdjustTo1(p);
       MLuaEmitOp(fs, OP_SETTABLE);
       MLuaEmitOpB(fs, OP_POP, 1);
       StackPop(p, 3); /* Pop t, k, v */
@@ -1814,6 +1912,7 @@ static void ParseExprStat(MLuaParser *p) {
        * SETTABLE leaves t on the stack; drop it. */
       Advance(p);
       ParseExpr(p);
+      AdjustTo1(p);
       MLuaEmitOpB(fs, OP_LOADK, (U8)accessInfo.fieldConstIdx);
       MLuaEmitOp(fs, OP_SWAP);
       MLuaEmitOp(fs, OP_SETTABLE);
@@ -1838,8 +1937,13 @@ static void ParseExprStat(MLuaParser *p) {
       MLuaEmitOpB(fs, OP_LOADK, (U8)accessInfo.fieldConstIdx);
       MLuaEmitOp(fs, OP_GETTABLE);
     }
-    /* Pop result */
-    MLuaEmitOpB(fs, OP_POP, 1);
+    /* Discard the statement's value(s): a trailing call may have produced
+     * any number of results */
+    if (EndsWithMultret(fs)) {
+      MLuaEmitOpB(fs, OP_ADJUST, 0);
+    } else {
+      MLuaEmitOpB(fs, OP_POP, 1);
+    }
     StackPop(p, 1);
   }
 }

@@ -99,6 +99,61 @@ MLuaGCHeader *MLuaAllocObject(MLuaState *L, U8 objType, Size dataSize);
  */
 Size MLuaObjectSize(MLuaGCHeader *header);
 
+/*
+ * Offset of the first GC object in a constrained heap (after the state
+ * struct and the carved-out execution arrays). The GC heap walk starts here.
+ */
+Size MLuaFirstObjOffset(MLuaState *L);
+
+/* ========================================================================== */
+/* Call Frames & Execution Contexts                                           */
+/* ========================================================================== */
+
+/*
+ * One Lua call frame. The VM dispatch loop is frame-iterative: Lua-to-Lua
+ * calls push frames instead of recursing in C, which is what allows a
+ * coroutine to suspend at arbitrary depth and resume later.
+ *
+ * PC is stored as a byte OFFSET into the proto's code (never a pointer) and
+ * Func as a GC-managed value, so suspended frames survive heap compaction.
+ */
+typedef struct MLuaFrame {
+  MLuaValue Func;  /* The Lua closure being executed */
+  Size PC;         /* Saved bytecode offset: resume point / return point */
+  Size LocalsBase; /* This frame's base in the Locals array */
+  Size EvalBase;   /* EvalStack height at entry; results land here */
+  Size ArgsBase;   /* This frame's argument window start in Args */
+  Size ArgsCount;  /* Argument count (drives OP_VARARG / MLuaGetArg) */
+} MLuaFrame;
+
+/*
+ * A full execution context: everything that distinguishes one thread of
+ * execution from another. The main thread's context lives in
+ * MLuaState.MainCtx while a coroutine runs; each coroutine owns one.
+ */
+typedef struct MLuaExecCtx {
+  MLuaValue *EvalStack;
+  Size EvalStackSize;
+  Size EvalTop;
+
+  MLuaValue *Locals;
+  Size LocalsSize;
+  Size LocalsBase;
+  Size LocalsTop;
+
+  MLuaValue *Args;
+  Size ArgsSize;
+  Size ArgsBase;
+  Size ArgsTop;
+  Size ArgsCount;
+
+  MLuaFrame *Frames;
+  Size FrameCap;
+  Size FrameTop;
+
+  struct MLuaUpvalue *OpenUpvalues;
+} MLuaExecCtx;
+
 /* ========================================================================== */
 /* MLuaState Structure                                                        */
 /* ========================================================================== */
@@ -137,22 +192,28 @@ struct MLuaState {
                         (including C-boundary calls like pcall/require) start
                         here, and the GC marks Locals[0..LocalsTop) */
 
-  /* Arguments Array (for C function calls) */
+  /* Arguments Array: stacked per-frame windows. The current frame's window
+     is [ArgsBase, ArgsBase+ArgsCount); ArgsTop is the first free slot. */
   MLuaValue *Args; /* Arguments array base */
   Size ArgsSize;   /* Arguments array capacity */
-  Size ArgsCount;  /* Current number of arguments */
+  Size ArgsBase;   /* Current frame's window start */
+  Size ArgsTop;    /* First free slot above all live windows */
+  Size ArgsCount;  /* Current frame's argument count */
 
-  /* Number of values the most recent OP_CALL left on the EvalStack.
-     Consumed by OP_GLOOP_STEP (emitted right after the iterator call)
-     to normalize results without clobbering enclosing frames' stack. */
+  /* Number of values the most recent call (OP_CALL/OP_CALLM/OP_VARARG-all)
+     left on the EvalStack. Consumed by OP_ADJUST, OP_CALLM, OP_APPENDM and
+     OP_GLOOP_STEP. */
   Size LastCallResults;
 
-  /* Call Stack (for stacktrace) */
-  struct {
-    void *Proto;     /* MLuaProto* for this frame */
-    Size PC;         /* Program counter offset when call was made */
-  } CallStack[64];   /* Fixed-size call stack (max nesting depth) */
-  Size CallStackTop; /* Current call depth */
+  /* Call Frames (frame-iterative dispatch; also drives stack traces) */
+  MLuaFrame *Frames; /* Frame array (fixed allocation at state init) */
+  Size FrameCap;     /* Capacity */
+  Size FrameTop;     /* Current depth */
+
+  /* C-boundary bookkeeping */
+  Size CCallDepth; /* Nested MLuaCall entries (yield-across-C detection) */
+  Bool YieldFlag;  /* Set by MLuaThreadYield; consumed by the dispatch loop */
+  Bool InCCall;    /* Inside a light C function (selects GetTop semantics) */
 
   /* Upvalues */
   struct MLuaUpvalue *OpenUpvalues; /* List of open upvalues */
@@ -176,9 +237,9 @@ struct MLuaState {
   MLuaValue (*RequireFunc)(MLuaState *, const char *modname);
 
   /* Coroutine Tracking */
-  void *CurrentThread; /* Currently running coroutine (MLuaThread*) or NULL for
-                          main */
-  Bool InCoroutine;    /* TRUE if currently in a coroutine (yieldable) */
+  struct MLuaThread *CurrentThread; /* Running coroutine, NULL for main */
+  MLuaExecCtx MainCtx; /* Main thread's saved context while a coroutine runs.
+                          Only meaningful when CurrentThread != NULL. */
 
   /* Error Handling */
   void (*Panic)(MLuaState *); /* Panic handler */

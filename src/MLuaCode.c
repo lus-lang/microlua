@@ -28,6 +28,7 @@ Size MLuaOpSize(MLuaOpCode op) {
   case OP_GETTABLE:
   case OP_SETTABLE:
   case OP_APPEND:
+  case OP_APPENDM:
   case OP_NOT:
   case OP_EQ:
   case OP_LT:
@@ -65,6 +66,7 @@ Size MLuaOpSize(MLuaOpCode op) {
   case OP_GETUPVAL:
   case OP_SETUPVAL:
   case OP_CLOSE:
+  case OP_ADJUST:
   case OP_POP:
   case OP_JMP:
   case OP_JMPF:
@@ -77,6 +79,7 @@ Size MLuaOpSize(MLuaOpCode op) {
   case OP_GLOOP_STEP:
   case OP_CLOSURE:
   case OP_CALL:
+  case OP_CALLM:
   case OP_RET:
   case OP_VARARG:
   case OP_TAILCALL:
@@ -288,6 +291,9 @@ const char *MLuaOpName(MLuaOpCode op) {
       [OP_DUP] = "DUP",
       [OP_SWAP] = "SWAP",
       [OP_CLOSE] = "CLOSE",
+      [OP_ADJUST] = "ADJUST",
+      [OP_APPENDM] = "APPENDM",
+      [OP_CALLM] = "CALLM",
       [OP_NEWTABLE] = "NEWTABLE",
       [OP_GETTABLE] = "GETTABLE",
       [OP_SETTABLE] = "SETTABLE",

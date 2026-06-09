@@ -93,12 +93,10 @@ until the crash is fully fixed.
 - `print`/`require` only exist when the embedder installs callbacks
   (`MLuaSetOutput`/`MLuaSetRequirer`) — the REPL installs both.
 
-## Known baseline (2026-06-09, post-Phase 1)
+## Known baseline (2026-06-09, post-Phase 2)
 
-- `test_vm`: 2 pre-existing failures (`StackPushPop`, `StackIndexing`) — `MLuaGetTop`
-  returns the Args count, the tests expect EvalStack semantics. Resolved by the
-  Phase 2 frame machine; do not paper over.
-- `test_base`: 1 failure (`select '#'`) — `...` in call arguments forwards only one
-  value (`OP_VARARG 1` stub). Resolved by Phase 2's multi-result machinery.
-- Everything else green: test_string 18/18, test_table 11/11, test_closure 21/21,
-  internal suites 9/10.
+All suites green: internal 10/10; interpreter test_base 19, test_string 18,
+test_table 11, test_closure 21, test_coroutine 28 — zero failures. Release
+(freestanding) build clean. Outstanding work tracked in the phase plan:
+GC hardening under memory pressure (Phase 3), io/os + Unicode + library
+parity (Phase 4), meson-wired interpreter tests (Phase 5).
