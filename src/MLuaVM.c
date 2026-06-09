@@ -12,7 +12,6 @@
 #include "MLuaParse.h"
 #include "MLuaString.h"
 
-#include <stdio.h> /* For debug output */
 
 /* ========================================================================== */
 /* VM Error Handling with Line Info                                           */
@@ -207,6 +206,31 @@ static char ErrorMsgBuffer[512];
 static char StackTraceBuffer[2048];
 
 /*
+ * Append formatted pieces to the stack-trace buffer without libc.
+ */
+static char *TraceAppend(char *p, char *end, const char *s, Size len) {
+  while (len-- && p < end) {
+    *p++ = *s++;
+  }
+  return p;
+}
+
+static char *TraceAppendLine(char *p, char *end, const char *src, Size srcLen,
+                             Size line, const char *label) {
+  char numBuf[24];
+  Size numLen = MLuaIntToStr((I64)line, numBuf);
+
+  p = TraceAppend(p, end, "\t", 1);
+  p = TraceAppend(p, end, src, srcLen);
+  p = TraceAppend(p, end, ":", 1);
+  p = TraceAppend(p, end, numBuf, numLen);
+  p = TraceAppend(p, end, ": ", 2);
+  p = TraceAppend(p, end, label, StrLen(label));
+  p = TraceAppend(p, end, "\n", 1);
+  return p;
+}
+
+/*
  * Build a stacktrace string from the current call stack.
  * Returns pointer to static buffer with formatted trace.
  */
@@ -233,12 +257,7 @@ static const char *BuildStackTrace(MLuaState *L, MLuaProto *currentProto,
     }
 
     /* Format: "source:line: in function" */
-    if (p < end) {
-      int n = snprintf(p, (size_t)(end - p), "\t%.*s:%llu: %s\n", (int)srcLen,
-                       src, (unsigned long long)line, label);
-      if (n > 0)
-        p += n;
-    }
+    p = TraceAppendLine(p, end, src, srcLen, line, label);
   }
 
   /* Walk the caller frames (most recent first); the topmost frame is the
@@ -270,12 +289,7 @@ static const char *BuildStackTrace(MLuaState *L, MLuaProto *currentProto,
       srcLen = MLuaShortStrLen(proto->Source);
     }
 
-    if (p < end) {
-      int n = snprintf(p, (size_t)(end - p), "\t%.*s:%llu: %s\n", (int)srcLen,
-                       src, (unsigned long long)line, label);
-      if (n > 0)
-        p += n;
-    }
+    p = TraceAppendLine(p, end, src, srcLen, line, label);
   }
 
   *p = '\0';

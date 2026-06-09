@@ -35,7 +35,8 @@ microlua_inc = include_directories('src', 'src/library')
 if debug_mode
     lib_c_args = ['-DMLUA_PTR_SIZE=8']
 else
-    lib_c_args = ['-ffreestanding', '-fno-builtin', '-DMLUA_PTR_SIZE=8']
+    lib_c_args = ['-ffreestanding', '-fno-builtin', '-fno-stack-protector',
+                  '-DMLUA_PTR_SIZE=8']
 endif
 
 microlua_lib = static_library('microlua', microlua_sources,

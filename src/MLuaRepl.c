@@ -263,11 +263,11 @@ int main(int argc, char **argv) {
         return 1;
       }
     } else {
-      /* First non-option is the script file */
+      /* First non-option is the script file; the remaining args reach the
+       * script through the standard `arg` table built below */
       if (!scriptFile) {
         scriptFile = arg;
       }
-      /* Remaining args would be passed to script (not implemented yet) */
     }
   }
 

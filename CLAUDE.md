@@ -17,7 +17,11 @@ ninja -C builddir
 
 - `-DMLUA_PTR_SIZE=8` is set by meson; required for NaN-boxing on 64-bit.
 - The static library (`libmicrolua.a`) must stay libc-free; only the REPL
-  (`src/MLuaRepl.c`) and optional extensions may use libc.
+  (`src/MLuaRepl.c`) and optional extensions may use libc. Verify with
+  `nm builddir-release/libmicrolua.a | grep ' U '`: the only acceptable
+  undefined symbols are libm functions (sin/cos/pow/...) from `__builtin_*`
+  lowering — embedded toolchains provide those — plus the project's own
+  Mem*/StrLen (defined in MLuaCore.o).
 - The interactive REPL evaluates **one line = one chunk**: locals do not persist across
   lines. Multi-line snippets must be run from a file or written on a single line.
 
@@ -115,8 +119,23 @@ cd tests/interpreter && ../../builddir/mlua test_base.lua  # one suite by hand
   (`MLuaSetOutput`/`MLuaSetRequirer`); io/os/dofile/loadfile live in the optional
   libc extension (`src/extensions/MLuaStdLib.c`) — the REPL provides all of it.
 
-## Status (2026-06-09, post-Phase 5)
+## Deliberately NOT done (rejected with reasons — don't "fix" these)
+
+- Keyword lookup / `FindLocal` are linear scans: at ≤23 keywords and typical
+  local counts, a hash or binary search costs more code than it saves time.
+- `MLuaGCStep` performs a full collection: incremental GC isn't promised by the
+  README and the safepoint full-collect is simple and bounded by tiny heaps.
+- Pattern matching is byte-based (UTF-8-safe but classes/positions are bytes):
+  codepoint-aware classes need Unicode tables that don't fit the footprint.
+- `upper`/`lower` are ASCII-only: same reason.
+- The REPL's `-o` bytecode output remains a stub: `string.dump` exists for the
+  serialization itself; CLI plumbing adds little.
+- `return f(g())` / `return f(...)` (CALLM-form tails) are NOT tail calls; only
+  plain `OP_CALL` returns are flipped to `OP_TAILCALL`. Correctness is identical,
+  only frame reuse differs, and the flip-time check stays trivially safe.
+
+## Status (2026-06-09, all phases complete)
 
 All suites green via a single `meson test -C builddir`: 10 internal C suites +
 TestCoro (GC stress, ~1700 collections) + 7 interpreter suites (130 cases).
-Freestanding release build clean. Remaining phase: optimizations (Phase 6).
+Freestanding release build clean; README claims verified against the code.
