@@ -28,8 +28,15 @@ static int BaseAssert(MLuaState *L) {
     L->ErrorMsg = msg;
     return -1; /* Error */
   }
-  /* Return all arguments */
-  return MLuaGetTop(L);
+  /* Return all arguments (results must be pushed, not just counted) */
+  {
+    int top = MLuaGetTop(L);
+    int i;
+    for (i = 0; i < top; i++) {
+      MLuaPush(L, MLuaGetArg(L, i));
+    }
+    return top;
+  }
 }
 
 /* ========================================================================== */
@@ -159,32 +166,33 @@ static int BaseIpairs(MLuaState *L) {
 
 static int BasePcall(MLuaState *L) {
   int top = MLuaGetTop(L);
-  int nargs = top - 1;
+  Size entryTop;
   int status;
+  int i;
 
   if (top < 1) {
     MLuaPush(L, MLUA_FALSE);
-    return 1;
-  }
-
-  /* Get function and call it */
-  status = MLuaPCall(L, nargs, -1, 0);
-
-  if (status == MLUA_OK) {
-    /* Prepend true to results */
-    /* Results are already on stack, just add true at beginning */
-    MLuaPush(L, MLUA_TRUE);
-    return MLuaGetTop(L);
-  } else {
-    /* Return false + error message */
-    MLuaPush(L, MLUA_FALSE);
-    if (L->ErrorMsg) {
-      MLuaPush(L, MLuaStringNew(L, L->ErrorMsg, StrLen(L->ErrorMsg)));
-    } else {
-      MLuaPush(L, MLuaStringNew(L, "error", 5));
-    }
+    MLuaPush(L, MLuaStringNew(L, "bad argument #1 (value expected)", 32));
     return 2;
   }
+
+  /*
+   * Our arguments live in the Args window (OP_CALL moved them there), but
+   * MLuaPCall expects function+args on the EvalStack. Reserve the status
+   * slot first so true/false precedes the results, then re-push.
+   */
+  entryTop = L->EvalTop;
+  MLuaPush(L, MLUA_NIL); /* placeholder for the status boolean */
+  for (i = 0; i < top; i++) {
+    MLuaPush(L, MLuaGetArg(L, i));
+  }
+
+  status = MLuaPCall(L, top - 1, -1, 0);
+
+  /* On success the results follow the placeholder; on error MLuaPCall
+   * restored the stack and pushed the error message there instead. */
+  L->EvalStack[entryTop] = (status == MLUA_OK) ? MLUA_TRUE : MLUA_FALSE;
+  return (int)(L->EvalTop - entryTop);
 }
 
 /* ========================================================================== */
@@ -305,9 +313,11 @@ static int BaseType(MLuaState *L) {
 static int BaseXpcall(MLuaState *L) {
   /* xpcall(f, msgh, ...) - call f with error handler msgh */
   int top = MLuaGetTop(L);
-  int nargs = top - 2; /* Exclude f and msgh */
   MLuaValue msgh;
+  MLuaValue errval;
+  Size entryTop;
   int status;
+  int i;
 
   if (top < 2) {
     MLuaPush(L, MLUA_FALSE);
@@ -315,39 +325,41 @@ static int BaseXpcall(MLuaState *L) {
     return 2;
   }
 
-  /* Save error handler */
-  msgh = MLuaGetStack(L, 2);
+  /* Save error handler by value: the Args window is overwritten by the
+   * protected call below */
+  msgh = MLuaGetArg(L, 1);
 
-  /* Call the function (msgh position not used yet in simple impl) */
-  status = MLuaPCall(L, nargs, -1, 0);
+  /* Same placeholder pattern as pcall; args 3..top follow the function */
+  entryTop = L->EvalTop;
+  MLuaPush(L, MLUA_NIL);
+  MLuaPush(L, MLuaGetArg(L, 0));
+  for (i = 2; i < top; i++) {
+    MLuaPush(L, MLuaGetArg(L, i));
+  }
+
+  status = MLuaPCall(L, top - 2, -1, 0);
 
   if (status == MLUA_OK) {
-    /* Prepend true to results */
-    MLuaPush(L, MLUA_TRUE);
-    return MLuaGetTop(L);
-  } else {
-    /* Get error message */
-    const char *errmsg = L->ErrorMsg ? L->ErrorMsg : "error";
-    MLuaValue errval = MLuaStringNew(L, errmsg, StrLen(errmsg));
-
-    /* Call error handler if it's a function */
-    if (!IsNil(msgh) && (IsPtr(msgh) || IsLightFunc(msgh))) {
-      /* Push msgh and error, call it */
-      MLuaPush(L, msgh);
-      MLuaPush(L, errval);
-      int hstatus = MLuaPCall(L, 1, 1, 0);
-      if (hstatus == MLUA_OK) {
-        /* Handler result is on stack */
-        errval = MLuaPop(L);
-      }
-      /* If handler fails, we use original error */
-    }
-
-    /* Return false + processed error */
-    MLuaPush(L, MLUA_FALSE);
-    MLuaPush(L, errval);
-    return 2;
+    L->EvalStack[entryTop] = MLUA_TRUE;
+    return (int)(L->EvalTop - entryTop);
   }
+
+  /* Stack is [placeholder, errmsg]: take the error, run the handler */
+  errval = MLuaPop(L);
+
+  if (!IsNil(msgh) && (IsPtr(msgh) || IsLightFunc(msgh))) {
+    MLuaPush(L, msgh);
+    MLuaPush(L, errval);
+    if (MLuaPCall(L, 1, 1, 0) == MLUA_OK) {
+      errval = MLuaPop(L); /* Handler's result replaces the error */
+    } else {
+      MLuaPop(L); /* Handler failed: drop its error, keep the original */
+    }
+  }
+
+  L->EvalStack[entryTop] = MLUA_FALSE;
+  MLuaPush(L, errval);
+  return (int)(L->EvalTop - entryTop);
 }
 
 /* ========================================================================== */

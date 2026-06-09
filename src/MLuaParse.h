@@ -20,6 +20,8 @@ typedef struct {
   MLuaState *L;      /* Runtime state */
   const char *Error; /* Error message */
   Size ErrorLine;    /* Error line number */
+  Bool LongJumps;    /* Emit long-form forward jumps (set on the re-parse
+                        after a short I8 jump offset overflowed) */
 } MLuaParser;
 
 /* ========================================================================== */

@@ -93,10 +93,12 @@ until the crash is fully fixed.
 - `print`/`require` only exist when the embedder installs callbacks
   (`MLuaSetOutput`/`MLuaSetRequirer`) — the REPL installs both.
 
-## Known baseline (2026-06-09)
+## Known baseline (2026-06-09, post-Phase 1)
 
 - `test_vm`: 2 pre-existing failures (`StackPushPop`, `StackIndexing`) — `MLuaGetTop`
-  semantics; do not paper over.
-- `test_lib`: 1 pre-existing failure (`Load` — `MLuaDoString` status != MLUA_OK).
-- Interpreter suites: red until closures/upvalues + `pcall` fixes land (Phase 1) — the
-  `_base.lua` harness itself depends on them, plus `io.write` (Phase 4 extension).
+  returns the Args count, the tests expect EvalStack semantics. Resolved by the
+  Phase 2 frame machine; do not paper over.
+- `test_base`: 1 failure (`select '#'`) — `...` in call arguments forwards only one
+  value (`OP_VARARG 1` stub). Resolved by Phase 2's multi-result machinery.
+- Everything else green: test_string 18/18, test_table 11/11, test_closure 21/21,
+  internal suites 9/10.

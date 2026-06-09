@@ -85,12 +85,20 @@ TEST(LongStr_Data) {
   ASSERT_STREQ(s, "Testing");
 }
 
-TEST(LongStr_AutoLen) {
+/*
+ * len is always exact: len==0 creates the empty string. The old "0 means
+ * auto-detect" contract was removed because it made empty strings from
+ * non-NUL-terminated buffers impossible (and read out of bounds).
+ */
+TEST(LongStr_EmptyAndExplicitLen) {
   MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
   ASSERT_NE(L, NULL);
 
-  MLuaValue v = MLuaStringNew(L, "Hello", 0); /* 0 means auto-detect */
+  MLuaValue v = MLuaStringNew(L, "Hello", StrLen("Hello"));
   ASSERT_EQ(MLuaStringLen(v), 5);
+
+  MLuaValue empty = MLuaStringNew(L, "garbage-not-read", 0);
+  ASSERT_EQ(MLuaStringLen(empty), 0);
 }
 
 /* ========================================================================== */
@@ -214,7 +222,7 @@ int main(void) {
   printf("\nLong Strings:\n");
   RUN_TEST(LongStr_Create);
   RUN_TEST(LongStr_Data);
-  RUN_TEST(LongStr_AutoLen);
+  RUN_TEST(LongStr_EmptyAndExplicitLen);
 
   printf("\nInterning:\n");
   RUN_TEST(Intern_SameString);

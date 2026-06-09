@@ -131,13 +131,12 @@ function M.run()
     for _, suite in ipairs(suites) do
         print(suite.name .. ":")
         for _, test in ipairs(suite.tests) do
-            io.write("  " .. test.name .. "... ")
             local ok, err = pcall(test.fn)
             if ok then
-                print("✓")
+                print("  " .. test.name .. "... ✓")
                 passed = passed + 1
             else
-                print("✗")
+                print("  " .. test.name .. "... ✗")
                 failed = failed + 1
                 errors[#errors + 1] = {
                     suite = suite.name,

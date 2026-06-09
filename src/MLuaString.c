@@ -192,10 +192,11 @@ MLuaValue MLuaStringNew(MLuaState *L, const char *str, Size len) {
   Size totalDataSize;
   MLuaValue result;
 
-  /* Calculate length if not provided */
-  if (len == 0 && str != NULL) {
-    len = StrLen(str);
-  }
+  /*
+   * 'len' is always the exact byte length — callers measure with StrLen
+   * themselves. (An auto-detect on len==0 would make genuine empty strings
+   * impossible: a non-NUL-terminated buffer would be read out of bounds.)
+   */
 
   /* Use short string for <= 3 bytes */
   if (len <= 3) {
@@ -247,8 +248,19 @@ MLuaValue MLuaStringNew(MLuaState *L, const char *str, Size len) {
 /* String Operations                                                          */
 /* ========================================================================== */
 
-/* Static buffer for short string data access */
-static char ShortStrBuffer[4];
+/*
+ * Rotating buffers for short-string data access.
+ *
+ * Short strings (<=3 bytes) live inside the value word, so MLuaStringData
+ * must materialize their bytes somewhere. A single static buffer would
+ * alias any two short strings whose data pointers are alive at once
+ * (e.g. MLuaStringCompare, table.concat's separator vs elements), so we
+ * rotate through four buffers. Contract: a returned pointer stays valid
+ * until the fourth subsequent MLuaStringData call on a short string.
+ */
+#define SHORTSTR_BUFFERS 4
+static char ShortStrBuffer[SHORTSTR_BUFFERS][4];
+static unsigned ShortStrBufferIdx;
 
 Size MLuaStringLen(MLuaValue v) {
   MLuaGCHeader *gch;
@@ -272,11 +284,13 @@ const char *MLuaStringData(MLuaValue v) {
   MLuaStringHeader *sh;
 
   if (IsShortStr(v)) {
-    ShortStrBuffer[0] = GetShortStrChar0(v);
-    ShortStrBuffer[1] = GetShortStrChar1(v);
-    ShortStrBuffer[2] = GetShortStrChar2(v);
-    ShortStrBuffer[3] = '\0';
-    return ShortStrBuffer;
+    char *buf = ShortStrBuffer[ShortStrBufferIdx];
+    ShortStrBufferIdx = (ShortStrBufferIdx + 1) % SHORTSTR_BUFFERS;
+    buf[0] = GetShortStrChar0(v);
+    buf[1] = GetShortStrChar1(v);
+    buf[2] = GetShortStrChar2(v);
+    buf[3] = '\0';
+    return buf;
   }
 
   if (!IsString(v)) {

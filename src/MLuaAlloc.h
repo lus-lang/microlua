@@ -133,11 +133,19 @@ struct MLuaState {
   MLuaValue *Locals; /* Locals array base */
   Size LocalsSize;   /* Locals array capacity */
   Size LocalsBase;   /* Current frame's base index in Locals */
+  Size LocalsTop;    /* First free slot above the current frame; new frames
+                        (including C-boundary calls like pcall/require) start
+                        here, and the GC marks Locals[0..LocalsTop) */
 
   /* Arguments Array (for C function calls) */
   MLuaValue *Args; /* Arguments array base */
   Size ArgsSize;   /* Arguments array capacity */
   Size ArgsCount;  /* Current number of arguments */
+
+  /* Number of values the most recent OP_CALL left on the EvalStack.
+     Consumed by OP_GLOOP_STEP (emitted right after the iterator call)
+     to normalize results without clobbering enclosing frames' stack. */
+  Size LastCallResults;
 
   /* Call Stack (for stacktrace) */
   struct {

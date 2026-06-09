@@ -137,15 +137,24 @@ void MLuaGCMark(MLuaState *L, MLuaValue value) {
 static void MarkRoots(MLuaState *L) {
   Size i;
   MLuaGCRef *ref;
+  MLuaUpvalue *uv;
 
   /* Mark EvalStack values */
   for (i = 0; i < L->EvalTop; i++) {
     MLuaGCMark(L, L->EvalStack[i]);
   }
 
-  /* Mark Locals values (up to current usage) */
-  for (i = 0; i < L->LocalsBase; i++) {
+  /* Mark Locals values, INCLUDING the current frame (LocalsTop is the
+   * first free slot above all live frames) */
+  for (i = 0; i < L->LocalsTop; i++) {
     MLuaGCMark(L, L->Locals[i]);
+  }
+
+  /* Mark the open-upvalue list: the upvalue objects themselves are roots
+   * while open (closures referencing them are found transitively, but an
+   * upvalue between FindUpvalue and closure attachment must survive too) */
+  for (uv = L->OpenUpvalues; uv != NULL; uv = uv->Next) {
+    MLuaGCMarkObject(L, &uv->Header);
   }
 
   /* Mark Args values */
@@ -284,10 +293,13 @@ static void UpdateReferences(MLuaState *L) {
     L->EvalStack[i] = UpdateValue(L, L->EvalStack[i]);
   }
 
-  /* Update Locals values */
-  for (i = 0; i < L->LocalsBase; i++) {
+  /* Update Locals values (including the current frame) */
+  for (i = 0; i < L->LocalsTop; i++) {
     L->Locals[i] = UpdateValue(L, L->Locals[i]);
   }
+
+  /* Re-link the open-upvalue list head (upvalue objects may move) */
+  L->OpenUpvalues = (struct MLuaUpvalue *)UpdatePtr(L, L->OpenUpvalues);
 
   /* Update Args values */
   for (i = 0; i < L->ArgsCount; i++) {
@@ -373,6 +385,9 @@ static void UpdateReferences(MLuaState *L) {
           /* Closed upvalue - update the closed value */
           uv->Closed = UpdateValue(L, uv->Closed);
         }
+        /* Open upvalues' Location points into the Locals array, which never
+         * moves — no update needed. The Next chain may move, though. */
+        uv->Next = (MLuaUpvalue *)UpdatePtr(L, uv->Next);
         break;
       }
       default:

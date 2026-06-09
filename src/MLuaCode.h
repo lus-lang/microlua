@@ -58,6 +58,9 @@ typedef enum {
   OP_DUP = 0x1B,  /* 1B: a → a a  : Duplicate top */
   OP_SWAP = 0x1C, /* 1B: a b → b a : Swap top two */
 
+  /* ===== Upvalue Lifetime (0x1D) ===== */
+  OP_CLOSE = 0x1D, /* 2B: B — : Close open upvalues at local slots >= B */
+
   /* ===== Tables (0x20-0x23) ===== */
   OP_NEWTABLE = 0x20, /* 1B: → tbl    : Create and push empty table */
   OP_GETTABLE = 0x21, /* 1B: t k → v  : v = t[k] */
@@ -203,6 +206,18 @@ struct MLuaProto {
 /* Code Generator State                                                       */
 /* ========================================================================== */
 
+/*
+ * A forward jump awaiting its target.
+ * Short form: a 2-byte OP_JMP/JMPF/JMPT whose I8 offset is patched in place.
+ * Long form (re-parse fallback): the offset lives in a placeholder constant
+ * pushed before OP_JMP_S, so any distance is representable.
+ */
+typedef struct {
+  Size Pos; /* Short: position of the jump opcode. Long: position AFTER the
+               OP_JMP_S (the offset's origin). */
+  int K;    /* -1 for short form; else the placeholder constant index */
+} MLuaFwdJump;
+
 /* Compiler function state */
 typedef struct MLuaFuncState MLuaFuncState;
 struct MLuaFuncState {
@@ -223,18 +238,34 @@ struct MLuaFuncState {
   Size LocalsSize; /* Number of locals */
   Size LocalsCap;  /* Capacity */
   U8 NumLocals;    /* Active local count */
+  U8 MaxLocals;    /* High-water mark of NumLocals. Loops release their slots
+                      at parse time, but the FRAME must reserve the peak:
+                      calls inside a loop body allocate the callee frame at
+                      LocalsTop, which must clear the live loop slots. */
 
-  /* Upvalues */
-  Size UpvaluesSize; /* Number of upvalues */
+  /* Upvalues (compile-time descriptors, copied into Proto at body end) */
+  struct {
+    MLuaValue Name; /* Captured variable name (for dedup) */
+    U8 InStack;     /* 1: captures parent local; 0: captures parent upvalue */
+    U8 Index;       /* Parent local slot or parent upvalue index */
+  } *Upvals;
+  Size UpvalsSize; /* Number of upvalues */
+  Size UpvalsCap;  /* Capacity */
 
-  /* Backpatching for control flow */
-  Size *PatchStack; /* Stack of instruction offsets to patch */
-  Size PatchTop;    /* Top of patch stack */
-  Size PatchCap;    /* Capacity */
+  /* Highest local slot of THIS function captured by any nested function,
+   * or -1 if none. Lets loops skip OP_CLOSE when nothing is captured. */
+  int MaxCapturedSlot;
+
+  /* Set when a jump offset exceeded the I8 range (checked at body end) */
+  Bool JumpOverflow;
+
+  /* Backpatching for control flow (breaks, if-chain end jumps) */
+  MLuaFwdJump *PatchStack; /* Stack of pending forward jumps */
+  Size PatchTop;           /* Top of patch stack */
+  Size PatchCap;           /* Capacity */
 
   /* Loop state */
   Size LoopStart; /* Start of current loop (for continue) */
-  Size BreakList; /* List of break jumps to patch */
 
   /* Line number tracking */
   Size LastLine; /* Last source line for which bytecode was emitted */
@@ -260,20 +291,23 @@ Size MLuaEmitOp(MLuaFuncState *fs, MLuaOpCode op);
 Size MLuaEmitOpB(MLuaFuncState *fs, MLuaOpCode op, U8 b);
 
 /*
- * Emit opcode + 16-bit operand (Little Endian).
- */
-Size MLuaEmitOpK(MLuaFuncState *fs, MLuaOpCode op, U16 k);
-
-/*
  * Emit raw bytes.
  */
 Size MLuaEmitBytes(MLuaFuncState *fs, const U8 *bytes, Size count);
 
 /*
- * Add a constant to the constant pool.
+ * Add a constant to the constant pool (deduplicated).
  * Returns the constant index.
  */
 int MLuaAddConstant(MLuaFuncState *fs, MLuaValue v);
+
+/*
+ * Add a constant WITHOUT deduplication. Use for patchable placeholder
+ * constants (e.g. loop targets) whose final value is written after the
+ * surrounding code has been emitted. A deduplicated slot could be shared
+ * with an unrelated constant, so placeholders must always get a fresh slot.
+ */
+int MLuaAddConstantRaw(MLuaFuncState *fs, MLuaValue v);
 
 /*
  * Add a string constant.

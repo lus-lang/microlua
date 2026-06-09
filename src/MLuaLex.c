@@ -327,9 +327,33 @@ static void ScanNumber(MLuaLexer *lex) {
   lex->Token.Type = TK_NUMBER;
 }
 
+/* Map an escape character to its decoded byte */
+static char DecodeEscape(char c) {
+  switch (c) {
+  case 'n':
+    return '\n';
+  case 't':
+    return '\t';
+  case 'r':
+    return '\r';
+  case '0':
+    return '\0';
+  case 'a':
+    return '\a';
+  case 'b':
+    return '\b';
+  case 'f':
+    return '\f';
+  case 'v':
+    return '\v';
+  default:
+    return c; /* \\ \" \' decode to themselves */
+  }
+}
+
 static void ScanString(MLuaLexer *lex, char quote) {
   const char *start = lex->Current;
-  Size len = 0;
+  Bool hasEscape = FALSE;
 
   while (Peek(lex) != quote && Peek(lex) != '\0') {
     if (Peek(lex) == '\n') {
@@ -339,7 +363,7 @@ static void ScanString(MLuaLexer *lex, char quote) {
 
     if (Peek(lex) == '\\') {
       Advance(lex); /* Skip backslash */
-      /* Handle escape sequences */
+      /* Validate escape sequences */
       switch (Peek(lex)) {
       case 'n':
       case 't':
@@ -352,6 +376,7 @@ static void ScanString(MLuaLexer *lex, char quote) {
       case 'b':
       case 'f':
       case 'v':
+        hasEscape = TRUE;
         break;
       default:
         SetError(lex, "invalid escape sequence");
@@ -360,7 +385,6 @@ static void ScanString(MLuaLexer *lex, char quote) {
     }
 
     Advance(lex);
-    len++;
   }
 
   if (Peek(lex) != quote) {
@@ -371,8 +395,38 @@ static void ScanString(MLuaLexer *lex, char quote) {
   Advance(lex); /* Consume closing quote */
 
   lex->Token.Type = TK_STRING;
-  lex->Token.Value.String.Data = start;
-  lex->Token.Value.String.Length = (Size)(lex->Current - start - 1);
+
+  if (!hasEscape) {
+    /* Zero-copy: point straight into the source */
+    lex->Token.Value.String.Data = start;
+    lex->Token.Value.String.Length = (Size)(lex->Current - start - 1);
+    return;
+  }
+
+  /* Escapes present: decode into a heap buffer (shorter than the raw span) */
+  {
+    Size rawLen = (Size)(lex->Current - start - 1);
+    char *buf = (char *)MLuaAlloc(lex->L, rawLen);
+    Size out = 0;
+    Size i;
+
+    if (!buf) {
+      SetError(lex, "out of memory");
+      return;
+    }
+
+    for (i = 0; i < rawLen; i++) {
+      if (start[i] == '\\' && i + 1 < rawLen) {
+        i++;
+        buf[out++] = DecodeEscape(start[i]);
+      } else {
+        buf[out++] = start[i];
+      }
+    }
+
+    lex->Token.Value.String.Data = buf;
+    lex->Token.Value.String.Length = out;
+  }
 }
 
 static void ScanLongString(MLuaLexer *lex) {

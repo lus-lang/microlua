@@ -47,6 +47,17 @@ void MLuaSetStack(MLuaState *L, int index, MLuaValue v);
 int MLuaGetTop(MLuaState *L);
 
 /*
+ * Get the i-th argument (0-based) of the current C function call,
+ * or nil if out of range. Arguments live in the Args window.
+ */
+MLuaValue MLuaGetArg(MLuaState *L, int index);
+
+/*
+ * Number of arguments passed to the current C function call.
+ */
+int MLuaGetArgCount(MLuaState *L);
+
+/*
  * Set stack top (expand or shrink).
  */
 void MLuaSetTop(MLuaState *L, int index);

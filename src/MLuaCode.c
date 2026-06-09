@@ -64,6 +64,7 @@ Size MLuaOpSize(MLuaOpCode op) {
   case OP_SETARG:
   case OP_GETUPVAL:
   case OP_SETUPVAL:
+  case OP_CLOSE:
   case OP_POP:
   case OP_JMP:
   case OP_JMPF:
@@ -162,14 +163,6 @@ Size MLuaEmitOpB(MLuaFuncState *fs, MLuaOpCode op, U8 b) {
   return MLuaEmitBytes(fs, bytes, 2);
 }
 
-Size MLuaEmitOpK(MLuaFuncState *fs, MLuaOpCode op, U16 k) {
-  U8 bytes[3];
-  bytes[0] = (U8)op;
-  bytes[1] = (U8)(k & 0xFF);        /* Low byte */
-  bytes[2] = (U8)((k >> 8) & 0xFF); /* High byte */
-  return MLuaEmitBytes(fs, bytes, 3);
-}
-
 Size MLuaCodePos(MLuaFuncState *fs) { return fs->Proto->CodeSize; }
 
 /* ========================================================================== */
@@ -219,6 +212,19 @@ int MLuaAddConstant(MLuaFuncState *fs, MLuaValue v) {
   return (int)p->ConstantsSize++;
 }
 
+int MLuaAddConstantRaw(MLuaFuncState *fs, MLuaValue v) {
+  MLuaProto *p = fs->Proto;
+
+  if (p->ConstantsSize >= p->ConstantsCap) {
+    if (!GrowConstants(fs)) {
+      return -1; /* Error */
+    }
+  }
+
+  p->Constants[p->ConstantsSize] = v;
+  return (int)p->ConstantsSize++;
+}
+
 int MLuaAddStringK(MLuaFuncState *fs, const char *str, Size len) {
   MLuaValue s = MLuaStringNew(fs->L, str, len);
   if (IsNil(s)) {
@@ -243,6 +249,13 @@ void MLuaPatchJump(MLuaFuncState *fs, Size jmp, Size target) {
   /* Calculate signed offset from instruction AFTER the jump (jmp + 2 for 2-byte
    * instr) */
   offset = (int)target - (int)(jmp + 2);
+
+  /* Truncating silently would create a wild jump; flag it so the parser can
+   * report "control structure too long" instead of emitting broken code. */
+  if (offset < -128 || offset > 127) {
+    fs->JumpOverflow = TRUE;
+    return;
+  }
 
   /* Store as signed 8-bit */
   p->Code[jmp + 1] = (U8)(I8)offset;
@@ -274,6 +287,7 @@ const char *MLuaOpName(MLuaOpCode op) {
       [OP_POP] = "POP",
       [OP_DUP] = "DUP",
       [OP_SWAP] = "SWAP",
+      [OP_CLOSE] = "CLOSE",
       [OP_NEWTABLE] = "NEWTABLE",
       [OP_GETTABLE] = "GETTABLE",
       [OP_SETTABLE] = "SETTABLE",

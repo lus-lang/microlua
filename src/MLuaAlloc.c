@@ -117,6 +117,7 @@ MLuaState *MLuaNewConstrainedState(void *memory, Size size) {
   L->Locals = (MLuaValue *)(base + L->HeapTop);
   L->LocalsSize = MLUA_DEFAULT_STACK_SIZE;
   L->LocalsBase = 0;
+  L->LocalsTop = 0;
   L->HeapTop += localsBytes;
 
   /* Allocate Args */
@@ -179,6 +180,7 @@ MLuaState *MLuaNewVectorState(void *ctx, MLuaAllocFunc allocFn,
   }
   L->LocalsSize = MLUA_DEFAULT_STACK_SIZE;
   L->LocalsBase = 0;
+  L->LocalsTop = 0;
 
   /* Allocate Args */
   argsBytes = 64 * sizeof(MLuaValue);

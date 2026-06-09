@@ -101,10 +101,14 @@ static MLuaValue ReplRequire(MLuaState *L, const char *modname) {
   }
 
   /* Check if module returned a value.
-   * If EvalTop > savedEvalTop, the top value is the result.
+   * If EvalTop > savedEvalTop, the top value is the result. Reset the
+   * stack to where it was so the module chunk's leftovers don't leak
+   * into the caller's frame (the caller re-pushes the result).
    */
   if (L->EvalTop > savedEvalTop) {
-    return L->EvalStack[L->EvalTop - 1];
+    MLuaValue result = L->EvalStack[L->EvalTop - 1];
+    L->EvalTop = savedEvalTop;
+    return result;
   }
 
   /* No return value - return true to indicate successful load */

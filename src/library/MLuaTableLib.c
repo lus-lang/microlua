@@ -201,10 +201,8 @@ static Bool TableSortCompare(MLuaState *L, MLuaValue a, MLuaValue b,
     MLuaCall(L, 2, 1);
     return IsTruthy(MLuaPop(L));
   } else {
-    /* Default: numeric comparison */
-    double na = MLuaToNumber(a);
-    double nb = MLuaToNumber(b);
-    return na < nb;
+    /* Default: Lua's '<' (numbers numerically, strings lexicographically) */
+    return MLuaCompare(L, OP_LT, a, b);
   }
 }
 
