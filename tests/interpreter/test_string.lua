@@ -154,4 +154,4 @@ test.describe("unicode awareness", function()
     end)
 end)
 
-test.run()
+assert(test.run())

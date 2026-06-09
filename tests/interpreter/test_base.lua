@@ -151,4 +151,4 @@ test.describe("multiple assignment", function()
     end)
 end)
 
-test.run()
+assert(test.run())

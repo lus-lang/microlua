@@ -24,23 +24,29 @@ ninja -C builddir
 ## Tests
 
 ```sh
-meson test -C builddir                                 # internal C tests
-cd tests/interpreter && ../../builddir/mlua test_base.lua   # interpreter suites
+meson test -C builddir            # EVERYTHING: internal C tests + interpreter suites
+meson test -C builddir --suite interpreter   # just the Lua suites
+cd tests/interpreter && ../../builddir/mlua test_base.lua  # one suite by hand
 ```
 
-- `require("_base")` resolves relative to the **cwd** — run interpreter tests from
-  `tests/interpreter/`.
+- Interpreter suites end with `assert(test.run())`, so failures exit non-zero;
+  `require("_base")` resolves relative to the **cwd** (meson sets the workdir).
 - Prefer **interpreter tests** (`tests/interpreter/test_*.lua`, harness in `_base.lua`:
   `describe`/`it`/`expect`) over internal C tests; use C tests only for what Lua can't
-  reach (GC compaction details, C API edge cases).
-- Baseline notes (update as fixed): see "Known baseline" at the bottom.
+  reach (GC compaction details, C API edge cases). `tests/internal/TestCoro.c` runs
+  Lua workloads in small heaps to force real collections — extend it for GC work.
 
 ## Debugging
 
-For crashes, hangs, or timeouts in tests: use **`debug.py`** (an LLDB wrapper that
-interrupts after a timeout and prints a backtrace). Do **not** invoke LLDB directly, and
-do not "simplify" a failing test to pinpoint a crash — debug the real thing and work
-until the crash is fully fixed.
+- Crashes/hangs: use **`debug.py [--timeout N] [exe [args...]]`** (an LLDB wrapper that
+  interrupts after a timeout and prints a backtrace). Do **not** invoke LLDB directly,
+  and do not "simplify" a failing test to pinpoint a crash — debug the real thing and
+  work until it is fully fixed.
+- GC issues: compile with `-DMLUA_GC_TRACE` for per-phase traces +
+  `MLuaGCVerifyHeap()`; `tests/internal/SmallHeapRunner.c` runs any script in a small
+  constrained heap (`small_heap_runner script.lua [heapKB]`) so collections actually
+  fire.
+- The interactive REPL is line-per-chunk; multi-line repros must go in a file.
 
 ## Hard rules (non-negotiable)
 
@@ -81,22 +87,36 @@ until the crash is fully fixed.
 
 ## Invariants that bite
 
-- **The GC moves objects.** After *any* allocation, raw pointers into the heap may be
-  stale — reload them (e.g. re-`GetPtr` values you still hold) and use `MLuaGCRef` for
-  C-held references across allocations.
-- Strings are interned: equal contents ⇒ same pointer. Never mutate string bytes in place.
+- **The GC moves objects — but only at safepoints.** Allocations never collect; they
+  set `GCPending`, and the dispatch loop collects between instructions (reloading
+  frame registers afterwards). C library code therefore never sees objects move
+  mid-operation. C code that holds `MLuaValue`s across a call back into Lua
+  (`MLuaCall`/`MLuaPCall`) must re-read them from its Args window afterwards or hold
+  them via `MLuaGCRef` — a collection may have happened inside.
+- **Every heap allocation is header-prefixed** (`OBJTYPE_RAW` for `MLuaAlloc`
+  payloads) and MOVABLE. If you add a struct that owns a raw buffer, you must (1)
+  mark it in `MLuaGCMarkObject` and (2) remap the pointer in `UpdateReferences` —
+  see the TABLE/PROTO/THREAD cases in `MLuaGC.c`.
+- Saved PCs are byte OFFSETS, functions are GC values; `RELOAD_FRAME` re-derives
+  raw pointers. Never store a raw `MLuaProto*`/code pointer across a safepoint.
+- Strings are interned (equal contents ⇒ same value) and the intern table is WEAK
+  with `MLUA_FALSE` tombstones. Never mutate string bytes in place.
+- `MLuaStringData` on short strings (≤3 bytes) returns one of 4 rotating static
+  buffers — a pointer is valid until the 4th subsequent call.
 - No metatables anywhere — table delegation goes through the table's `Forward` field
   (`table.forward`). `rawget`/`rawset`/`rawequal`/`setmetatable` must not be added.
 - All C functions are **light**: no upvalues, registered via `MLuaRegisterCFunc` /
   `MLuaRegisterLib`. (This is why `coroutine.wrap` is intentionally absent.)
+- C functions receive arguments via `MLuaGetArg(L, i)` (0-based) /
+  `MLuaGetStack(L, i)` (1-based), push results with `MLuaPush`, and return the
+  result count (or -1 with `L->ErrorMsg` set for errors).
 - Table arrays reject holes: writing beyond `len+1` is a runtime error by design.
 - `print`/`require` only exist when the embedder installs callbacks
-  (`MLuaSetOutput`/`MLuaSetRequirer`) — the REPL installs both.
+  (`MLuaSetOutput`/`MLuaSetRequirer`); io/os/dofile/loadfile live in the optional
+  libc extension (`src/extensions/MLuaStdLib.c`) — the REPL provides all of it.
 
-## Known baseline (2026-06-09, post-Phase 2)
+## Status (2026-06-09, post-Phase 5)
 
-All suites green: internal 10/10; interpreter test_base 19, test_string 18,
-test_table 11, test_closure 21, test_coroutine 28 — zero failures. Release
-(freestanding) build clean. Outstanding work tracked in the phase plan:
-GC hardening under memory pressure (Phase 3), io/os + Unicode + library
-parity (Phase 4), meson-wired interpreter tests (Phase 5).
+All suites green via a single `meson test -C builddir`: 10 internal C suites +
+TestCoro (GC stress, ~1700 collections) + 7 interpreter suites (130 cases).
+Freestanding release build clean. Remaining phase: optimizations (Phase 6).

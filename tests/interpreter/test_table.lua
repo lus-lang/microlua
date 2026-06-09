@@ -85,4 +85,4 @@ test.describe("table.remove", function()
     end)
 end)
 
-test.run()
+assert(test.run())
