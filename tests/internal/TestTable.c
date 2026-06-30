@@ -1,0 +1,265 @@
+/*
+ * MicroLua - TestTable.c
+ * Tests for MLuaTable.c (tables)
+ */
+
+#include "MLuaAlloc.h"
+#include "MLuaCore.h"
+#include "MLuaString.h"
+#include "MLuaTable.h"
+#include <stdio.h>
+
+static int TestsPassed = 0;
+static int TestsFailed = 0;
+
+#define TEST(name) static void Test_##name(void)
+#define RUN_TEST(name)                                                         \
+  do {                                                                         \
+    printf("  Testing %s... ", #name);                                         \
+    Test_##name();                                                             \
+    printf("OK\n");                                                            \
+    TestsPassed++;                                                             \
+  } while (0)
+
+#define ASSERT(expr)                                                           \
+  do {                                                                         \
+    if (!(expr)) {                                                             \
+      printf("FAILED\n    Assertion failed: %s\n", #expr);                     \
+      TestsFailed++;                                                           \
+      return;                                                                  \
+    }                                                                          \
+  } while (0)
+
+#define ASSERT_EQ(a, b) ASSERT((a) == (b))
+#define ASSERT_NE(a, b) ASSERT((a) != (b))
+
+#define TEST_HEAP_SIZE (128 * 1024)
+static U8 TestHeap[TEST_HEAP_SIZE] __attribute__((aligned(8)));
+
+/* ========================================================================== */
+/* Creation Tests                                                             */
+/* ========================================================================== */
+
+TEST(Create_Empty) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  ASSERT_NE(L, NULL);
+
+  MLuaValue tbl = MLuaTableNew(L);
+  ASSERT(IsTable(tbl));
+  ASSERT_EQ(MLuaTableLen(tbl), 0);
+}
+
+TEST(Create_Sized) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  ASSERT_NE(L, NULL);
+
+  MLuaValue tbl = MLuaTableNewSized(L, 10, 5);
+  ASSERT(IsTable(tbl));
+  ASSERT_EQ(MLuaTableLen(tbl), 0);
+}
+
+/* ========================================================================== */
+/* Array Part Tests                                                           */
+/* ========================================================================== */
+
+TEST(Array_SetGet) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  ASSERT_NE(L, NULL);
+
+  MLuaValue tbl = MLuaTableNew(L);
+  ASSERT(MLuaTableSet(L, tbl, MakeInt(1), MakeInt(100)));
+
+  MLuaValue v = MLuaTableGet(L, tbl, MakeInt(1));
+  ASSERT_EQ(GetInt(v), 100);
+  ASSERT_EQ(MLuaTableLen(tbl), 1);
+}
+
+TEST(Array_Sequential) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  ASSERT_NE(L, NULL);
+
+  MLuaValue tbl = MLuaTableNew(L);
+  ASSERT(MLuaTableSet(L, tbl, MakeInt(1), MakeInt(10)));
+  ASSERT(MLuaTableSet(L, tbl, MakeInt(2), MakeInt(20)));
+  ASSERT(MLuaTableSet(L, tbl, MakeInt(3), MakeInt(30)));
+
+  ASSERT_EQ(MLuaTableLen(tbl), 3);
+  ASSERT_EQ(GetInt(MLuaTableGet(L, tbl, MakeInt(2))), 20);
+}
+
+TEST(Array_Append) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  ASSERT_NE(L, NULL);
+
+  MLuaValue tbl = MLuaTableNew(L);
+  ASSERT(MLuaTableAppend(L, tbl, MakeInt(1)));
+  ASSERT(MLuaTableAppend(L, tbl, MakeInt(2)));
+  ASSERT(MLuaTableAppend(L, tbl, MakeInt(3)));
+
+  ASSERT_EQ(MLuaTableLen(tbl), 3);
+  ASSERT_EQ(GetInt(MLuaTableGet(L, tbl, MakeInt(3))), 3);
+}
+
+TEST(Array_NoHoles) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  ASSERT_NE(L, NULL);
+
+  MLuaValue tbl = MLuaTableNew(L);
+  ASSERT(MLuaTableSet(L, tbl, MakeInt(1), MakeInt(10)));
+
+  /* Trying to set index 3 without index 2 should fail (hole) */
+  Bool result = MLuaTableSet(L, tbl, MakeInt(3), MakeInt(30));
+  /* Actually goes to hash part, not an error */
+  ASSERT(result);
+  /* But array length should still be 1 */
+  ASSERT_EQ(MLuaTableLen(tbl), 1);
+}
+
+/* ========================================================================== */
+/* Hash Part Tests                                                            */
+/* ========================================================================== */
+
+TEST(Hash_StringKey) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  ASSERT_NE(L, NULL);
+
+  MLuaValue tbl = MLuaTableNew(L);
+  MLuaValue key = MLuaStringNew(L, "name", 4);
+
+  ASSERT(MLuaTableSet(L, tbl, key, MakeInt(42)));
+  ASSERT_EQ(GetInt(MLuaTableGet(L, tbl, key)), 42);
+}
+
+TEST(Hash_Multiple) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  ASSERT_NE(L, NULL);
+
+  MLuaValue tbl = MLuaTableNew(L);
+  MLuaValue k1 = MLuaStringNew(L, "one", 3);
+  MLuaValue k2 = MLuaStringNew(L, "two", 3);
+  MLuaValue k3 = MLuaStringNew(L, "three", 5);
+
+  ASSERT(MLuaTableSet(L, tbl, k1, MakeInt(1)));
+  ASSERT(MLuaTableSet(L, tbl, k2, MakeInt(2)));
+  ASSERT(MLuaTableSet(L, tbl, k3, MakeInt(3)));
+
+  ASSERT_EQ(GetInt(MLuaTableGet(L, tbl, k1)), 1);
+  ASSERT_EQ(GetInt(MLuaTableGet(L, tbl, k2)), 2);
+  ASSERT_EQ(GetInt(MLuaTableGet(L, tbl, k3)), 3);
+}
+
+TEST(Hash_Delete) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  ASSERT_NE(L, NULL);
+
+  MLuaValue tbl = MLuaTableNew(L);
+  MLuaValue key = MLuaStringNew(L, "key", 3);
+
+  ASSERT(MLuaTableSet(L, tbl, key, MakeInt(100)));
+  ASSERT(!IsNil(MLuaTableGet(L, tbl, key)));
+
+  /* Delete by setting to nil */
+  ASSERT(MLuaTableSet(L, tbl, key, MLUA_NIL));
+  ASSERT(IsNil(MLuaTableGet(L, tbl, key)));
+}
+
+/* ========================================================================== */
+/* Forward Delegation Tests                                                   */
+/* ========================================================================== */
+
+TEST(Forward_Basic) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  ASSERT_NE(L, NULL);
+
+  MLuaValue proto = MLuaTableNew(L);
+  MLuaValue child = MLuaTableNew(L);
+
+  MLuaValue key = MLuaStringNew(L, "inherited", 9);
+  ASSERT(MLuaTableSet(L, proto, key, MakeInt(999)));
+
+  MLuaTableSetForward(child, proto);
+
+  /* Child should find value in prototype */
+  ASSERT_EQ(GetInt(MLuaTableGet(L, child, key)), 999);
+}
+
+TEST(Forward_Override) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  ASSERT_NE(L, NULL);
+
+  MLuaValue proto = MLuaTableNew(L);
+  MLuaValue child = MLuaTableNew(L);
+
+  MLuaValue key = MLuaStringNew(L, "value", 5);
+  ASSERT(MLuaTableSet(L, proto, key, MakeInt(1)));
+  ASSERT(MLuaTableSet(L, child, key, MakeInt(2)));
+
+  MLuaTableSetForward(child, proto);
+
+  /* Child's value should override prototype */
+  ASSERT_EQ(GetInt(MLuaTableGet(L, child, key)), 2);
+}
+
+/* ========================================================================== */
+/* Iteration Tests                                                            */
+/* ========================================================================== */
+
+TEST(Iteration_Array) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  ASSERT_NE(L, NULL);
+
+  MLuaValue tbl = MLuaTableNew(L);
+  ASSERT(MLuaTableAppend(L, tbl, MakeInt(10)));
+  ASSERT(MLuaTableAppend(L, tbl, MakeInt(20)));
+
+  MLuaValue value;
+  MLuaValue key = MLuaTableNext(tbl, MLUA_NIL, &value);
+
+  ASSERT(!IsNil(key));
+  ASSERT_EQ(GetInt(key), 1);
+  ASSERT_EQ(GetInt(value), 10);
+
+  key = MLuaTableNext(tbl, key, &value);
+  ASSERT(!IsNil(key));
+  ASSERT_EQ(GetInt(key), 2);
+  ASSERT_EQ(GetInt(value), 20);
+
+  key = MLuaTableNext(tbl, key, &value);
+  ASSERT(IsNil(key)); /* End of iteration */
+}
+
+/* ========================================================================== */
+/* Main                                                                       */
+/* ========================================================================== */
+
+int main(void) {
+  printf("MicroLua Table Tests\n");
+  printf("====================\n\n");
+
+  printf("Creation:\n");
+  RUN_TEST(Create_Empty);
+  RUN_TEST(Create_Sized);
+
+  printf("\nArray Part:\n");
+  RUN_TEST(Array_SetGet);
+  RUN_TEST(Array_Sequential);
+  RUN_TEST(Array_Append);
+  RUN_TEST(Array_NoHoles);
+
+  printf("\nHash Part:\n");
+  RUN_TEST(Hash_StringKey);
+  RUN_TEST(Hash_Multiple);
+  RUN_TEST(Hash_Delete);
+
+  printf("\nForward Delegation:\n");
+  RUN_TEST(Forward_Basic);
+  RUN_TEST(Forward_Override);
+
+  printf("\nIteration:\n");
+  RUN_TEST(Iteration_Array);
+
+  printf("\n====================\n");
+  printf("Results: %d passed, %d failed\n", TestsPassed, TestsFailed);
+
+  return TestsFailed > 0 ? 1 : 0;
+}
