@@ -299,6 +299,9 @@ static void *CoreAlloc(MLuaState *L, Size size) {
   }
 
   /* Constrained mode: bump-pointer allocation */
+  if (size > (Size)-1 - (MLUA_ALIGNMENT - 1)) {
+    return NULL;
+  }
   aligned = ALIGN_UP(size, MLUA_ALIGNMENT);
 
   /*
@@ -307,6 +310,10 @@ static void *CoreAlloc(MLuaState *L, Size size) {
    * reloadable from the frames. Collecting here would move objects out
    * from under C code mid-operation.
    */
+  if (aligned > (Size)-1 - L->HeapTop) {
+    return NULL;
+  }
+
   if (L->GCEnabled && L->HeapTop + aligned > L->GCThreshold) {
     L->GCPending = TRUE;
   }
@@ -341,6 +348,9 @@ void *MLuaAlloc(MLuaState *L, Size size) {
    * would make compaction useless for a bump allocator). Unmarked raw
    * buffers — transient scratch, dead owners — are reclaimed.
    */
+  if (size > (Size)-1 - sizeof(MLuaGCHeader)) {
+    return NULL;
+  }
   totalSize = sizeof(MLuaGCHeader) + size;
   header = (MLuaGCHeader *)CoreAlloc(L, totalSize);
   if (!header) {
@@ -363,6 +373,9 @@ MLuaGCHeader *MLuaAllocObject(MLuaState *L, U8 objType, Size dataSize) {
   MLuaGCHeader *header;
 
   /* Calculate total size: header + data */
+  if (dataSize > (Size)-1 - sizeof(MLuaGCHeader)) {
+    return NULL;
+  }
   totalSize = sizeof(MLuaGCHeader) + dataSize;
 
   header = (MLuaGCHeader *)CoreAlloc(L, totalSize);

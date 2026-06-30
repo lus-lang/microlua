@@ -72,6 +72,9 @@ MLuaValue MLuaTableNewSized(MLuaState *L, Size arrayHint, Size hashHint) {
 
   /* Pre-allocate array part if hint given */
   if (arrayHint > 0) {
+    if (arrayHint > (Size)-1 / sizeof(MLuaValue)) {
+      return MakePtr(gch);
+    }
     Size arrayBytes = arrayHint * sizeof(MLuaValue);
     th->Array = (MLuaValue *)MLuaAlloc(L, arrayBytes);
     if (th->Array) {
@@ -84,6 +87,9 @@ MLuaValue MLuaTableNewSized(MLuaState *L, Size arrayHint, Size hashHint) {
 
   /* Pre-allocate hash part if hint given */
   if (hashHint > 0) {
+    if (hashHint > (Size)-1 / sizeof(MLuaTableNode)) {
+      return MakePtr(gch);
+    }
     Size hashBytes = hashHint * sizeof(MLuaTableNode);
     th->Nodes = (MLuaTableNode *)MLuaAlloc(L, hashBytes);
     if (th->Nodes) {
@@ -120,9 +126,14 @@ static Bool IsPositiveInt(MLuaValue key, Size *index) {
 
 static Bool ArrayGrow(MLuaState *L, MLuaTableHeader *th, Size newSize) {
   Size oldSize = th->ArraySize;
-  Size newBytes = newSize * sizeof(MLuaValue);
+  Size newBytes;
   MLuaValue *newArray;
   Size i;
+
+  if (newSize > (Size)-1 / sizeof(MLuaValue)) {
+    return FALSE;
+  }
+  newBytes = newSize * sizeof(MLuaValue);
 
   newArray = (MLuaValue *)MLuaAlloc(L, newBytes);
   if (!newArray) {
@@ -197,9 +208,18 @@ static Bool ArraySet(MLuaState *L, MLuaTableHeader *th, Size index,
 static Bool HashGrow(MLuaState *L, MLuaTableHeader *th) {
   Size oldCap = th->NodeCapacity;
   MLuaTableNode *oldNodes = th->Nodes;
-  Size newCap = (oldCap == 0) ? MLUA_TABLE_INITIAL_HASH_SIZE : oldCap * 2;
-  Size newBytes = newCap * sizeof(MLuaTableNode);
+  Size newCap;
+  Size newBytes;
   Size i;
+
+  if (oldCap > ((Size)-1 / 2)) {
+    return FALSE;
+  }
+  newCap = (oldCap == 0) ? MLUA_TABLE_INITIAL_HASH_SIZE : oldCap * 2;
+  if (newCap > (Size)-1 / sizeof(MLuaTableNode)) {
+    return FALSE;
+  }
+  newBytes = newCap * sizeof(MLuaTableNode);
 
   th->Nodes = (MLuaTableNode *)MLuaAlloc(L, newBytes);
   if (!th->Nodes) {
@@ -383,15 +403,27 @@ Bool MLuaTableSet(MLuaState *L, MLuaValue tbl, MLuaValue key, MLuaValue value) {
   gch = (MLuaGCHeader *)GetPtr(tbl);
   th = MLUA_TABLEHEADER(gch);
 
-  /* Try array part for positive integers */
+  /* Positive integer keys belong to the contiguous array part. */
   if (IsPositiveInt(key, &index)) {
-    /* Only use array if it doesn't create a hole */
     if (index <= th->ArrayLen + 1) {
       return ArraySet(L, th, index, value);
     }
+    /*
+     * index > len + 1: storing a value here would leave a gap in the array
+     * part, and holes are a runtime error by design (README / SPEC.BROAD).
+     * Assigning nil is just a no-op delete of an absent element, so it must
+     * succeed -- but it must NOT fall through to the hash part. Falling
+     * through is exactly the bug this guards against: a sparse integer write
+     * silently masquerading as a successful store in the hash.
+     */
+    if (IsNil(value)) {
+      return TRUE;
+    }
+    L->ErrorMsg = "attempt to create a hole in a table array";
+    return FALSE;
   }
 
-  /* Fall back to hash part */
+  /* All other keys (strings, non-positive integers, ...) go to the hash. */
   return HashSet(L, th, key, value);
 }
 
@@ -527,8 +559,13 @@ MLuaStatus MLuaTableSetSafe(MLuaState *L, MLuaValue tbl, MLuaValue key,
     return MLUA_ERR_RUNTIME;
   }
 
+  L->ErrorMsg = NULL;
   if (!MLuaTableSet(L, tbl, key, value)) {
-    L->ErrorMsg = "table operation failed";
+    /* MLuaTableSet sets a specific message for the hole case; fall back to a
+       generic one for other failures (e.g. allocation failure). */
+    if (!L->ErrorMsg) {
+      L->ErrorMsg = "table operation failed";
+    }
     return MLUA_ERR_RUNTIME;
   }
 

@@ -358,9 +358,15 @@ static char *SlurpFile(const char *path, Size *outLen) {
   if (!f) {
     return NULL;
   }
-  fseek(f, 0, SEEK_END);
+  if (fseek(f, 0, SEEK_END) != 0) {
+    fclose(f);
+    return NULL;
+  }
   size = ftell(f);
-  fseek(f, 0, SEEK_SET);
+  if (size < 0 || fseek(f, 0, SEEK_SET) != 0) {
+    fclose(f);
+    return NULL;
+  }
   buf = malloc((size_t)size + 1);
   if (!buf) {
     fclose(f);

@@ -7,10 +7,7 @@
 #define MLUA_GC_H
 
 #include "MLuaCore.h"
-#include "MLuaValue.h"
-
-/* Forward declaration */
-typedef struct MLuaState MLuaState;
+#include "MLuaValue.h" /* provides the MLuaState forward typedef */
 
 /* ========================================================================== */
 /* GC Phases                                                                  */
@@ -30,8 +27,6 @@ typedef struct MLuaState MLuaState;
  * allocations (which may trigger GC), it must use GCRef handles.
  * These handles are updated automatically if objects move.
  */
-
-typedef struct MLuaGCRef MLuaGCRef;
 
 struct MLuaGCRef {
   MLuaGCRef *Prev; /* Linked list for tracking */

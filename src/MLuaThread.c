@@ -13,6 +13,7 @@
 #include "MLuaThread.h"
 #include "MLuaFunc.h"
 #include "MLuaGC.h"
+#include "MLuaString.h"
 #include "MLuaVM.h"
 
 /* ========================================================================== */
@@ -144,7 +145,7 @@ MLuaValue MLuaThreadNew(MLuaState *L, MLuaValue func) {
   th->BaseCCalls = 0;
   th->XferBase = 0;
   th->XferCount = 0;
-  th->ErrorMsg = NULL;
+  th->ErrorValue = MLUA_NIL;
 
   return MakePtr(gch);
 }
@@ -229,6 +230,11 @@ int MLuaThreadResume(MLuaState *L, MLuaValue thread, const MLuaValue *argv,
     L->CCallDepth--;
   }
 
+  if (status != MLUA_OK && status != MLUA_YIELD) {
+    const char *msg = L->ErrorMsg ? L->ErrorMsg : "error";
+    th->ErrorValue = MLuaStringNew(L, msg, StrLen(msg));
+  }
+
   /* Capture the thread's final state, switch back to the resumer */
   SaveCtx(L, &th->Ctx);
 
@@ -263,7 +269,9 @@ int MLuaThreadResume(MLuaState *L, MLuaValue thread, const MLuaValue *argv,
 
   /* Error: the thread dies; its frames were already unwound by RunVM */
   th->Status = THREAD_DEAD;
-  th->ErrorMsg = L->ErrorMsg;
+  if (IsNil(th->ErrorValue)) {
+    th->ErrorValue = MLuaStringNew(L, "error", 5);
+  }
   return status;
 }
 

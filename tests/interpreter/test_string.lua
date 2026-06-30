@@ -56,6 +56,14 @@ test.describe("string.match", function()
         local result = string.match("hello", "%d+")
         test.expect(result).toBeNil()
     end)
+
+    test.it("matches patterns by byte by design", function()
+        local m = string.match("éa", ".")
+        test.expect(#m).toBe(1)
+        local a, b = string.find("éa", "a")
+        test.expect(a).toBe(3)
+        test.expect(b).toBe(3)
+    end)
 end)
 
 test.describe("string.pack/unpack", function()
@@ -145,12 +153,69 @@ test.describe("unicode awareness", function()
         test.expect(string.lower("HÉLLO")).toBe("hÉllo")
     end)
 
+    test.it("dumps functions larger than the old fixed buffer", function()
+        local big = string.rep("x", 20000)
+        local f = load("return '" .. big .. "'")
+        local dumped = string.dump(f)
+        local a, b, c, d = string.byte(dumped, 1, 4)
+        test.expect(a).toBe(27)
+        test.expect(b).toBe(77)
+        test.expect(c).toBe(76)
+        test.expect(d).toBe(117)
+        test.expect(#dumped > 20000).toBe(true)
+    end)
+
     test.it("case mapping handles long strings", function()
         local big = string.rep("ab", 800) -- 1600 bytes > the old 1024 cap
         local up = string.upper(big)
         test.expect(string.len(up)).toBe(1600)
         test.expect(string.sub(up, 1, 2)).toBe("AB")
         test.expect(string.sub(up, -2)).toBe("AB")
+    end)
+end)
+
+test.describe("concatenation", function()
+    test.it("joins two strings", function()
+        test.expect("foo" .. "bar").toBe("foobar")
+    end)
+
+    test.it("chains many operands (all-string fast path)", function()
+        test.expect("a" .. "bb" .. "ccc" .. "dddd").toBe("abbcccdddd")
+        local a, b, c = "hello", " ", "world"
+        test.expect(a .. b .. c).toBe("hello world")
+    end)
+
+    test.it("handles empty operands", function()
+        test.expect("" .. "x").toBe("x")
+        test.expect("x" .. "").toBe("x")
+        test.expect("" .. "").toBe("")
+    end)
+
+    test.it("produces short (<=3 byte) results correctly", function()
+        test.expect("a" .. "b").toBe("ab")
+        test.expect("a" .. "b" .. "c").toBe("abc")
+    end)
+
+    test.it("interns equal results to the same value", function()
+        local x = "ab" .. "cdef"
+        local y = "abc" .. "def"
+        test.expect(x).toBe(y)          -- equal contents
+        test.expect(x == y).toBeTrue()  -- and identical (interned)
+    end)
+
+    test.it("converts numbers in concatenation (number path)", function()
+        test.expect("n=" .. 42).toBe("n=42")
+        test.expect(1 .. 2 .. 3).toBe("123")
+        test.expect("x" .. 1 .. "y" .. 2).toBe("x1y2")
+        test.expect("neg" .. -7).toBe("neg-7")
+    end)
+
+    test.it("builds long strings in a loop", function()
+        local s = ""
+        for i = 1, 50 do s = s .. "ab" end
+        test.expect(#s).toBe(100)
+        test.expect(string.sub(s, 1, 4)).toBe("abab")
+        test.expect(string.sub(s, -2)).toBe("ab")
     end)
 end)
 

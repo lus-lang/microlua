@@ -96,6 +96,8 @@ Size MLuaDoubleToStr(double d, char *buf, int prec) {
   /* Default precision */
   if (prec < 0)
     prec = 14;
+  if (prec > 32)
+    prec = 32;
 
   /* Split into integer and fractional parts */
   intPart = (I64)d;
@@ -424,10 +426,14 @@ Bool MLuaStrToNumber(const char *s, Size len, double *out) {
       } else if (p < end && *p == '+')
         p++;
 
-      while (p < end && *p >= '0' && *p <= '9') {
-        exp = exp * 10 + (*p - '0');
-        p++;
-      }
+        while (p < end && *p >= '0' && *p <= '9') {
+          if (exp < 1024) {
+            exp = exp * 10 + (*p - '0');
+            if (exp > 1024)
+              exp = 1024;
+          }
+          p++;
+        }
       exp *= expSign;
 
       /* Apply binary exponent */
@@ -469,7 +475,11 @@ Bool MLuaStrToNumber(const char *s, Size len, double *out) {
         p++;
 
       while (p < end && *p >= '0' && *p <= '9') {
-        exp = exp * 10 + (*p - '0');
+        if (exp < 308) {
+          exp = exp * 10 + (*p - '0');
+          if (exp > 308)
+            exp = 308;
+        }
         p++;
       }
       exp *= expSign;
@@ -637,7 +647,11 @@ Size MLuaFormat(MLuaState *L, const char *fmt, Size fmtLen, MLuaValue *args,
 
       /* Parse width */
       while (i < fmtLen && fmt[i] >= '0' && fmt[i] <= '9') {
-        width = width * 10 + (fmt[i] - '0');
+        if (width < 4096) {
+          width = width * 10 + (fmt[i] - '0');
+          if (width > 4096)
+            width = 4096;
+        }
         i++;
       }
 
@@ -646,7 +660,11 @@ Size MLuaFormat(MLuaState *L, const char *fmt, Size fmtLen, MLuaValue *args,
         prec = 0;
         i++;
         while (i < fmtLen && fmt[i] >= '0' && fmt[i] <= '9') {
-          prec = prec * 10 + (fmt[i] - '0');
+          if (prec < 4096) {
+            prec = prec * 10 + (fmt[i] - '0');
+            if (prec > 4096)
+              prec = 4096;
+          }
           i++;
         }
       }

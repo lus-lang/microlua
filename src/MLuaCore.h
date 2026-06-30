@@ -125,6 +125,9 @@ extern void MLuaAssertFail(const char *expr, const char *file, int line);
 #define MathAcos(x) __builtin_acos(x)
 #define MathAtan(x) __builtin_atan(x)
 #define MathAtan2(y, x) __builtin_atan2((y), (x))
+#define MathCosh(x) __builtin_cosh(x)
+#define MathSinh(x) __builtin_sinh(x)
+#define MathTanh(x) __builtin_tanh(x)
 #define MathExp(x) __builtin_exp(x)
 #define MathLog(x) __builtin_log(x)
 #define MathLog10(x) __builtin_log10(x)
@@ -149,6 +152,9 @@ double MathAsin(double x);
 double MathAcos(double x);
 double MathAtan(double x);
 double MathAtan2(double y, double x);
+double MathCosh(double x);
+double MathSinh(double x);
+double MathTanh(double x);
 double MathExp(double x);
 double MathLog(double x);
 double MathLog10(double x);

@@ -22,6 +22,7 @@ typedef struct {
   Size ErrorLine;    /* Error line number */
   Bool LongJumps;    /* Emit long-form forward jumps (set on the re-parse
                         after a short I8 jump offset overflowed) */
+  int ParseDepth;    /* Guard recursive-descent parser stack depth */
 } MLuaParser;
 
 /* ========================================================================== */

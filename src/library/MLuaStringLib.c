@@ -7,6 +7,7 @@
 #include "../MLuaCode.h"
 #include "../MLuaConvert.h"
 #include "../MLuaCore.h"
+#include "../MLuaDump.h"
 #include "../MLuaFunc.h"
 #include "../MLuaString.h"
 #include "../MLuaUTF8.h"
@@ -112,182 +113,27 @@ static int StringChar(MLuaState *L) {
 /* string.dump                                                                */
 /* ========================================================================== */
 
-/*
- * MicroLua bytecode format:
- * [4] Magic: "\x1bMLu"
- * [1] Version: 0x01
- * [1] Format: 0x00 (official)
- * [1] Endian: 0x01 (little)
- * [1] Int size: sizeof(int)
- * [1] Size_t size: sizeof(Size)
- * [1] Instruction size: 1 (variable)
- * [1] Number size: 8 (double)
- * Then follows the function prototype
- */
-
-/* Helper: write a byte to buffer */
-static Size DumpByte(char *buf, Size pos, Size cap, U8 b) {
-  if (pos < cap)
-    buf[pos] = (char)b;
-  return pos + 1;
-}
-
-/* Helper: write a 32-bit int (little endian) */
-static Size DumpInt(char *buf, Size pos, Size cap, U32 val) {
-  int i;
-  for (i = 0; i < 4 && pos < cap; i++) {
-    buf[pos++] = (char)(val & 0xFF);
-    val >>= 8;
-  }
-  return pos;
-}
-
-/* Helper: write a Size (little endian, 4 or 8 bytes depending on platform) */
-static Size DumpSize(char *buf, Size pos, Size cap, Size val) {
-  Size i;
-  for (i = 0; i < sizeof(Size) && pos < cap; i++) {
-    buf[pos++] = (char)(val & 0xFF);
-    val >>= 8;
-  }
-  return pos;
-}
-
-/* Helper: write bytes */
-static Size DumpBytes(char *buf, Size pos, Size cap, const U8 *data, Size len) {
-  Size i;
-  for (i = 0; i < len && pos < cap; i++) {
-    buf[pos++] = (char)data[i];
-  }
-  return pos;
-}
-
-/* Helper: write a double */
-static Size DumpNumber(char *buf, Size pos, Size cap, double d) {
-  union {
-    double d;
-    U8 b[8];
-  } u;
-  Size i;
-  u.d = d;
-  for (i = 0; i < 8 && pos < cap; i++) {
-    buf[pos++] = (char)u.b[i];
-  }
-  return pos;
-}
-
-/* Forward declaration */
-static Size DumpProto(MLuaState *L, MLuaProto *proto, char *buf, Size pos,
-                      Size cap);
-
-/* Dump a constant value */
-static Size DumpValue(MLuaState *L, MLuaValue v, char *buf, Size pos,
-                      Size cap) {
-  UNUSED(L);
-  if (IsNil(v)) {
-    pos = DumpByte(buf, pos, cap, 0); /* type nil */
-  } else if (IsFalse(v)) {
-    pos = DumpByte(buf, pos, cap, 1); /* type false */
-  } else if (IsTrue(v)) {
-    pos = DumpByte(buf, pos, cap, 2); /* type true */
-  } else if (IsInt(v)) {
-    pos = DumpByte(buf, pos, cap, 3); /* type int */
-    pos = DumpInt(buf, pos, cap, (U32)GetInt(v));
-  } else if (MLuaIsNumber(v)) {
-    pos = DumpByte(buf, pos, cap, 4); /* type number */
-    pos = DumpNumber(buf, pos, cap, MLuaToNumber(v));
-  } else { /* String */
-    const char *s = MLuaStringData(v);
-    Size slen = MLuaStringLen(v);
-    pos = DumpByte(buf, pos, cap, 5); /* type string */
-    pos = DumpSize(buf, pos, cap, slen);
-    pos = DumpBytes(buf, pos, cap, (const U8 *)s, slen);
-  }
-  return pos;
-}
-
-/* Dump a function prototype */
-static Size DumpProto(MLuaState *L, MLuaProto *proto, char *buf, Size pos,
-                      Size cap) {
-  Size i;
-
-  /* Source (for debug) */
-  pos = DumpValue(L, proto->Source, buf, pos, cap);
-
-  /* Line defined */
-  pos = DumpInt(buf, pos, cap, (U32)proto->LineDefined);
-
-  /* Params, vararg, maxstack */
-  pos = DumpByte(buf, pos, cap, proto->NumParams);
-  pos = DumpByte(buf, pos, cap, proto->IsVararg);
-  pos = DumpByte(buf, pos, cap, proto->MaxStackSize);
-
-  /* Code */
-  pos = DumpSize(buf, pos, cap, proto->CodeSize);
-  pos = DumpBytes(buf, pos, cap, proto->Code, proto->CodeSize);
-
-  /* Constants */
-  pos = DumpSize(buf, pos, cap, proto->ConstantsSize);
-  for (i = 0; i < proto->ConstantsSize; i++) {
-    pos = DumpValue(L, proto->Constants[i], buf, pos, cap);
-  }
-
-  /* Upvalues */
-  pos = DumpSize(buf, pos, cap, proto->UpvaluesSize);
-  for (i = 0; i < proto->UpvaluesSize; i++) {
-    pos = DumpByte(buf, pos, cap, proto->Upvalues[i].InStack);
-    pos = DumpByte(buf, pos, cap, proto->Upvalues[i].Index);
-  }
-
-  /* Nested prototypes */
-  pos = DumpSize(buf, pos, cap, proto->ProtosSize);
-  for (i = 0; i < proto->ProtosSize; i++) {
-    pos = DumpProto(L, proto->Protos[i], buf, pos, cap);
-  }
-
-  return pos;
-}
-
 static int StringDump(MLuaState *L) {
   MLuaValue func = MLuaGetStack(L, 1);
-  char buf[16384];
-  Size pos = 0;
-  Size cap = sizeof(buf);
-  MLuaClosure *cl;
-  MLuaProto *proto;
+  Size size;
+  char *buf;
 
-  /* Check if it's a function */
-  if (!IsPtr(func)) {
+  size = MLuaDumpFunction(L, func, NULL, 0);
+  if (size == 0) {
     MLuaPush(L, MLUA_NIL);
     MLuaPush(L, MLuaStringNew(L, "cannot dump C functions", 23));
     return 2;
   }
 
-  cl = (MLuaClosure *)GetPtr(func);
-  proto = cl->Proto;
-
-  if (!proto) {
+  buf = (char *)MLuaAlloc(L, size);
+  if (!buf) {
     MLuaPush(L, MLUA_NIL);
-    MLuaPush(L, MLuaStringNew(L, "cannot dump C functions", 23));
+    MLuaPush(L, MLuaStringNew(L, "out of memory", 13));
     return 2;
   }
 
-  /* Write header */
-  pos = DumpByte(buf, pos, cap, 0x1B); /* ESC */
-  pos = DumpByte(buf, pos, cap, 'M');
-  pos = DumpByte(buf, pos, cap, 'L');
-  pos = DumpByte(buf, pos, cap, 'u');
-  pos = DumpByte(buf, pos, cap, 0x01); /* Version */
-  pos = DumpByte(buf, pos, cap, 0x00); /* Format */
-  pos = DumpByte(buf, pos, cap, 0x01); /* Little endian */
-  pos = DumpByte(buf, pos, cap, sizeof(int));
-  pos = DumpByte(buf, pos, cap, sizeof(Size));
-  pos = DumpByte(buf, pos, cap, 1); /* Instruction size (variable) */
-  pos = DumpByte(buf, pos, cap, 8); /* Number size (double) */
-
-  /* Dump prototype */
-  pos = DumpProto(L, proto, buf, pos, cap);
-
-  MLuaPush(L, MLuaStringNew(L, buf, pos));
+  MLuaDumpFunction(L, func, buf, size);
+  MLuaPush(L, MLuaStringNew(L, buf, size));
   return 1;
 }
 
@@ -303,7 +149,10 @@ typedef struct {
   const char *PatEnd;
   const char *CapStarts[32];
   const char *CapEnds[32];
+  const char *OpenCapStart;
   int NumCaptures;
+  int CaptureDepth;
+  const char *Error;
 } MatchState;
 
 /* Check if character matches class c */
@@ -450,12 +299,28 @@ static const char *PatMatch(MatchState *ms, const char *s, const char *p) {
 
     /* Handle captures */
     if (*p == '(') {
-      ms->CapStarts[ms->NumCaptures] = s;
+      if (ms->CaptureDepth != 0) {
+        ms->Error = "nested captures are not supported";
+        return NULL;
+      }
+      if (ms->NumCaptures >= 32) {
+        ms->Error = "too many captures";
+        return NULL;
+      }
+      ms->OpenCapStart = s;
+      ms->CaptureDepth = 1;
       p++;
       continue;
     }
     if (*p == ')') {
+      if (ms->CaptureDepth == 0) {
+        ms->Error = "invalid pattern capture";
+        return NULL;
+      }
+      ms->CapStarts[ms->NumCaptures] = ms->OpenCapStart;
       ms->CapEnds[ms->NumCaptures++] = s;
+      ms->OpenCapStart = NULL;
+      ms->CaptureDepth = 0;
       p++;
       continue;
     }
@@ -487,6 +352,10 @@ static const char *PatMatch(MatchState *ms, const char *s, const char *p) {
       return NULL;
     s++;
     p += itemLen;
+  }
+  if (ms->CaptureDepth != 0) {
+    ms->Error = "unfinished capture";
+    return NULL;
   }
   return s;
 }
@@ -548,10 +417,17 @@ static int StringFind(MLuaState *L) {
   ms.PatStart = pattern;
   ms.PatEnd = pattern + plen;
   ms.NumCaptures = 0;
+  ms.CaptureDepth = 0;
+  ms.OpenCapStart = NULL;
+  ms.Error = NULL;
 
   /* Check for anchor */
   if (*pattern == '^') {
     const char *end = PatMatch(&ms, s + init - 1, pattern + 1);
+    if (ms.Error) {
+      L->ErrorMsg = ms.Error;
+      return -1;
+    }
     if (end) {
       MLuaPush(L, MakeInt((I32)init));
       MLuaPush(L, MakeInt((I32)(init + (end - (s + init - 1)) - 1)));
@@ -569,7 +445,14 @@ static int StringFind(MLuaState *L) {
   /* Try matching at each position */
   for (i = init - 1; i < slen; i++) {
     ms.NumCaptures = 0;
+    ms.CaptureDepth = 0;
+    ms.OpenCapStart = NULL;
+    ms.Error = NULL;
     const char *end = PatMatch(&ms, s + i, pattern);
+    if (ms.Error) {
+      L->ErrorMsg = ms.Error;
+      return -1;
+    }
     if (end) {
       Size j;
       MLuaPush(L, MakeInt((I32)(i + 1)));
@@ -701,10 +584,17 @@ static int StringMatch(MLuaState *L) {
   ms.PatStart = pattern;
   ms.PatEnd = pattern + plen;
   ms.NumCaptures = 0;
+  ms.CaptureDepth = 0;
+  ms.OpenCapStart = NULL;
+  ms.Error = NULL;
 
   /* Check for anchor */
   if (*pattern == '^') {
     const char *end = PatMatch(&ms, s + init - 1, pattern + 1);
+    if (ms.Error) {
+      L->ErrorMsg = ms.Error;
+      return -1;
+    }
     if (end) {
       if (ms.NumCaptures > 0) {
         /* Return captures */
@@ -727,7 +617,14 @@ static int StringMatch(MLuaState *L) {
   /* Try matching at each position */
   for (i = init - 1; i < slen; i++) {
     ms.NumCaptures = 0;
+    ms.CaptureDepth = 0;
+    ms.OpenCapStart = NULL;
+    ms.Error = NULL;
     const char *end = PatMatch(&ms, s + i, pattern);
+    if (ms.Error) {
+      L->ErrorMsg = ms.Error;
+      return -1;
+    }
     if (end) {
       if (ms.NumCaptures > 0) {
         /* Return captures */
@@ -830,15 +727,20 @@ static int StringPack(MLuaState *L) {
       break;
     }
     case 'c': { /* fixed-size string: cn */
-      int n = 0;
+      Size n = 0;
       while (fi < fmtlen && fmt[fi] >= '0' && fmt[fi] <= '9') {
-        n = n * 10 + (fmt[fi++] - '0');
+        if (n < sizeof(buf)) {
+          n = n * 10 + (Size)(fmt[fi] - '0');
+          if (n > sizeof(buf))
+            n = sizeof(buf);
+        }
+        fi++;
       }
       if (n > 0) {
         Size slen;
         const char *s = GetStrArg(L, argIdx++, &slen);
         Size i;
-        for (i = 0; i < (Size)n && pos < sizeof(buf); i++) {
+        for (i = 0; i < n && pos < sizeof(buf); i++) {
           buf[pos++] = (i < slen && s) ? s[i] : '\0';
         }
       }
@@ -907,11 +809,22 @@ static int StringPacksize(MLuaState *L) {
       size += 8;
       break;
     case 'c': {
-      int n = 0;
+      Size n = 0;
       while (fi < fmtlen && fmt[fi] >= '0' && fmt[fi] <= '9') {
-        n = n * 10 + (fmt[fi++] - '0');
+        if (n <= (Size)-1 / 10) {
+          Size next = n * 10 + (Size)(fmt[fi] - '0');
+          n = next < n ? (Size)-1 : next;
+        } else {
+          n = (Size)-1;
+        }
+        fi++;
       }
-      size += (Size)n;
+      if (n > (Size)-1 - size) {
+        MLuaPush(L, MLUA_NIL);
+        MLuaPush(L, MLuaStringNew(L, "format too large", 16));
+        return 2;
+      }
+      size += n;
       break;
     }
     case 'z': /* Variable length - cannot compute */
@@ -949,6 +862,10 @@ static int StringRep(MLuaState *L) {
 
   /* Heap scratch sized exactly (no silent truncation); reclaimed at the
    * next collection */
+  if ((Size)n > (Size)-1 / len) {
+    L->ErrorMsg = "out of memory";
+    return -1;
+  }
   total = len * (Size)n;
   buf = (char *)MLuaAlloc(L, total);
   if (!buf) {
@@ -1158,13 +1075,19 @@ static int StringUnpack(MLuaState *L) {
       break;
     }
     case 'c': { /* fixed-size string: cn */
-      int n = 0;
+      Size n = 0;
       while (fi < fmtlen && fmt[fi] >= '0' && fmt[fi] <= '9') {
-        n = n * 10 + (fmt[fi++] - '0');
+        if (n <= (Size)-1 / 10) {
+          Size next = n * 10 + (Size)(fmt[fi] - '0');
+          n = next < n ? (Size)-1 : next;
+        } else {
+          n = (Size)-1;
+        }
+        fi++;
       }
-      if (n > 0 && pos + (Size)n <= datalen) {
-        MLuaPush(L, MLuaStringNew(L, data + pos, (Size)n));
-        pos += (Size)n;
+      if (n > 0 && n <= datalen - pos) {
+        MLuaPush(L, MLuaStringNew(L, data + pos, n));
+        pos += n;
         count++;
       }
       break;

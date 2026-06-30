@@ -107,12 +107,21 @@ TEST(Array_NoHoles) {
   MLuaValue tbl = MLuaTableNew(L);
   ASSERT(MLuaTableSet(L, tbl, MakeInt(1), MakeInt(10)));
 
-  /* Trying to set index 3 without index 2 should fail (hole) */
-  Bool result = MLuaTableSet(L, tbl, MakeInt(3), MakeInt(30));
-  /* Actually goes to hash part, not an error */
-  ASSERT(result);
-  /* But array length should still be 1 */
+  /* Setting index 3 while index 2 is absent would create a hole: rejected,
+     and the value must not leak into the hash part. */
+  ASSERT(!MLuaTableSet(L, tbl, MakeInt(3), MakeInt(30)));
+  ASSERT(IsNil(MLuaTableGet(L, tbl, MakeInt(3))));
   ASSERT_EQ(MLuaTableLen(tbl), 1);
+
+  /* Assigning nil to a would-be hole is a harmless no-op, not an error. */
+  ASSERT(MLuaTableSet(L, tbl, MakeInt(3), MLUA_NIL));
+  ASSERT_EQ(MLuaTableLen(tbl), 1);
+
+  /* Filling the gap contiguously still works afterwards. */
+  ASSERT(MLuaTableSet(L, tbl, MakeInt(2), MakeInt(20)));
+  ASSERT(MLuaTableSet(L, tbl, MakeInt(3), MakeInt(30)));
+  ASSERT_EQ(MLuaTableLen(tbl), 3);
+  ASSERT_EQ(GetInt(MLuaTableGet(L, tbl, MakeInt(3))), 30);
 }
 
 /* ========================================================================== */

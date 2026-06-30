@@ -200,6 +200,10 @@ double MLuaToNumber(MLuaValue v) {
 }
 
 MLuaValue MLuaMakeNumber(MLuaState *L, double n) {
+#if MLUA_PTR_SIZE == 8
+  UNUSED(L);
+#endif
+
   /* Try to fit in tagged integer first */
   if (n == (double)(I32)n) {
     I32 i = (I32)n;
@@ -230,5 +234,21 @@ MLuaValue MLuaMakeNumber(MLuaState *L, double n) {
     num->Value = n;
     return MakePtr(num);
   }
+#endif
+}
+
+MLuaValue MLuaMakeFloat(MLuaState *L, double n) {
+#if MLUA_PTR_SIZE == 8
+  UNUSED(L);
+  return MakeDouble(n);
+#else
+  MLuaGCHeader *gch = MLuaAllocObject(L, OBJTYPE_NUMBER, sizeof(double));
+  MLuaNumber *num;
+  if (!gch) {
+    return MakeInt(0);
+  }
+  num = MLUA_NUMBER(gch);
+  num->Value = n;
+  return MakePtr(num);
 #endif
 }

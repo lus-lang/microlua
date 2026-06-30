@@ -55,7 +55,7 @@ typedef struct MLuaThread {
   Size XferBase;
   Size XferCount;
 
-  const char *ErrorMsg; /* Error message if dead with error */
+  MLuaValue ErrorValue; /* Error message if dead with error */
 } MLuaThread;
 
 /* Get thread header from GC header */

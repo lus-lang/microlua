@@ -221,6 +221,9 @@ MLuaValue MLuaStringNew(MLuaState *L, const char *str, Size len) {
 
   /* Allocate new string */
   headerSize = sizeof(MLuaStringHeader);
+  if (len > (Size)-1 - headerSize - 1) {
+    return MLUA_NIL;
+  }
   totalDataSize = headerSize + len + 1; /* +1 for null terminator */
 
   gch = MLuaAllocObject(L, OBJTYPE_STRING, totalDataSize);
@@ -368,5 +371,107 @@ MLuaValue MLuaStringConcat(MLuaState *L, MLuaValue a, MLuaValue b) {
   result = MLuaStringNew(L, buf, totalLen);
 
   /* Note: buf will be collected by GC eventually */
+  return result;
+}
+
+MLuaValue MLuaStringConcatMany(MLuaState *L, const MLuaValue *vals, int count) {
+  Size totalLen = 0;
+  Size off = 0;
+  int i;
+  MLuaGCHeader *gch;
+  MLuaStringHeader *sh;
+  char *data;
+  MLuaValue result;
+  MLuaValue *slot;
+
+  for (i = 0; i < count; i++) {
+    totalLen += MLuaStringLen(vals[i]);
+  }
+
+  /* Short result (<=3 bytes): assemble into a tiny buffer and return a short
+   * string (short strings are never interned). */
+  if (totalLen <= 3) {
+    char tmp[4];
+    Size t = 0;
+    for (i = 0; i < count; i++) {
+      const char *s = MLuaStringData(vals[i]);
+      Size n = MLuaStringLen(vals[i]);
+      Size j;
+      for (j = 0; j < n; j++) {
+        tmp[t++] = s[j];
+      }
+    }
+    return MLuaStringNewShort(tmp, totalLen);
+  }
+
+  if (L->StringTableCap == 0) {
+    if (!MLuaStringTableInit(L)) {
+      return MLUA_NIL;
+    }
+  }
+
+  /*
+   * Allocate the result object up front and copy the operands straight into
+   * its data with (vectorizable) MemCpy -- no temporary buffer and no second
+   * copy (unlike routing through MLuaStringNew). Each operand's bytes are
+   * consumed immediately, so a short string's rotating data buffer cannot
+   * alias across operands. No GC runs inside an allocation (safepoint model),
+   * so the operand pointers stay valid throughout.
+   */
+  gch = MLuaAllocObject(L, OBJTYPE_STRING,
+                        sizeof(MLuaStringHeader) + totalLen + 1);
+  if (!gch) {
+    return MLUA_NIL;
+  }
+  sh = MLUA_STRHEADER(gch);
+  data = (char *)MLUA_STRDATA(sh);
+
+  for (i = 0; i < count; i++) {
+    const char *s = MLuaStringData(vals[i]);
+    Size n = MLuaStringLen(vals[i]);
+    MemCpy(data + off, s, n);
+    off += n;
+  }
+  data[totalLen] = '\0';
+
+  /*
+   * Hash incrementally. FNV-1a is a left fold, so
+   *   hash(a || b) == fold(hash(a), b's bytes).
+   * Start from the FIRST operand's hash (already stored for a long string,
+   * O(1); cheaply recomputed for a <=3-byte short string) and fold only the
+   * bytes contributed by the remaining operands. For `s = s .. x` this folds
+   * just x's few bytes instead of rehashing all of s, collapsing the O(n^2)
+   * hashing of a build loop to O(n) -- and yields the exact same hash value,
+   * so interning is unaffected.
+   */
+  {
+    Size firstLen = MLuaStringLen(vals[0]);
+    Size k;
+    U32 hash;
+    if (IsShortStr(vals[0])) {
+      hash = MLuaStringHash(data, firstLen); /* <= 3 bytes */
+    } else {
+      hash = MLUA_STRHEADER((MLuaGCHeader *)GetPtr(vals[0]))->Hash;
+    }
+    for (k = firstLen; k < totalLen; k++) {
+      hash ^= (U8)data[k];
+      hash *= FNV_PRIME;
+    }
+    sh->Hash = hash;
+  }
+  sh->Length = totalLen;
+  result = MakePtr(gch);
+
+  /*
+   * Dedup against the intern table using the now-contiguous bytes. Concat
+   * results are usually unique (a miss that inserts); on the rare hit the
+   * freshly built object is simply left for the collector, preserving the
+   * "equal contents => identical pointer" invariant.
+   */
+  slot = StringTableFind(L, data, totalLen, sh->Hash);
+  if (slot && !IsNil(*slot)) {
+    return *slot;
+  }
+  StringTableInsert(L, result);
   return result;
 }

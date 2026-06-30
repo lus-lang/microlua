@@ -20,6 +20,7 @@
 
 #include "MLuaAlloc.h"
 #include "MLuaCore.h"
+#include "MLuaDump.h"
 #include "MLuaStdLib.h"
 #include "MLuaString.h"
 #include "MLuaVM.h"
@@ -56,9 +57,15 @@ static char *ReadFile(const char *path, Size *outLen) {
   if (!f)
     return NULL;
 
-  fseek(f, 0, SEEK_END);
+  if (fseek(f, 0, SEEK_END) != 0) {
+    fclose(f);
+    return NULL;
+  }
   size = ftell(f);
-  fseek(f, 0, SEEK_SET);
+  if (size < 0 || fseek(f, 0, SEEK_SET) != 0) {
+    fclose(f);
+    return NULL;
+  }
 
   buf = (char *)malloc((size_t)size + 1);
   if (!buf) {
@@ -137,6 +144,59 @@ static void PrintHelp(const char *progname) {
 static void PrintVersion(void) {
   printf("%s\n", MLUA_VERSION);
   printf("%s\n", MLUA_COPYRIGHT);
+}
+
+static int WriteBytecode(MLuaState *L, const char *source, Size len,
+                         const char *name, const char *outputFile) {
+  MLuaStatus status;
+  MLuaValue func;
+  Size size;
+  char *buf;
+  FILE *out;
+  size_t written;
+  int closeStatus;
+
+  status = MLuaLoadString(L, source, len, name);
+  if (status != MLUA_OK) {
+    if (L->ErrorMsg) {
+      fprintf(stderr, "%s: Error: %s\n", name, L->ErrorMsg);
+    } else {
+      fprintf(stderr, "%s: Error: compile error\n", name);
+    }
+    return 1;
+  }
+
+  func = MLuaPop(L);
+  size = MLuaDumpFunction(L, func, NULL, 0);
+  if (size == 0) {
+    fprintf(stderr, "Error: cannot dump bytecode\n");
+    return 1;
+  }
+
+  buf = (char *)malloc((size_t)size);
+  if (!buf) {
+    fprintf(stderr, "Error: out of memory\n");
+    return 1;
+  }
+  MLuaDumpFunction(L, func, buf, size);
+
+  out = fopen(outputFile, "wb");
+  if (!out) {
+    fprintf(stderr, "Error: Cannot open '%s' for writing\n", outputFile);
+    free(buf);
+    return 1;
+  }
+
+  written = fwrite(buf, 1, (size_t)size, out);
+  closeStatus = fclose(out);
+  if (written != (size_t)size || closeStatus != 0) {
+    fprintf(stderr, "Error: failed to write '%s'\n", outputFile);
+    free(buf);
+    return 1;
+  }
+
+  free(buf);
+  return 0;
 }
 
 /* ========================================================================== */
@@ -271,8 +331,13 @@ int main(int argc, char **argv) {
     }
   }
 
+  if (outputFile && !scriptFile && !evalExpr) {
+    fprintf(stderr, "Error: -o requires a script file or -e expression\n");
+    return 1;
+  }
+
   /* Default to interactive if no script or eval */
-  if (!scriptFile && !evalExpr) {
+  if (!scriptFile && !evalExpr && !outputFile) {
     interactive = 1;
   }
 
@@ -356,8 +421,28 @@ int main(int argc, char **argv) {
     }
   }
 
-  /* Execute eval expression */
-  if (evalExpr) {
+  if (outputFile) {
+    if (evalExpr) {
+      if (WriteBytecode(L, evalExpr, StrLen(evalExpr), "=eval", outputFile) !=
+          0) {
+        return 1;
+      }
+    } else if (scriptFile) {
+      char *source;
+      Size len;
+
+      source = ReadFile(scriptFile, &len);
+      if (!source) {
+        fprintf(stderr, "Error: Cannot open '%s'\n", scriptFile);
+        return 1;
+      }
+      if (WriteBytecode(L, source, len, scriptFile, outputFile) != 0) {
+        free(source);
+        return 1;
+      }
+      free(source);
+    }
+  } else if (evalExpr) {
     MLuaStatus status = MLuaDoString(L, evalExpr, StrLen(evalExpr), "=eval");
     if (status != MLUA_OK) {
       if (L->ErrorMsg) {
@@ -377,7 +462,7 @@ int main(int argc, char **argv) {
   }
 
   /* Execute script file */
-  if (scriptFile) {
+  if (!outputFile && scriptFile) {
     char *source;
     Size len;
 
@@ -429,11 +514,6 @@ int main(int argc, char **argv) {
            (unsigned long long)L->ArgsCount);
     printf("Strings:      %llu\n", (unsigned long long)L->StringTableCount);
     printf("Light Funcs:  %llu\n", (unsigned long long)L->LightFuncCount);
-  }
-
-  /* Save bytecode (stub - would need compiler access) */
-  if (outputFile) {
-    fprintf(stderr, "Note: Bytecode output not yet implemented\n");
   }
 
   return 0;

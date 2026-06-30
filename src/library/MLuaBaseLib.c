@@ -9,7 +9,6 @@
 #include "../MLuaString.h"
 #include "../MLuaTable.h"
 #include "../MLuaVM.h"
-#include <stdio.h>
 
 /* ========================================================================== */
 /* assert                                                                     */
@@ -221,7 +220,6 @@ static int BaseSelect(MLuaState *L) {
     return top - n;
   } else {
     /* Check for "#" */
-    Size len;
     const char *s = MLuaStringData(idx);
     if (s && s[0] == '#') {
       MLuaPush(L, MakeInt((I32)(top - 1)));

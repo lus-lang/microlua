@@ -11,8 +11,9 @@
 
 #include "MLuaCore.h"
 
-/* Forward declaration */
+/* Shared forward declarations (single definition avoids C99 duplicate-typedef) */
 typedef struct MLuaState MLuaState;
+typedef struct MLuaGCRef MLuaGCRef;
 
 /* ========================================================================== */
 /* MLuaValue Type                                                             */
@@ -429,5 +430,8 @@ double MLuaToNumber(MLuaValue v);
 
 /* Create heap number if needed */
 MLuaValue MLuaMakeNumber(MLuaState *L, double n);
+
+/* Create a floating-point value even when n has an integral value. */
+MLuaValue MLuaMakeFloat(MLuaState *L, double n);
 
 #endif /* MLUA_VALUE_H */

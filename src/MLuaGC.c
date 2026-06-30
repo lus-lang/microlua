@@ -197,6 +197,7 @@ void MLuaGCMarkObject(MLuaState *L, MLuaGCHeader *obj) {
     for (i = 0; i < th->Ctx.FrameTop; i++) {
       MLuaGCMark(L, th->Ctx.Frames[i].Func);
     }
+    MLuaGCMark(L, th->ErrorValue);
     /* Mark open upvalues belonging to this thread */
     {
       MLuaUpvalue *uv = th->Ctx.OpenUpvalues;
@@ -465,8 +466,8 @@ static void UpdateReferences(MLuaState *L) {
   /* Re-link the open-upvalue list head (upvalue objects may move) */
   L->OpenUpvalues = (struct MLuaUpvalue *)UpdatePtr(L, L->OpenUpvalues);
 
-  /* Update Args values */
-  for (i = 0; i < L->ArgsCount; i++) {
+  /* Update every live Args window, not only the current frame's window. */
+  for (i = 0; i < L->ArgsTop; i++) {
     L->Args[i] = UpdateValue(L, L->Args[i]);
   }
 
@@ -614,6 +615,7 @@ static void UpdateReferences(MLuaState *L) {
         for (i = 0; i < th->Ctx.FrameTop; i++) {
           th->Ctx.Frames[i].Func = UpdateValue(L, th->Ctx.Frames[i].Func);
         }
+        th->ErrorValue = UpdateValue(L, th->ErrorValue);
 
         /* Open upvalues point into this thread's (old) Locals buffer:
          * rebase them against the buffer's new address. The upvalue

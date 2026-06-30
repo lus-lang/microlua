@@ -5,7 +5,6 @@
 
 #include "MLuaParse.h"
 #include "MLuaString.h"
-#include <stdio.h>
 
 /* ========================================================================== */
 /* Line Info Helper                                                           */
@@ -31,10 +30,27 @@ static int ParseFuncBody(MLuaParser *p, Bool isMethod);
 /* Parser Helpers                                                             */
 /* ========================================================================== */
 
+#define MLUA_PARSE_MAX_DEPTH 256
+
 static void Error(MLuaParser *p, const char *msg) {
   if (!p->Error) {
     p->Error = msg;
     p->ErrorLine = p->Lex.Line;
+  }
+}
+
+static Bool EnterParseDepth(MLuaParser *p) {
+  if (p->ParseDepth >= MLUA_PARSE_MAX_DEPTH) {
+    Error(p, "source nesting too deep");
+    return FALSE;
+  }
+  p->ParseDepth++;
+  return TRUE;
+}
+
+static void LeaveParseDepth(MLuaParser *p) {
+  if (p->ParseDepth > 0) {
+    p->ParseDepth--;
   }
 }
 
@@ -538,7 +554,6 @@ static Bool IsRightAssoc(MLuaTokenType t) {
   return t == TK_CARET || t == TK_CONCAT;
 }
 
-static void ParsePrimaryExpr(MLuaParser *p);
 static void ParseSubExpr(MLuaParser *p, Precedence minPrec);
 
 static void ParsePrefix(MLuaParser *p) {
@@ -578,7 +593,8 @@ static void ParsePrefix(MLuaParser *p) {
       }
     } else {
       /* Float literal (or integer too large for I32): float constant */
-      int k = MLuaAddConstant(fs, MLuaMakeNumber(p->L, num));
+      int k = MLuaAddConstant(fs, isFloat ? MLuaMakeFloat(p->L, num)
+                                          : MLuaMakeNumber(p->L, num));
       MLuaEmitOpB(fs, OP_LOADK, (U8)k);
     }
     StackPush(p, 1);
@@ -955,15 +971,29 @@ static void ParseSuffix(MLuaParser *p) {
 static void ParseSubExpr(MLuaParser *p, Precedence minPrec) {
   MLuaFuncState *fs = p->FS;
 
+  if (!EnterParseDepth(p)) {
+    return;
+  }
+
   ParsePrefix(p);
   ParseSuffix(p);
 
-  while (GetPrecedence(p->Lex.Token.Type) > minPrec ||
-         (GetPrecedence(p->Lex.Token.Type) == minPrec &&
-          IsRightAssoc(p->Lex.Token.Type))) {
+  while (!p->Error && (GetPrecedence(p->Lex.Token.Type) > minPrec ||
+                       (GetPrecedence(p->Lex.Token.Type) == minPrec &&
+                        IsRightAssoc(p->Lex.Token.Type)))) {
     MLuaTokenType op = p->Lex.Token.Type;
     Precedence prec = GetPrecedence(op);
-    Precedence nextPrec = IsRightAssoc(op) ? prec : (Precedence)(prec + 1);
+    /* Recurse at the operator's own precedence for BOTH associativities.
+     * The loop guard above (strict '>' for left-assoc, plus the
+     * '== minPrec && right-assoc' clause) is what distinguishes them:
+     *   left-assoc  a-b-c : the inner parse stops at the second '-' (ADD is
+     *                       not > ADD), so the outer loop folds left.
+     *   right-assoc a^b^c : the inner parse consumes the second '^' via the
+     *                       equality clause, folding right.
+     * Using (prec + 1) here for left-assoc was the bug: it made the RHS of a
+     * lower-precedence op refuse a following higher-precedence op, so
+     * `2 + 3 * 4` parsed as `(2 + 3) * 4`. */
+    Precedence nextPrec = prec;
 
     /* The lhs operand of any operator is a single value */
     AdjustTo1(p);
@@ -1032,6 +1062,8 @@ static void ParseSubExpr(MLuaParser *p, Precedence minPrec) {
       StackPop(p, 1); /* Two operands -> one result */
     }
   }
+
+  LeaveParseDepth(p);
 }
 
 static void ParseExpr(MLuaParser *p) { ParseSubExpr(p, PREC_NONE); }
@@ -1814,6 +1846,11 @@ static int ParseFuncBody(MLuaParser *p, Bool isMethod) {
   /* Emit return if not already present */
   MLuaEmitOpB(&fs, OP_RET, 0);
 
+  if (fs.MaxStack > 255) {
+    Error(p, "expression too complex");
+    p->FS = outerFS;
+    return -1;
+  }
   proto->MaxStackSize = (U8)(fs.MaxStack > 2 ? fs.MaxStack : 2);
   proto->NumLocals =
       fs.MaxLocals; /* Reserve the PEAK slot count (loops release slots) */
@@ -2221,11 +2258,17 @@ static void ParseStatement(MLuaParser *p) {
 }
 
 static void ParseBlock(MLuaParser *p) {
-  while (!Check(p, TK_END) && !Check(p, TK_ELSE) && !Check(p, TK_ELSEIF) &&
-         !Check(p, TK_UNTIL) && !Check(p, TK_EOF)) {
+  if (!EnterParseDepth(p)) {
+    return;
+  }
+
+  while (!p->Error && !Check(p, TK_END) && !Check(p, TK_ELSE) &&
+         !Check(p, TK_ELSEIF) && !Check(p, TK_UNTIL) && !Check(p, TK_EOF)) {
     ParseStatement(p);
     Match(p, TK_SEMICOLON);
   }
+
+  LeaveParseDepth(p);
 }
 
 static void ParseChunk(MLuaParser *p) {
@@ -2286,6 +2329,10 @@ static MLuaProto *ParseOnce(MLuaState *L, const char *source, Size len,
     return NULL;
   }
 
+  if (fs.MaxStack > 255) {
+    *outError = "expression too complex";
+    return NULL;
+  }
   proto->MaxStackSize = (U8)(fs.MaxStack > 2 ? fs.MaxStack : 2);
   proto->NumLocals =
       fs.MaxLocals; /* Reserve the PEAK slot count (loops release slots) */

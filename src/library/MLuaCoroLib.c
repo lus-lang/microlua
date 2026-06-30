@@ -171,10 +171,10 @@ static int CoroClose(MLuaState *L) {
   th->Ctx.ArgsTop = 0;
   th->Ctx.LocalsTop = 0;
 
-  if (th->Status == THREAD_DEAD && th->ErrorMsg) {
+  if (th->Status == THREAD_DEAD && !IsNil(th->ErrorValue)) {
     /* Died with an error: report it (Lua 5.4 semantics) */
     MLuaPush(L, MLUA_FALSE);
-    MLuaPush(L, MLuaStringNew(L, th->ErrorMsg, StrLen(th->ErrorMsg)));
+    MLuaPush(L, th->ErrorValue);
     th->Status = THREAD_DEAD;
     return 2;
   }

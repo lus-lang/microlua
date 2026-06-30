@@ -330,6 +330,38 @@ static int MathTanF(MLuaState *L) {
 }
 
 /* ========================================================================== */
+/* math.cosh / math.sinh / math.tanh (Lua 5.1)                                */
+/* ========================================================================== */
+
+static int MathCoshF(MLuaState *L) {
+  double x = GetArg(L, 1);
+  MLuaPush(L, MLuaMakeNumber(L, MathCosh(x)));
+  return 1;
+}
+
+static int MathSinhF(MLuaState *L) {
+  double x = GetArg(L, 1);
+  MLuaPush(L, MLuaMakeNumber(L, MathSinh(x)));
+  return 1;
+}
+
+static int MathTanhF(MLuaState *L) {
+  double x = GetArg(L, 1);
+  MLuaPush(L, MLuaMakeNumber(L, MathTanh(x)));
+  return 1;
+}
+
+/* ========================================================================== */
+/* math.log10 (Lua 5.1)                                                       */
+/* ========================================================================== */
+
+static int MathLog10F(MLuaState *L) {
+  double x = GetArg(L, 1);
+  MLuaPush(L, MLuaMakeNumber(L, MathLog10(x)));
+  return 1;
+}
+
+/* ========================================================================== */
 /* math.tointeger                                                             */
 /* ========================================================================== */
 
@@ -388,8 +420,10 @@ static const MLuaLibEntry MathLibEntries[] = {{"abs", MathAbs},
                                               {"acos", MathAcosF},
                                               {"asin", MathAsinF},
                                               {"atan", MathAtanF},
+                                              {"atan2", MathAtanF},
                                               {"ceil", MathCeilF},
                                               {"cos", MathCosF},
+                                              {"cosh", MathCoshF},
                                               {"deg", MathDeg},
                                               {"exp", MathExpF},
                                               {"floor", MathFloorF},
@@ -397,16 +431,20 @@ static const MLuaLibEntry MathLibEntries[] = {{"abs", MathAbs},
                                               {"frexp", MathFrexpF},
                                               {"ldexp", MathLdexpF},
                                               {"log", MathLogF},
+                                              {"log10", MathLog10F},
                                               {"max", MathMax},
                                               {"min", MathMin},
+                                              {"mod", MathFmodF},
                                               {"pow", MathPowF},
                                               {"modf", MathModfF},
                                               {"rad", MathRad},
                                               {"random", MathRandom},
                                               {"randomseed", MathRandomseed},
                                               {"sin", MathSinF},
+                                              {"sinh", MathSinhF},
                                               {"sqrt", MathSqrtF},
                                               {"tan", MathTanF},
+                                              {"tanh", MathTanhF},
                                               {"tointeger", MathTointeger},
                                               {"type", MathType},
                                               {"ult", MathUlt},

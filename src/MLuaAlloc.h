@@ -13,8 +13,7 @@
 /* Heap State                                                                 */
 /* ========================================================================== */
 
-typedef struct MLuaState MLuaState;
-typedef struct MLuaGCRef MLuaGCRef;
+/* MLuaState and MLuaGCRef forward typedefs come from MLuaValue.h (above). */
 
 /* Allocator function types for vector-state mode */
 typedef void *(*MLuaAllocFunc)(MLuaState *L, void *ctx, Size size);

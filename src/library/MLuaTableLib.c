@@ -5,6 +5,7 @@
 
 #include "MLuaTableLib.h"
 #include "../MLuaCore.h"
+#include "../MLuaGC.h"
 #include "../MLuaString.h"
 #include "../MLuaTable.h"
 #include "../MLuaVM.h"
@@ -15,50 +16,84 @@
 
 static int TableConcat(MLuaState *L) {
   MLuaValue tbl = MLuaGetStack(L, 1);
-  const char *sep = "";
+  MLuaValue sepval = MLUA_NIL;
   Size seplen = 0;
-  Size i = 1;
-  Size j;
-  char buf[4096];
+  IPtr startI = 1;
+  IPtr j;
+  Size k;
+  Size totalLen = 0;
   Size bufpos = 0;
+  char *buf;
   int top = MLuaGetTop(L);
 
   if (top >= 2) {
-    MLuaValue sepval = MLuaGetStack(L, 2);
-    sep = MLuaStringData(sepval);
+    sepval = MLuaGetStack(L, 2);
     seplen = MLuaStringLen(sepval);
   }
   if (top >= 3) {
-    i = (Size)GetInt(MLuaGetStack(L, 3));
+    startI = GetInt(MLuaGetStack(L, 3));
   }
   if (top >= 4) {
-    j = (Size)GetInt(MLuaGetStack(L, 4));
+    j = GetInt(MLuaGetStack(L, 4));
   } else {
-    j = MLuaTableLen(tbl);
+    j = (IPtr)MLuaTableLen(tbl);
   }
 
-  if (!sep)
-    sep = "";
+  if (startI < 1)
+    startI = 1;
+  if (j < startI) {
+    MLuaPush(L, MLuaStringNew(L, "", 0));
+    return 1;
+  }
 
-  for (; i <= j; i++) {
-    MLuaValue v = MLuaTableGet(L, tbl, MakeInt((I32)i));
-    Size slen = MLuaStringLen(v);
-    const char *s = MLuaStringData(v);
+  /*
+   * First pass: compute the exact length (element bytes plus one separator
+   * between each pair). A fixed stack buffer used to live here and silently
+   * truncated at 4 KB; size a heap buffer exactly instead.
+   */
+  for (k = (Size)startI; k <= (Size)j; k++) {
+    totalLen += MLuaStringLen(MLuaTableGet(L, tbl, MakeInt((I32)k)));
+  }
+  if (j >= startI) {
+    totalLen += (Size)(j - startI) * seplen; /* separators BETWEEN elements */
+  }
 
-    /* Add separator if not first element */
-    if (i > 1 && bufpos + seplen < sizeof(buf)) {
-      Size k;
-      for (k = 0; k < seplen; k++) {
-        buf[bufpos++] = sep[k];
+  if (totalLen == 0) {
+    MLuaPush(L, MLuaStringNew(L, "", 0));
+    return 1;
+  }
+
+  buf = (char *)MLuaAlloc(L, totalLen);
+  if (!buf) {
+    L->ErrorMsg = "out of memory";
+    return -1;
+  }
+
+  /*
+   * Second pass: fill. No allocation happens between MLuaAlloc above and the
+   * MLuaStringNew below, so 'buf' cannot move. Each operand's bytes are
+   * re-fetched immediately before they are copied, so a short string's
+   * rotating data buffer cannot alias across iterations (the bug the old
+   * once-captured 'sep' pointer was exposed to).
+   */
+  for (k = (Size)startI; k <= (Size)j; k++) {
+    MLuaValue v;
+    const char *s;
+    Size slen;
+    Size t;
+
+    if (k > (Size)startI && seplen > 0) {
+      const char *sp = MLuaStringData(sepval);
+      for (t = 0; t < seplen; t++) {
+        buf[bufpos++] = sp[t];
       }
     }
 
-    /* Add element */
-    if (s && bufpos + slen < sizeof(buf)) {
-      Size k;
-      for (k = 0; k < slen; k++) {
-        buf[bufpos++] = s[k];
-      }
+    v = MLuaTableGet(L, tbl, MakeInt((I32)k));
+    slen = MLuaStringLen(v);
+    s = MLuaStringData(v);
+    for (t = 0; t < slen; t++) {
+      buf[bufpos++] = s[t];
     }
   }
 
@@ -81,11 +116,26 @@ static int TableInsert(MLuaState *L) {
     MLuaTableSet(L, tbl, MakeInt((I32)(len + 1)), value);
   } else if (top >= 3) {
     /* Insert at position: table.insert(t, pos, value) */
-    Size pos = (Size)GetInt(MLuaGetStack(L, 2));
+    MLuaValue posv = MLuaGetStack(L, 2);
     MLuaValue value = MLuaGetStack(L, 3);
+    Size pos;
     Size i;
 
-    /* Shift elements up */
+    if (!IsInt(posv)) {
+      L->ErrorMsg = "bad argument #2 to 'insert' (number expected)";
+      return -1;
+    }
+    /* Position must land inside the sequence or exactly one past its end;
+       anything else would create a hole. (Also guards the loop below from
+       an unsigned underflow when pos < 1.) */
+    if (GetInt(posv) < 1 || (Size)GetInt(posv) > len + 1) {
+      L->ErrorMsg = "bad argument #2 to 'insert' (position out of bounds)";
+      return -1;
+    }
+    pos = (Size)GetInt(posv);
+
+    /* Shift elements up (top-down, so the array never transiently holds a
+       hole) */
     for (i = len; i >= pos; i--) {
       MLuaValue v = MLuaTableGet(L, tbl, MakeInt((I32)i));
       MLuaTableSet(L, tbl, MakeInt((I32)(i + 1)), v);
@@ -125,17 +175,23 @@ static int TablePack(MLuaState *L) {
 static int TableUnpack(MLuaState *L) {
   MLuaValue tbl = MLuaGetStack(L, 1);
   int top = MLuaGetTop(L);
-  Size i = 1;
-  Size j;
+  IPtr i = 1;
+  IPtr j;
   Size count = 0;
 
   if (top >= 2) {
-    i = (Size)GetInt(MLuaGetStack(L, 2));
+    i = GetInt(MLuaGetStack(L, 2));
   }
   if (top >= 3) {
-    j = (Size)GetInt(MLuaGetStack(L, 3));
+    j = GetInt(MLuaGetStack(L, 3));
   } else {
-    j = MLuaTableLen(tbl);
+    j = (IPtr)MLuaTableLen(tbl);
+  }
+
+  if (i < 1)
+    i = 1;
+  if (j < i) {
+    return 0;
   }
 
   for (; i <= j; i++) {
@@ -191,15 +247,39 @@ static int TableRemove(MLuaState *L) {
 /* ========================================================================== */
 
 /* Helper: compare two values, return true if a < b */
-static Bool TableSortCompare(MLuaState *L, MLuaValue a, MLuaValue b,
-                             Bool hasComp, MLuaValue compFunc) {
-  if (hasComp && !IsNil(compFunc)) {
+typedef struct {
+  MLuaGCRef Table;
+  MLuaGCRef Comp;
+  Bool HasComp;
+  Bool Error;
+} TableSortContext;
+
+static Bool TableSortCompare(MLuaState *L, TableSortContext *ctx, MLuaValue a,
+                             MLuaValue b) {
+  if (ctx->HasComp && !IsNil(ctx->Comp.Value)) {
+    MLuaGCRef aref;
+    MLuaGCRef bref;
+    MLuaStatus status;
+    MLuaValue result;
+
+    MLuaPushGCRef(L, &aref, a);
+    MLuaPushGCRef(L, &bref, b);
+
     /* Use custom comparator */
-    MLuaPush(L, compFunc);
-    MLuaPush(L, a);
-    MLuaPush(L, b);
-    MLuaCall(L, 2, 1);
-    return IsTruthy(MLuaPop(L));
+    MLuaPush(L, ctx->Comp.Value);
+    MLuaPush(L, aref.Value);
+    MLuaPush(L, bref.Value);
+    status = MLuaCall(L, 2, 1);
+    if (status != MLUA_OK) {
+      ctx->Error = TRUE;
+      MLuaPopGCRef(L, &bref);
+      MLuaPopGCRef(L, &aref);
+      return FALSE;
+    }
+    result = MLuaPop(L);
+    MLuaPopGCRef(L, &bref);
+    MLuaPopGCRef(L, &aref);
+    return IsTruthy(result);
   } else {
     /* Default: Lua's '<' (numbers numerically, strings lexicographically) */
     return MLuaCompare(L, OP_LT, a, b);
@@ -215,27 +295,35 @@ static void TableSwap(MLuaState *L, MLuaValue tbl, Size i, Size j) {
 }
 
 /* Quicksort partition */
-static Size TablePartition(MLuaState *L, MLuaValue tbl, Size lo, Size hi,
-                           Bool hasComp, MLuaValue compFunc) {
-  MLuaValue pivot = MLuaTableGet(L, tbl, MakeInt((I32)hi));
+static Size TablePartition(MLuaState *L, TableSortContext *ctx, Size lo,
+                           Size hi) {
+  MLuaGCRef pivotRef;
+  MLuaValue pivot = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)hi));
   Size i = lo;
   Size j;
 
+  MLuaPushGCRef(L, &pivotRef, pivot);
+
   for (j = lo; j < hi; j++) {
-    MLuaValue val = MLuaTableGet(L, tbl, MakeInt((I32)j));
-    if (TableSortCompare(L, val, pivot, hasComp, compFunc)) {
-      TableSwap(L, tbl, i, j);
+    MLuaValue val = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)j));
+    if (TableSortCompare(L, ctx, val, pivotRef.Value)) {
+      TableSwap(L, ctx->Table.Value, i, j);
       i++;
     }
+    if (ctx->Error) {
+      MLuaPopGCRef(L, &pivotRef);
+      return i;
+    }
   }
-  TableSwap(L, tbl, i, hi);
+  TableSwap(L, ctx->Table.Value, i, hi);
+  MLuaPopGCRef(L, &pivotRef);
   return i;
 }
 
 /* Quicksort recursive implementation (iterative via stack to avoid deep
  * recursion) */
-static void TableQuicksort(MLuaState *L, MLuaValue tbl, Size lo, Size hi,
-                           Bool hasComp, MLuaValue compFunc) {
+static void TableQuicksort(MLuaState *L, TableSortContext *ctx, Size lo,
+                           Size hi) {
   /* Use an explicit stack to avoid deep recursion */
   Size stack[64];
   int top = -1;
@@ -243,12 +331,12 @@ static void TableQuicksort(MLuaState *L, MLuaValue tbl, Size lo, Size hi,
   stack[++top] = lo;
   stack[++top] = hi;
 
-  while (top >= 0) {
+  while (top >= 0 && !ctx->Error) {
     Size high = stack[top--];
     Size low = stack[top--];
 
     if (low < high) {
-      Size p = TablePartition(L, tbl, low, high, hasComp, compFunc);
+      Size p = TablePartition(L, ctx, low, high);
 
       /* Push larger partition first (to minimize stack depth) */
       if (p > 1 && p - 1 - low > high - p - 1) {
@@ -279,9 +367,20 @@ static int TableSort(MLuaState *L) {
   Size len = MLuaTableLen(tbl);
   Bool hasComp = MLuaGetTop(L) >= 2;
   MLuaValue compFunc = hasComp ? MLuaGetStack(L, 2) : MLUA_NIL;
+  TableSortContext ctx;
 
+  ctx.HasComp = hasComp;
+  ctx.Error = FALSE;
+  MLuaPushGCRef(L, &ctx.Table, tbl);
+  MLuaPushGCRef(L, &ctx.Comp, compFunc);
   if (len > 1) {
-    TableQuicksort(L, tbl, 1, len, hasComp, compFunc);
+    TableQuicksort(L, &ctx, 1, len);
+  }
+  MLuaPopGCRef(L, &ctx.Comp);
+  MLuaPopGCRef(L, &ctx.Table);
+
+  if (ctx.Error) {
+    return -1;
   }
 
   return 0;

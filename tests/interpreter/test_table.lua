@@ -51,6 +51,25 @@ test.describe("table.concat", function()
     test.it("handles empty table", function()
         test.expect(table.concat({})).toBe("")
     end)
+
+    test.it("does not truncate results larger than 4KB", function()
+        local t = {}
+        for i = 1, 2000 do t[i] = "abcde" end   -- 2000*5 = 10000 bytes
+        local r = table.concat(t)
+        test.expect(#r).toBe(10000)
+        test.expect(string.sub(r, 1, 5)).toBe("abcde")
+        test.expect(string.sub(r, -5)).toBe("abcde")
+    end)
+
+    test.it("places separators only between elements (with a range)", function()
+        local t = { "a", "b", "c", "d", "e" }
+        test.expect(table.concat(t, "-", 2, 4)).toBe("b-c-d")  -- no leading/trailing sep
+    end)
+
+    test.it("returns empty for an inverted range", function()
+        local t = { "a", "b", "c" }
+        test.expect(table.concat(t, ",", 3, 1)).toBe("")
+    end)
 end)
 
 test.describe("table.insert", function()
@@ -82,6 +101,45 @@ test.describe("table.remove", function()
         local v = table.remove(t, 2)
         test.expect(v).toBe(2)
         test.expect(t[2]).toBe(3)
+    end)
+end)
+
+test.describe("table holes", function()
+    test.it("rejects an assignment that would create a hole", function()
+        local t = { 1 }
+        local ok = pcall(function() t[3] = 30 end)
+        test.expect(ok).toBeFalse()
+        test.expect(t[3]).toBeNil()
+        test.expect(#t).toBe(1)
+    end)
+
+    test.it("allows filling the next slot, then the one after", function()
+        local t = { 1 }
+        t[2] = 2
+        t[3] = 3
+        test.expect(#t).toBe(3)
+        test.expect(t[3]).toBe(3)
+    end)
+
+    test.it("treats a nil assignment past the end as a no-op", function()
+        local t = { 1 }
+        local ok = pcall(function() t[5] = nil end)
+        test.expect(ok).toBeTrue()
+        test.expect(#t).toBe(1)
+    end)
+
+    test.it("errors when table.insert position is out of bounds", function()
+        local t = { 1, 2, 3 }
+        local ok = pcall(function() table.insert(t, 10, 99) end)
+        test.expect(ok).toBeFalse()
+        test.expect(#t).toBe(3)
+    end)
+
+    test.it("still inserts at the valid boundary position", function()
+        local t = { 1, 2, 3 }
+        table.insert(t, 4, 4)
+        test.expect(#t).toBe(4)
+        test.expect(t[4]).toBe(4)
     end)
 end)
 

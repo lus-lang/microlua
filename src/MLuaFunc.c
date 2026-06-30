@@ -11,10 +11,17 @@
 /* ========================================================================== */
 
 MLuaClosure *MLuaClosureNew(MLuaState *L, MLuaProto *proto, U8 numUpvalues) {
-  Size size = sizeof(MLuaClosure) + numUpvalues * sizeof(MLuaUpvalue *);
-  MLuaGCHeader *header = MLuaAllocObject(L, OBJTYPE_FUNCTION, size);
+  Size size;
+  MLuaGCHeader *header;
   MLuaClosure *cl;
   int i;
+
+  if ((Size)numUpvalues > ((Size)-1 - sizeof(MLuaClosure)) /
+                                sizeof(MLuaUpvalue *)) {
+    return NULL;
+  }
+  size = sizeof(MLuaClosure) + (Size)numUpvalues * sizeof(MLuaUpvalue *);
+  header = MLuaAllocObject(L, OBJTYPE_FUNCTION, size);
 
   if (!header) {
     return NULL;
@@ -35,10 +42,17 @@ MLuaClosure *MLuaClosureNew(MLuaState *L, MLuaProto *proto, U8 numUpvalues) {
 
 MLuaCClosure *MLuaCClosureNew(MLuaState *L, MLuaCFunction func,
                               U8 numUpvalues) {
-  Size size = sizeof(MLuaCClosure) + numUpvalues * sizeof(MLuaValue);
-  MLuaGCHeader *header = MLuaAllocObject(L, OBJTYPE_FUNCTION, size);
+  Size size;
+  MLuaGCHeader *header;
   MLuaCClosure *cc;
   int i;
+
+  if ((Size)numUpvalues > ((Size)-1 - sizeof(MLuaCClosure)) /
+                                sizeof(MLuaValue)) {
+    return NULL;
+  }
+  size = sizeof(MLuaCClosure) + (Size)numUpvalues * sizeof(MLuaValue);
+  header = MLuaAllocObject(L, OBJTYPE_FUNCTION, size);
 
   if (!header) {
     return NULL;

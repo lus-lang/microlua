@@ -71,7 +71,7 @@
 void MLuaPush(MLuaState *L, MLuaValue v) {
   /* Push to EvalStack */
   if (L->EvalTop >= L->EvalStackSize) {
-    /* Stack overflow - should expand or error */
+    L->ErrorMsg = "stack overflow";
     return;
   }
   L->EvalStack[L->EvalTop++] = v;
@@ -198,9 +198,6 @@ void MLuaSetGlobal(MLuaState *L, const char *name, MLuaValue value) {
 /* ========================================================================== */
 
 #include <stdarg.h>
-
-/* Static buffer for error messages - may be used for formatted errors later */
-static char ErrorMsgBuffer[512];
 
 /* Static buffer for stacktrace */
 static char StackTraceBuffer[2048];
@@ -471,6 +468,7 @@ MLuaValue MLuaLen(MLuaState *L, MLuaValue v) {
 MLuaValue MLuaConcat(MLuaState *L, int count) {
   /* Concatenate 'count' values from top of stack into a single string */
   Size totalLen = 0;
+  Bool allStrings = TRUE;
   U8 *buffer;
   U8 *p;
   int i;
@@ -489,12 +487,23 @@ MLuaValue MLuaConcat(MLuaState *L, int count) {
     } else if (IsInt(v) || MLuaIsNumber(v)) {
       /* Estimate max digits for number */
       totalLen += 24;
+      allStrings = FALSE;
     } else {
       /* Invalid type for concatenation */
       L->ErrorMsg = IsNil(v) ? "attempt to concatenate a nil value"
                              : "attempt to concatenate a non-string value";
       return MLUA_NIL;
     }
+  }
+
+  /*
+   * Common case: every operand is already a string. Build the interned result
+   * directly from the operands (no temporary buffer, no second copy) instead
+   * of materializing into a scratch buffer and re-hashing via MLuaStringNew.
+   * The number-bearing case still needs the scratch buffer to convert digits.
+   */
+  if (allStrings) {
+    return MLuaStringConcatMany(L, &L->EvalStack[L->EvalTop - count], count);
   }
 
   /* Allocate buffer */
@@ -602,6 +611,11 @@ static MLuaStatus PushFrame(MLuaState *L, Size funcPos, Size nargs) {
 
   if (L->FrameTop >= L->FrameCap) {
     L->ErrorMsg = "call stack overflow";
+    return MLUA_ERRRUN;
+  }
+
+  if (funcPos + proto->MaxStackSize > L->EvalStackSize) {
+    L->ErrorMsg = "stack overflow";
     return MLUA_ERRRUN;
   }
 
@@ -1187,6 +1201,7 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
           L->ArgsCount = nargs_call;
           L->ArgsTop = win + nargs_call;
 
+          L->Frames[L->FrameTop - 1].PC = (Size)(pc - proto->Code);
           savedInC = L->InCCall;
           L->InCCall = TRUE;
           results = cfunc(L);
@@ -1206,6 +1221,11 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
             return MLUA_YIELD;
           }
 
+          /* The C function may have called back into Lua and triggered a
+           * compacting GC. Re-derive all frame-local raw pointers before
+           * touching proto/pc/cl again. */
+          RELOAD_FRAME();
+
           /* Release the C call's window, restore this frame's */
           L->ArgsTop = win;
           {
@@ -1217,6 +1237,9 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
           if (results < 0) {
             /* C function signaled error - L->ErrorMsg should be set */
             VM_TRY(MLUA_ERRRUN);
+          }
+          if (L->EvalTop - funcPos < (Size)results) {
+            VM_FAIL(L, MLUA_ERR_RUNTIME, "stack overflow");
           }
           if (results == 0) {
             STACK_PUSH(MLUA_NIL);
@@ -1525,6 +1548,10 @@ MLuaStatus MLuaCall(MLuaState *L, int nargs, int nresults) {
 
       if (results < 0) {
         return MLUA_ERRRUN; /* ErrorMsg set by the C function */
+      }
+      if (L->EvalTop - funcPos < (Size)results) {
+        L->ErrorMsg = "stack overflow";
+        return MLUA_ERRRUN;
       }
       if (results == 0) {
         MLuaPush(L, MLUA_NIL);

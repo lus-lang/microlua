@@ -106,6 +106,13 @@ int MLuaStringCompare(MLuaValue a, MLuaValue b);
 MLuaValue MLuaStringConcat(MLuaState *L, MLuaValue a, MLuaValue b);
 
 /*
+ * Concatenate `count` string values (all must be strings) into one interned
+ * string, built directly with no temporary buffer or second copy. Used by the
+ * VM's concat path for the common all-string case.
+ */
+MLuaValue MLuaStringConcatMany(MLuaState *L, const MLuaValue *vals, int count);
+
+/*
  * Hash function for strings (FNV-1a)
  */
 U32 MLuaStringHash(const char *str, Size len);
