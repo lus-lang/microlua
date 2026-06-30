@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MicroLua</title>
+  <style>
+    table {
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      border: 1px solid currentColor;
+      padding: 0.4em;
+      text-align: left;
+      vertical-align: top;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>MicroLua</h1>
+    <p>
+      MicroLua is a tiny Lua runtime for embedded systems and other places
+      where portability, a small footprint, and predictable memory use matter.
+    </p>
+    <nav aria-label="Contents">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#download">Download</a></li>
+        <li><a href="#build">Compile</a></li>
+        <li><a href="#use">Use</a></li>
+        <li><a href="#embedding">Embed MicroLua</a></li>
+        <li><a href="#documentation">Documentation</a></li>
+        <li><a href="#limitations">Limitations</a></li>
+        <li><a href="#tests">Tests and Benchmarks</a></li>
+      </ol>
+    </nav>
+  </header>
+
+  <main>
+    <section id="download">
+      <h2>Download</h2>
+      <p>
+        Clone the source repository:
+      </p>
+      <pre><code>git clone https://github.com/lus-lang/microlua.git
+cd microlua</code></pre>
+      <p>
+        You can also download a source archive from the repository host and
+        unpack it locally. The build instructions below assume that the current
+        directory is the MicroLua source tree.
+      </p>
+    </section>
+
+    <section id="build">
+      <h2>Compile</h2>
+      <p>
+        MicroLua uses Meson and Ninja. A debug build allows libc in the core and
+        is the usual build for development:
+      </p>
+      <pre><code>meson setup builddir
+ninja -C builddir</code></pre>
+      <p>
+        A release build compiles the core static library in freestanding mode:
+      </p>
+      <pre><code>meson setup builddir-release --buildtype=release
+ninja -C builddir-release</code></pre>
+      <p>
+        In release mode, the core library is compiled with freestanding flags.
+        The command-line executable still uses libc for file and console I/O.
+      </p>
+      <section>
+        <h3>Build Outputs</h3>
+        <dl>
+          <dt><code>builddir/mlua</code></dt>
+          <dd>The command-line interpreter and REPL.</dd>
+          <dt><code>builddir/libmicrolua.a</code></dt>
+          <dd>The embeddable MicroLua static library.</dd>
+          <dt><code>builddir-release/libmicrolua.a</code></dt>
+          <dd>The freestanding release static library.</dd>
+        </dl>
+      </section>
+    </section>
+
+    <section id="use">
+      <h2>Use</h2>
+      <section>
+        <h3>Command Line</h3>
+        <pre><code>./builddir/mlua script.lua
+./builddir/mlua
+./builddir/mlua -e 'print(1 + 2 * 3)'
+./builddir/mlua -o chunk.mlu script.lua</code></pre>
+        <p>
+          Running <code>mlua</code> with no file starts the interactive REPL.
+          The REPL evaluates one line as one chunk, so local variables do not
+          persist across lines. Put multi-line programs in a file.
+        </p>
+      </section>
+
+      <section>
+        <h3>Options</h3>
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Option</th>
+              <th scope="col">Meaning</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>-h</code>, <code>--help</code></td>
+              <td>Show command-line help.</td>
+            </tr>
+            <tr>
+              <td><code>-e EXPR</code>, <code>--eval EXPR</code></td>
+              <td>Evaluate a chunk supplied on the command line.</td>
+            </tr>
+            <tr>
+              <td><code>-i</code>, <code>--interactive</code></td>
+              <td>Enter interactive mode.</td>
+            </tr>
+            <tr>
+              <td><code>-I FILE</code>, <code>--include FILE</code></td>
+              <td>Include a file through the REPL's require support.</td>
+            </tr>
+            <tr>
+              <td><code>-d</code>, <code>--dump</code></td>
+              <td>Print memory usage statistics.</td>
+            </tr>
+            <tr>
+              <td><code>--memory-limit N</code></td>
+              <td>Run with a heap limited to <code>N</code> bytes.</td>
+            </tr>
+            <tr>
+              <td><code>--no-column</code></td>
+              <td>Omit column information from debug output.</td>
+            </tr>
+            <tr>
+              <td><code>-o FILE</code></td>
+              <td>Compile a source file or <code>-e</code> chunk and write MicroLua bytecode to <code>FILE</code>.</td>
+            </tr>
+            <tr>
+              <td><code>-v</code>, <code>--version</code></td>
+              <td>Print version information.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h3>Small Example</h3>
+        <pre><code>local total = 0
+for i = 1, 10 do
+  total = total + i
+end
+print(total)</code></pre>
+      </section>
+    </section>
+
+    <section id="embedding">
+      <h2>Embed MicroLua</h2>
+      <p>
+        Link your application with <code>libmicrolua.a</code> and include the
+        headers from <code>src/</code>. The core can run on a caller-provided
+        heap and does not require libc in the freestanding release build.
+      </p>
+      <p>
+        The embedder controls host integration. Output and module loading are
+        available only when the embedder installs callbacks.
+      </p>
+      <dl>
+        <dt><code>MLuaSetOutput</code></dt>
+        <dd>Installs the callback used by functions such as <code>print</code> and <code>error</code>.</dd>
+        <dt><code>MLuaSetRequirer</code></dt>
+        <dd>Installs the callback used by <code>require</code>.</dd>
+      </dl>
+      <p>
+        Optional <code>io</code>, <code>os</code>, <code>dofile</code>, and
+        <code>loadfile</code> support lives in <code>src/extensions/MLuaStdLib.c</code>
+        and requires libc.
+      </p>
+    </section>
+
+    <section id="documentation">
+      <h2>Documentation</h2>
+
+      <section>
+        <h3>Language</h3>
+        <p>
+          MicroLua follows Lua syntax where that syntax fits its footprint.
+          Supported statements include local declarations, assignments,
+          function definitions, <code>if</code>, <code>while</code>,
+          <code>repeat</code>, numeric <code>for</code>, generic
+          <code>for</code>, <code>do</code> blocks, <code>break</code>, and
+          <code>return</code>.
+        </p>
+        <p>
+          Supported values include <code>nil</code>, booleans, numbers, strings,
+          tables, functions, C functions, and coroutines. Strings and source
+          files are UTF-8. Numeric literals keep the Lua 5.3 integer/float
+          distinction: <code>math.type(1)</code> is <code>"integer"</code> and
+          <code>math.type(1.0)</code> is <code>"float"</code>.
+        </p>
+        <p>
+          Supported operators include arithmetic <code>+</code>, <code>-</code>,
+          <code>*</code>, <code>/</code>, <code>%</code>, exponentiation
+          <code>^</code>, length <code>#</code>, concatenation <code>..</code>,
+          comparisons, <code>and</code>, <code>or</code>, and <code>not</code>.
+        </p>
+        <p>
+          Functions support lexical closures, upvalues, varargs, multiple return
+          values, and proper tail calls for plain <code>return f(...)</code>
+          style calls.
+        </p>
+      </section>
+
+      <section>
+        <h3>Tables</h3>
+        <p>
+          Tables have an array part and a hash part. Array keys must remain
+          contiguous: assigning a value past <code>#t + 1</code> is a runtime
+          error because it would create a hole. Assigning <code>nil</code> past
+          the end is a no-op.
+        </p>
+        <p>
+          MicroLua does not have metatables. It provides <code>table.forward</code>
+          as a small table-delegation mechanism for lookup forwarding.
+        </p>
+      </section>
+
+      <section>
+        <h3>Base Globals</h3>
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Function</th>
+              <th scope="col">Arguments</th>
+              <th scope="col">Returns</th>
+              <th scope="col">Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>assert</code></td><td><code>v: any [, message: string]</code></td><td>All original arguments, or raises an error.</td><td>Checks that <code>v</code> is not false or nil. If the check fails, raises <code>message</code> or <code>"assertion failed!"</code>.</td></tr>
+            <tr><td><code>error</code></td><td><code>message: string</code></td><td>Does not return.</td><td>Raises a runtime error using the string value of <code>message</code>, or <code>"error"</code> when no string is supplied.</td></tr>
+            <tr><td><code>load</code></td><td><code>chunk: string [, chunkname: string [, mode: string [, env: any]]]</code></td><td>Compiled function, or <code>nil, message</code>.</td><td>Compiles a string chunk. MicroLua accepts the extra Lua-style parameters but only uses the chunk name.</td></tr>
+            <tr><td><code>loadstring</code></td><td><code>chunk: string [, chunkname: string [, mode: string [, env: any]]]</code></td><td>Compiled function, or <code>nil, message</code>.</td><td>Alias of <code>load</code>.</td></tr>
+            <tr><td><code>next</code></td><td><code>table: table [, key: any]</code></td><td><code>next_key, value</code>, or <code>nil</code>.</td><td>Returns the next key and value after <code>key</code>. Pass nil or omit <code>key</code> to start iteration.</td></tr>
+            <tr><td><code>pairs</code></td><td><code>table: table</code></td><td><code>iterator, table, nil</code>.</td><td>Returns a generic-for iterator triple using <code>next</code>.</td></tr>
+            <tr><td><code>ipairs</code></td><td><code>table: table</code></td><td><code>iterator, table, 0</code>.</td><td>Returns a generic-for iterator triple over array indices starting at 1.</td></tr>
+            <tr><td><code>pcall</code></td><td><code>func: function, ...: any</code></td><td><code>true, ...</code> on success; <code>false, message</code> on error.</td><td>Calls <code>func</code> in protected mode with the remaining arguments.</td></tr>
+            <tr><td><code>select</code></td><td><code>index: integer|string, ...: any</code></td><td>Selected values, a count, or no values.</td><td>If <code>index</code> is <code>"#"</code>, returns the number of extra arguments. Otherwise returns arguments from the numeric index onward; negative indices count from the end.</td></tr>
+            <tr><td><code>tonumber</code></td><td><code>value: number|string [, base: integer]</code></td><td>Number, or <code>nil</code>.</td><td>Converts numbers or numeric strings. Base conversion is supported for integer strings.</td></tr>
+            <tr><td><code>tostring</code></td><td><code>value: any</code></td><td>String.</td><td>Converts a value to its string representation.</td></tr>
+            <tr><td><code>type</code></td><td><code>value: any</code></td><td>String.</td><td>Returns the MicroLua type name.</td></tr>
+            <tr><td><code>xpcall</code></td><td><code>func: function, handler: function</code></td><td><code>true, ...</code> on success; <code>false, handled_error</code> on error.</td><td>Protected call that invokes <code>handler</code> with the error value when <code>func</code> fails.</td></tr>
+            <tr><td><code>print</code></td><td><code>...: any</code></td><td>No values.</td><td>Writes tab-separated values through the embedder output callback. Available when the embedder installs output support; the REPL does.</td></tr>
+            <tr><td><code>require</code></td><td><code>name: string</code></td><td>Module result.</td><td>Loads a module through the embedder requirer callback. Available only when that callback is installed; the REPL installs one.</td></tr>
+            <tr><td><code>unpack</code></td><td><code>table: table [, i: integer [, j: integer]]</code></td><td>Values <code>table[i]</code> through <code>table[j]</code>.</td><td>Global compatibility alias of <code>table.unpack</code>.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h3><code>math</code></h3>
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Function</th>
+              <th scope="col">Arguments</th>
+              <th scope="col">Returns</th>
+              <th scope="col">Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>math.abs</code></td><td><code>x: number</code></td><td>Number.</td><td>Absolute value.</td></tr>
+            <tr><td><code>math.acos</code></td><td><code>x: number</code></td><td>Number.</td><td>Arc cosine in radians.</td></tr>
+            <tr><td><code>math.asin</code></td><td><code>x: number</code></td><td>Number.</td><td>Arc sine in radians.</td></tr>
+            <tr><td><code>math.atan</code></td><td><code>y: number [, x: number]</code></td><td>Number.</td><td>Arc tangent. With two arguments, uses <code>atan2(y, x)</code>.</td></tr>
+            <tr><td><code>math.atan2</code></td><td><code>y: number [, x: number]</code></td><td>Number.</td><td>Alias of <code>math.atan</code> in MicroLua.</td></tr>
+            <tr><td><code>math.ceil</code></td><td><code>x: number</code></td><td>Number.</td><td>Smallest integer not less than <code>x</code>.</td></tr>
+            <tr><td><code>math.cos</code></td><td><code>x: number</code></td><td>Number.</td><td>Cosine of <code>x</code> radians.</td></tr>
+            <tr><td><code>math.cosh</code></td><td><code>x: number</code></td><td>Number.</td><td>Hyperbolic cosine.</td></tr>
+            <tr><td><code>math.deg</code></td><td><code>x: number</code></td><td>Number.</td><td>Converts radians to degrees.</td></tr>
+            <tr><td><code>math.exp</code></td><td><code>x: number</code></td><td>Number.</td><td>Returns e raised to <code>x</code>.</td></tr>
+            <tr><td><code>math.floor</code></td><td><code>x: number</code></td><td>Number.</td><td>Largest integer not greater than <code>x</code>.</td></tr>
+            <tr><td><code>math.fmod</code></td><td><code>x: number, y: number</code></td><td>Number.</td><td>C-style floating remainder of <code>x / y</code>.</td></tr>
+            <tr><td><code>math.frexp</code></td><td><code>x: number</code></td><td><code>mantissa, exponent</code>.</td><td>Splits <code>x</code> into a normalized fraction and exponent.</td></tr>
+            <tr><td><code>math.ldexp</code></td><td><code>mantissa: number, exponent: integer</code></td><td>Number.</td><td>Returns <code>mantissa * 2^exponent</code>.</td></tr>
+            <tr><td><code>math.log</code></td><td><code>x: number [, base: number]</code></td><td>Number.</td><td>Natural logarithm, or logarithm in the supplied base.</td></tr>
+            <tr><td><code>math.log10</code></td><td><code>x: number</code></td><td>Number.</td><td>Base-10 logarithm.</td></tr>
+            <tr><td><code>math.max</code></td><td><code>...: number</code></td><td>Number, or <code>nil</code> when called without arguments.</td><td>Maximum numeric argument.</td></tr>
+            <tr><td><code>math.min</code></td><td><code>...: number</code></td><td>Number, or <code>nil</code> when called without arguments.</td><td>Minimum numeric argument.</td></tr>
+            <tr><td><code>math.mod</code></td><td><code>x: number, y: number</code></td><td>Number.</td><td>Alias of <code>math.fmod</code>.</td></tr>
+            <tr><td><code>math.modf</code></td><td><code>x: number</code></td><td><code>integer_part, fractional_part</code>.</td><td>Splits a number into integer and fractional parts.</td></tr>
+            <tr><td><code>math.pow</code></td><td><code>x: number, y: number</code></td><td>Number.</td><td>Returns <code>x</code> raised to <code>y</code>.</td></tr>
+            <tr><td><code>math.rad</code></td><td><code>x: number</code></td><td>Number.</td><td>Converts degrees to radians.</td></tr>
+            <tr><td><code>math.random</code></td><td><code>[m: integer [, n: integer]]</code></td><td>Number or integer.</td><td>With no arguments, returns a float in <code>[0, 1)</code>. With one argument, returns an integer in <code>[1, m]</code>. With two, returns an integer in <code>[m, n]</code>.</td></tr>
+            <tr><td><code>math.randomseed</code></td><td><code>seed: integer</code></td><td>No values.</td><td>Seeds MicroLua's xorshift64 pseudo-random generator. Seed zero is changed to one.</td></tr>
+            <tr><td><code>math.sin</code></td><td><code>x: number</code></td><td>Number.</td><td>Sine of <code>x</code> radians.</td></tr>
+            <tr><td><code>math.sinh</code></td><td><code>x: number</code></td><td>Number.</td><td>Hyperbolic sine.</td></tr>
+            <tr><td><code>math.sqrt</code></td><td><code>x: number</code></td><td>Number.</td><td>Square root.</td></tr>
+            <tr><td><code>math.tan</code></td><td><code>x: number</code></td><td>Number.</td><td>Tangent of <code>x</code> radians.</td></tr>
+            <tr><td><code>math.tanh</code></td><td><code>x: number</code></td><td>Number.</td><td>Hyperbolic tangent.</td></tr>
+            <tr><td><code>math.tointeger</code></td><td><code>x: number</code></td><td>Integer, or <code>nil</code>.</td><td>Returns <code>x</code> as an integer if it is exactly representable as a MicroLua integer.</td></tr>
+            <tr><td><code>math.type</code></td><td><code>x: any</code></td><td><code>"integer"</code>, <code>"float"</code>, or <code>nil</code>.</td><td>Reports whether a number is stored as an integer or float.</td></tr>
+            <tr><td><code>math.ult</code></td><td><code>a: integer, b: integer</code></td><td>Boolean.</td><td>Unsigned less-than comparison of two integer values.</td></tr>
+          </tbody>
+        </table>
+        <p>
+          Available constants:
+          <code>pi</code>, <code>huge</code>, <code>maxinteger</code>, and
+          <code>mininteger</code>.
+        </p>
+      </section>
+
+      <section>
+        <h3><code>string</code></h3>
+        <p>
+          <code>string.len</code>, <code>string.sub</code>,
+          <code>string.byte</code>, <code>string.char</code>, and
+          <code>string.reverse</code> operate on codepoints. Pattern matching is
+          byte-based, and case conversion is ASCII-only.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Function</th>
+              <th scope="col">Arguments</th>
+              <th scope="col">Returns</th>
+              <th scope="col">Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>string.byte</code></td><td><code>s: string [, i: integer [, j: integer]]</code></td><td>Codepoints from <code>i</code> through <code>j</code>.</td><td>Returns UTF-8 codepoints at codepoint positions. Negative indices count from the end.</td></tr>
+            <tr><td><code>string.char</code></td><td><code>...: integer</code></td><td>String.</td><td>Encodes up to 256 numeric codepoints as UTF-8.</td></tr>
+            <tr><td><code>string.dump</code></td><td><code>func: function</code></td><td>Bytecode string, or <code>nil, message</code>.</td><td>Serializes a Lua closure in MicroLua bytecode format. C functions cannot be dumped.</td></tr>
+            <tr><td><code>string.find</code></td><td><code>s: string, pattern: string [, init: integer [, plain: boolean]]</code></td><td><code>start, end [, captures...]</code>, or <code>nil</code>.</td><td>Finds a byte-position match. With <code>plain</code> truthy, searches for literal text. Otherwise uses MicroLua patterns.</td></tr>
+            <tr><td><code>string.format</code></td><td><code>format: string, ...: any</code></td><td>String.</td><td>Formats values into a bounded buffer using MicroLua's formatter.</td></tr>
+            <tr><td><code>string.len</code></td><td><code>s: string</code></td><td>Integer.</td><td>Returns the number of UTF-8 codepoints.</td></tr>
+            <tr><td><code>string.lower</code></td><td><code>s: string</code></td><td>String.</td><td>ASCII-only lowercase conversion. Non-ASCII bytes are preserved.</td></tr>
+            <tr><td><code>string.match</code></td><td><code>s: string, pattern: string [, init: integer]</code></td><td>Captures, whole match, or <code>nil</code>.</td><td>Matches a MicroLua pattern. Captures are returned when present; otherwise the matched substring is returned.</td></tr>
+            <tr><td><code>string.pack</code></td><td><code>format: string, ...: integer|string</code></td><td>Binary string.</td><td>Packs values using supported format codes: <code>b</code>, <code>B</code>, <code>h</code>, <code>H</code>, <code>i</code>, <code>I</code>, <code>l</code>, <code>L</code>, <code>n</code>, <code>N</code>, <code>cN</code>, <code>z</code>, and ignored endian markers.</td></tr>
+            <tr><td><code>string.packsize</code></td><td><code>format: string</code></td><td>Integer, or <code>nil, message</code>.</td><td>Returns the static packed size for fixed-size formats. Variable-length <code>s</code> and <code>z</code> formats return <code>nil, message</code>.</td></tr>
+            <tr><td><code>string.rep</code></td><td><code>s: string, n: integer</code></td><td>String.</td><td>Repeats <code>s</code> <code>n</code> times. Non-positive counts return an empty string.</td></tr>
+            <tr><td><code>string.reverse</code></td><td><code>s: string</code></td><td>String.</td><td>Reverses the sequence of UTF-8 codepoints.</td></tr>
+            <tr><td><code>string.sub</code></td><td><code>s: string [, i: integer [, j: integer]]</code></td><td>String.</td><td>Returns a codepoint-indexed substring. Negative indices count from the end.</td></tr>
+            <tr><td><code>string.unpack</code></td><td><code>format: string, data: string [, pos: integer]</code></td><td>Unpacked values followed by next position.</td><td>Unpacks values from <code>data</code> starting at 1-based byte position <code>pos</code>.</td></tr>
+            <tr><td><code>string.upper</code></td><td><code>s: string</code></td><td>String.</td><td>ASCII-only uppercase conversion. Non-ASCII bytes are preserved.</td></tr>
+          </tbody>
+        </table>
+        <p>
+          Supported pattern features include anchors <code>^</code> and
+          <code>$</code>, classes such as <code>%a</code>, <code>%d</code>,
+          <code>%s</code>, <code>%w</code>, <code>%l</code>, <code>%u</code>,
+          <code>%p</code>, <code>%c</code>, and <code>%x</code>, character
+          sets, captures, and the <code>*</code>, <code>+</code>,
+          <code>-</code>, and <code>?</code> quantifiers.
+        </p>
+      </section>
+
+      <section>
+        <h3><code>table</code></h3>
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Function</th>
+              <th scope="col">Arguments</th>
+              <th scope="col">Returns</th>
+              <th scope="col">Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>table.concat</code></td><td><code>table: table [, sep: string [, i: integer [, j: integer]]]</code></td><td>String.</td><td>Concatenates array entries from <code>i</code> through <code>j</code>, placing <code>sep</code> between entries.</td></tr>
+            <tr><td><code>table.forward</code></td><td><code>table: table, forward: table|nil</code></td><td>No values.</td><td>Sets MicroLua's table lookup forwarding target. This is the small substitute for metatable <code>__index</code>.</td></tr>
+            <tr><td><code>table.insert</code></td><td><code>table: table, value: any</code> or <code>table: table, pos: integer, value: any</code></td><td>No values.</td><td>Inserts at the end or at <code>pos</code>. Positions outside <code>1..#table+1</code> are errors because they would create holes.</td></tr>
+            <tr><td><code>table.maxn</code></td><td><code>table: table</code></td><td>Number.</td><td>Returns the largest positive numeric key present in the table, or zero for non-tables/no numeric keys.</td></tr>
+            <tr><td><code>table.pack</code></td><td><code>...: any</code></td><td>Table.</td><td>Returns a table containing the arguments at integer keys and an <code>n</code> field with the argument count.</td></tr>
+            <tr><td><code>table.remove</code></td><td><code>table: table [, pos: integer]</code></td><td>Removed value, or <code>nil</code>.</td><td>Removes and returns the entry at <code>pos</code>, defaulting to the last array entry, then shifts later entries down.</td></tr>
+            <tr><td><code>table.sort</code></td><td><code>table: table [, comp: function]</code></td><td>No values.</td><td>Sorts the array part in place. <code>comp(a, b)</code>, when supplied, should return true when <code>a</code> comes before <code>b</code>.</td></tr>
+            <tr><td><code>table.unpack</code></td><td><code>table: table [, i: integer [, j: integer]]</code></td><td>Values <code>table[i]</code> through <code>table[j]</code>.</td><td>Returns array entries from <code>i</code> through <code>j</code>. Negative or zero starts are clamped to one; inverted ranges return no values.</td></tr>
+          </tbody>
+        </table>
+        <p>
+          <code>table.pack</code> and <code>table.unpack</code> follow the
+          Lua 5.2 naming. <code>unpack</code> is also available as a global
+          compatibility alias.
+        </p>
+      </section>
+
+      <section>
+        <h3><code>coroutine</code></h3>
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Function</th>
+              <th scope="col">Arguments</th>
+              <th scope="col">Returns</th>
+              <th scope="col">Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>coroutine.close</code></td><td><code>co: coroutine</code></td><td><code>true</code>, or <code>false, message</code>.</td><td>Closes a suspended or dead coroutine and drops its saved state. Closing a running coroutine is an error.</td></tr>
+            <tr><td><code>coroutine.create</code></td><td><code>func: function</code></td><td>Coroutine.</td><td>Creates a suspended coroutine that will run <code>func</code>.</td></tr>
+            <tr><td><code>coroutine.isyieldable</code></td><td>No arguments.</td><td>Boolean.</td><td>Returns true inside a coroutine when not crossing a C-call boundary.</td></tr>
+            <tr><td><code>coroutine.resume</code></td><td><code>co: coroutine, ...: any</code></td><td><code>true, ...</code> on success/yield; <code>false, message</code> on error.</td><td>Starts or resumes <code>co</code>, passing the remaining arguments into the coroutine.</td></tr>
+            <tr><td><code>coroutine.running</code></td><td>No arguments.</td><td><code>co, false</code> inside a coroutine; <code>nil, true</code> on the main thread.</td><td>Reports the currently running coroutine and whether execution is on the main thread.</td></tr>
+            <tr><td><code>coroutine.status</code></td><td><code>co: coroutine</code></td><td>String.</td><td>Returns <code>"suspended"</code>, <code>"running"</code>, <code>"normal"</code>, or <code>"dead"</code>.</td></tr>
+            <tr><td><code>coroutine.yield</code></td><td><code>...: any</code></td><td>Resume arguments when the coroutine is resumed again.</td><td>Suspends the current coroutine and transfers the arguments to its resumer.</td></tr>
+          </tbody>
+        </table>
+        <p>
+          Coroutines can yield from nested Lua calls. Yielding across a C-call
+          boundary is an error.
+        </p>
+      </section>
+
+      <section>
+        <h3>Optional <code>io</code> and <code>os</code></h3>
+        <p>
+          These are not part of the freestanding core. They are available in the
+          REPL build through <code>src/extensions/MLuaStdLib.c</code>.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Function</th>
+              <th scope="col">Arguments</th>
+              <th scope="col">Returns</th>
+              <th scope="col">Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>io.close</code></td><td><code>file: file</code></td><td>Boolean.</td><td>Closes a file handle created by <code>io.open</code>.</td></tr>
+            <tr><td><code>io.lines</code></td><td><code>file: file</code></td><td><code>iterator, file, nil</code>.</td><td>Returns an iterator triple that reads lines from a file handle.</td></tr>
+            <tr><td><code>io.open</code></td><td><code>path: string [, mode: string]</code></td><td>File handle, or <code>nil, message</code>.</td><td>Opens a file with the supplied C <code>fopen</code> mode, defaulting to read mode.</td></tr>
+            <tr><td><code>io.read</code></td><td><code>[format: string]</code></td><td>Read value, or no value at EOF.</td><td>Reads from standard input. Supported formats include line, <code>*l</code>, <code>*L</code>, <code>*n</code>, and <code>*a</code>.</td></tr>
+            <tr><td><code>io.write</code></td><td><code>...: any</code></td><td>No values.</td><td>Writes values to standard output.</td></tr>
+            <tr><td><code>file:read</code></td><td><code>[format: string]</code></td><td>Read value, or no value at EOF.</td><td>Reads from an opened file handle using the same formats as <code>io.read</code>.</td></tr>
+            <tr><td><code>file:write</code></td><td><code>...: any</code></td><td>The file handle.</td><td>Writes values to the file and returns the handle for chaining.</td></tr>
+            <tr><td><code>file:close</code></td><td><code>self: file</code></td><td>Boolean.</td><td>Closes the file handle.</td></tr>
+            <tr><td><code>file:lines</code></td><td><code>self: file</code></td><td><code>iterator, file, nil</code>.</td><td>Returns an iterator triple over lines in the file.</td></tr>
+            <tr><td><code>os.clock</code></td><td>No arguments.</td><td>Number.</td><td>Returns CPU time in seconds according to the host C library.</td></tr>
+            <tr><td><code>os.date</code></td><td><code>[format: string]</code></td><td>String or table.</td><td>Formats the current local time. <code>"*t"</code> returns a table with date/time fields.</td></tr>
+            <tr><td><code>os.exit</code></td><td><code>[code: integer]</code></td><td>Does not return.</td><td>Terminates the host process with the integer exit code, or zero.</td></tr>
+            <tr><td><code>os.getenv</code></td><td><code>name: string</code></td><td>String, or <code>nil</code>.</td><td>Returns the value of an environment variable.</td></tr>
+            <tr><td><code>os.time</code></td><td>No arguments.</td><td>Number.</td><td>Returns the current time as a host timestamp.</td></tr>
+            <tr><td><code>dofile</code></td><td><code>path: string</code></td><td>All chunk return values.</td><td>Loads and executes a file.</td></tr>
+            <tr><td><code>loadfile</code></td><td><code>path: string</code></td><td>Compiled function, or <code>nil, message</code>.</td><td>Loads and compiles a file without executing it.</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </section>
+
+    <section id="limitations">
+      <h2>Limitations</h2>
+      <ul>
+        <li>MicroLua is not a drop-in replacement for every Lua program.</li>
+        <li>C functions are light C functions and do not have upvalues.</li>
+        <li>Function environments are not supported; <code>setfenv</code> and <code>getfenv</code> are absent.</li>
+        <li><code>collectgarbage</code> is absent.</li>
+        <li>Metatables are absent; <code>setmetatable</code>, <code>getmetatable</code>, <code>rawequal</code>, <code>rawget</code>, and <code>rawset</code> are absent.</li>
+        <li><code>coroutine.wrap</code> is absent.</li>
+        <li><code>string.gsub</code> and <code>string.gmatch</code> are absent.</li>
+        <li>The package library, <code>LUA_PATH</code>, and <code>LUA_CPATH</code> behavior are absent.</li>
+        <li>Table arrays reject holes by design.</li>
+        <li>Integer arithmetic uses MicroLua's 32-bit integer behavior.</li>
+      </ul>
+    </section>
+
+    <section id="tests">
+      <h2>Tests and Benchmarks</h2>
+      <p>
+        Run all tests in a debug build:
+      </p>
+      <pre><code>meson test -C builddir</code></pre>
+      <p>
+        Run the freestanding release suite, including the libc-free symbol
+        guard:
+      </p>
+      <pre><code>meson test -C builddir-release</code></pre>
+      <p>
+        Run only interpreter, smoke, guard, CLI, or security suites:
+      </p>
+      <pre><code>meson test -C builddir --suite interpreter
+meson test -C builddir --suite smoke
+meson test -C builddir --suite guard
+meson test -C builddir --suite cli
+meson test -C builddir --suite security</code></pre>
+      <p>
+        Compare MicroLua against a local Lua 5.5 binary:
+      </p>
+      <pre><code>python3 bench/bench.py
+python3 bench/bench.py --quick</code></pre>
+      <p>
+        The benchmark checks byte-identical output before reporting timing,
+        native heap, and binary-size results. It skips cleanly when Lua 5.5 is
+        not available.
+      </p>
+    </section>
+
+    <section>
+      <h2>Compatibility Reference</h2>
+      <p>
+        MicroLua intentionally selects a small subset and a few later additions
+        from Lua. For background on standard Lua behavior, see the official
+        manuals at <a href="https://www.lua.org/manual/">lua.org/manual</a>.
+        This page documents only the features implemented by MicroLua.
+      </p>
+    </section>
+  </main>
+
+  <footer>
+    <p>
+      MicroLua source: <a href="https://github.com/lus-lang/microlua">github.com/lus-lang/microlua</a>
+    </p>
+  </footer>
+</body>
+</html>

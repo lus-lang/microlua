@@ -59,12 +59,6 @@ meson test -C builddir --suite smoke          # standalone smoke scripts
 
 A freestanding release build (`meson setup builddir-release --buildtype=release`) compiles the core with `-ffreestanding -fno-builtin`.
 
-## Benchmarks
-
-`python3 bench/bench.py` compares MicroLua against a local Lua 5.5 binary on the
-same workloads, checking byte-identical output before reporting timing, native
-heap, and binary-size results. It skips cleanly if Lua 5.5 is not available.
-
 [^1]: You can optionally choose to provide allocators for dynamic memory allocation.
 
 [^2]: These are provided in the repl.
