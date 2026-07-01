@@ -331,12 +331,14 @@ int MathIsInf(double x);
 #define MLUA_PI 3.14159265358979323846
 #endif
 
-/* Platform integer limits */
+/* Platform integer limits. The integer subtype is 32-bit on every target
+ * (inline on the NaN-boxing path, boxed when out of the inline range on the
+ * tagging path), so these mirror the I32 range rather than a 64-bit one. */
 #ifndef MLUA_MAXINTEGER
-#define MLUA_MAXINTEGER ((I64)0x7FFFFFFFFFFFFFFFLL)
+#define MLUA_MAXINTEGER ((I32)0x7FFFFFFF)
 #endif
 #ifndef MLUA_MININTEGER
-#define MLUA_MININTEGER ((I64)(-0x7FFFFFFFFFFFFFFFLL - 1))
+#define MLUA_MININTEGER ((I32)(-0x7FFFFFFF - 1))
 #endif
 
 #endif /* MLUA_CORE_H */
