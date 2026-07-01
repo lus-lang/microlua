@@ -2,3 +2,5 @@ lua-5.5.0/
 lua-5.5.0.tar.gz
 results/lua55_memory_runner
 results/mlua_memory_runner
+results/*.json
+results/*.md
