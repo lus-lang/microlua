@@ -36,10 +36,12 @@ typedef enum {
   OP_LOADK_S = 0x06,   /* 1B: idx → val   : Pop idx, push constants[idx] */
 
   /* ===== Locals (0x10-0x13) ===== */
-  OP_GETLOCAL = 0x10,   /* 2B: B → val       : Push locals[B] */
-  OP_SETLOCAL = 0x11,   /* 2B: B val →       : Pop to locals[B] */
-  OP_GETLOCAL_S = 0x12, /* 1B: idx → val     : Pop idx, push locals[idx] */
-  OP_SETLOCAL_S = 0x13, /* 1B: idx val →     : Pop idx and val, store */
+  OP_GETLOCAL = 0x10,       /* 2B: B → val       : Push locals[B] */
+  OP_SETLOCAL = 0x11,       /* 2B: B val →       : Pop to locals[B] */
+  OP_GETLOCAL_S = 0x12,     /* 1B: idx → val     : Pop idx, push locals[idx] */
+  OP_SETLOCAL_S = 0x13,     /* 1B: idx val →     : Pop idx and val, store */
+  OP_CLEARLOCAL = 0x0E,     /* 2B: B →           : locals[B] = nil */
+  OP_GETLOCAL_CLEAR = 0x0F, /* 2B: B → val       : Push and clear locals[B] */
 
   /* ===== Arguments (0x14-0x15) ===== */
   OP_GETARG = 0x14, /* 2B: B → val : Push args[B] */
@@ -265,6 +267,16 @@ struct MLuaFuncState {
   /* Highest local slot of THIS function captured by any nested function,
    * or -1 if none. Lets loops skip OP_CLOSE when nothing is captured. */
   int MaxCapturedSlot;
+  U32 CapturedSlots[8]; /* 256 bits: slots captured by nested functions */
+
+  /* Lexical scopes whose locals must be cleared when they end. */
+  struct {
+    U8 NumLocals;
+    U8 BreakBoundary;
+    Size LocalsSize;
+  } *Scopes;
+  Size ScopeTop;
+  Size ScopeCap;
 
   /* Code position right after the most recently emitted multi-result
    * instruction (OP_CALL/OP_CALLM/OP_VARARG-all), or 0. When this equals

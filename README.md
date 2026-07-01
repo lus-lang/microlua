@@ -15,7 +15,23 @@ MicroLua (`mlua`) is a tiny, reasonably complete Lua runtime. It is good for emb
  *   -v, --version         Print version
 ```
 
-In a local macOS size build with similar build flags, MicroLua's runtime artifacts total 218 KiB (259 KiB with the parser), around 2.8x smaller than Lua 5.5.0's runtime artifacts at 612 KiB. Re-run `python3 bench/bench.py` to regenerate local comparison results.
+In a local macOS size build with similar build flags, MicroLua's compiler/parser-less runtime artifacts total 218 KiB (259 KiB with the parser), around 2.8x smaller than Lua 5.5.0's runtime artifacts at 612 KiB. Re-run `python3 bench/bench.py` to regenerate local comparison results.
+
+## Memory benchmarks
+
+`python3 bench/benchmarksgame/bench.py` compares MicroLua with Lua 5.5 on
+small standalone ports of relevant Lua examples, scaled down for local runs and
+adjusted to avoid unsupported MicroLua features such as metatables and generated
+`load`. Each row passed a byte-identical stdout correctness gate. Lua memory is
+exact peak Lua heap from a tracking `lua_newstate` allocator. MicroLua memory is
+exact constrained-heap high-water from a high-limit `--dump` run.
+
+| workload     | source example       | memory-pressure focus    | Lua exact peak | MicroLua exact peak | mlua/lua memory |
+| ------------ | -------------------- | ------------------------ | -------------: | ------------------: | --------------: |
+| binarytrees  | `binarytrees-lua-4`  | allocation churn         |       1.19 MiB |           546.1 KiB |           0.45x |
+| knucleotide  | `knucleotide-lua-2`  | substring table pressure |       76.9 KiB |            71.8 KiB |           0.93x |
+| revcomp      | `revcomp-lua-5`      | string builder pressure  |      115.4 KiB |           104.5 KiB |           0.91x |
+| spectralnorm | `spectralnorm-lua-1` | numeric arrays           |       25.9 KiB |            25.6 KiB |           0.99x |
 
 ## At a glance
 
@@ -82,6 +98,25 @@ meson setup build-board -Dport_header=path/to/my_board_mlua.h
 
 Built-in presets are available with `-Dport=generic64`, `generic32`,
 `cortex-m`, or `riscv32`.
+
+## License
+
+```
+BSD Zero Clause License
+
+Copyright (c) 2026 Louka Ménard Blondin <hello@louka.sh>
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+```
 
 [^1]: You can optionally choose to provide allocators for dynamic memory allocation.
 

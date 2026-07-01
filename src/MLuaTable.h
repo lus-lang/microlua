@@ -28,20 +28,21 @@ typedef struct {
   MLuaValue Value;
 } MLuaTableNode;
 
+#define MLUA_TABLE_INLINE_ARRAY_CAP 3
+#define MLUA_TABLE_INLINE_HASH_CAP 1
+#define MLUA_TABLE_NODE_COUNT_MASK 0x3FFFFFFFU
+#define MLUA_TABLE_ARRAY_INLINE 0x40000000U
+#define MLUA_TABLE_HASH_INLINE 0x80000000U
+
 /* Table header (follows GC header) */
 typedef struct {
-  /* Array part */
-  MLuaValue *Array; /* Array of values (indices 1..ArraySize) */
-  Size ArraySize;   /* Current array capacity */
-  Size ArrayLen;    /* Actual length (# operator) */
-
-  /* Hash part */
-  MLuaTableNode *Nodes; /* Hash table nodes */
-  Size NodeCapacity;    /* Number of hash slots */
-  Size NodeCount;       /* Number of used slots */
-
-  /* Prototype delegation */
-  MLuaValue Forward; /* Forward table for failed lookups */
+  MLuaValue Forward;      /* Forward table for failed lookups */
+  U32 ArraySize;          /* Current array capacity */
+  U32 ArrayLen;           /* Actual length (# operator) */
+  U32 NodeCapacity;       /* Number of hash slots */
+  U32 NodeState;          /* Node count plus MLUA_TABLE_*_INLINE flags */
+  MLuaValue InlineArray[MLUA_TABLE_INLINE_ARRAY_CAP];
+  MLuaTableNode InlineNodes[MLUA_TABLE_INLINE_HASH_CAP];
 } MLuaTableHeader;
 
 /* Get table header from GC header */
@@ -51,6 +52,79 @@ typedef struct {
 #define MLUA_TABLE_INITIAL_ARRAY_SIZE 4
 #define MLUA_TABLE_INITIAL_HASH_SIZE 4
 #define MLUA_TABLE_LOAD_FACTOR 75
+
+static inline Bool MLuaTableArrayIsInline(const MLuaTableHeader *th) {
+  return (th->NodeState & MLUA_TABLE_ARRAY_INLINE) != 0;
+}
+
+static inline Bool MLuaTableHashIsInline(const MLuaTableHeader *th) {
+  return (th->NodeState & MLUA_TABLE_HASH_INLINE) != 0;
+}
+
+static inline Size MLuaTableNodeCount(const MLuaTableHeader *th) {
+  return (Size)(th->NodeState & MLUA_TABLE_NODE_COUNT_MASK);
+}
+
+static inline void MLuaTableSetNodeCount(MLuaTableHeader *th, Size count) {
+  th->NodeState = (th->NodeState & ~MLUA_TABLE_NODE_COUNT_MASK) |
+                  ((U32)count & MLUA_TABLE_NODE_COUNT_MASK);
+}
+
+static inline void MLuaTableIncNodeCount(MLuaTableHeader *th) {
+  MLuaTableSetNodeCount(th, MLuaTableNodeCount(th) + 1);
+}
+
+static inline void MLuaTableDecNodeCount(MLuaTableHeader *th) {
+  MLuaTableSetNodeCount(th, MLuaTableNodeCount(th) - 1);
+}
+
+static inline void MLuaTableSetArrayInline(MLuaTableHeader *th, Bool enabled) {
+  if (enabled) {
+    th->NodeState |= MLUA_TABLE_ARRAY_INLINE;
+  } else {
+    th->NodeState &= ~MLUA_TABLE_ARRAY_INLINE;
+  }
+}
+
+static inline void MLuaTableSetHashInline(MLuaTableHeader *th, Bool enabled) {
+  if (enabled) {
+    th->NodeState |= MLUA_TABLE_HASH_INLINE;
+  } else {
+    th->NodeState &= ~MLUA_TABLE_HASH_INLINE;
+  }
+}
+
+static inline MLuaValue *MLuaTableArrayData(MLuaTableHeader *th) {
+  return MLuaTableArrayIsInline(th) ? th->InlineArray
+                                    : (MLuaValue *)(UPtr)th->InlineArray[0];
+}
+
+static inline const MLuaValue *MLuaTableArrayDataConst(const MLuaTableHeader *th) {
+  return MLuaTableArrayIsInline(th) ? th->InlineArray
+                                    : (const MLuaValue *)(UPtr)th->InlineArray[0];
+}
+
+static inline MLuaTableNode *MLuaTableNodeData(MLuaTableHeader *th) {
+  return MLuaTableHashIsInline(th) ? th->InlineNodes
+                                   : (MLuaTableNode *)(UPtr)th->InlineNodes[0].Key;
+}
+
+static inline const MLuaTableNode *
+MLuaTableNodeDataConst(const MLuaTableHeader *th) {
+  return MLuaTableHashIsInline(th)
+             ? th->InlineNodes
+             : (const MLuaTableNode *)(UPtr)th->InlineNodes[0].Key;
+}
+
+static inline void MLuaTableSetArrayData(MLuaTableHeader *th,
+                                         MLuaValue *array) {
+  th->InlineArray[0] = (MLuaValue)(UPtr)array;
+}
+
+static inline void MLuaTableSetNodeData(MLuaTableHeader *th,
+                                        MLuaTableNode *nodes) {
+  th->InlineNodes[0].Key = (MLuaValue)(UPtr)nodes;
+}
 
 /* ========================================================================== */
 /* Table API                                                                  */

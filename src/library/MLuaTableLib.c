@@ -63,6 +63,34 @@ static int TableConcat(MLuaState *L) {
     return 1;
   }
 
+  if (L->GCPending || totalLen >= 1024) {
+    L->GCPending = FALSE;
+    MLuaGCCollect(L);
+    tbl = MLuaGetStack(L, 1);
+    if (top >= 2) {
+      sepval = MLuaGetStack(L, 2);
+    }
+  }
+
+  if (seplen == 0 && IsTable(tbl) && (Size)(j - startI + 1) <= 0x7FFFFFFFU) {
+    MLuaTableHeader *th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl));
+    if ((Size)j <= th->ArrayLen) {
+      MLuaValue *array = MLuaTableArrayData(th);
+      Bool allStrings = TRUE;
+      Size count = (Size)(j - startI + 1);
+      for (k = (Size)startI; k <= (Size)j; k++) {
+        if (!IsAnyString(array[k - 1])) {
+          allStrings = FALSE;
+          break;
+        }
+      }
+      if (allStrings) {
+        MLuaPush(L, MLuaStringConcatMany(L, &array[startI - 1], (int)count));
+        return 1;
+      }
+    }
+  }
+
   buf = (char *)MLuaAlloc(L, totalLen);
   if (!buf) {
     L->ErrorMsg = "out of memory";
@@ -404,6 +432,8 @@ static int TableForwardF(MLuaState *L) {
 static int TableMaxn(MLuaState *L) {
   MLuaValue tbl = MLuaGetStack(L, 1);
   MLuaTableHeader *th;
+  MLuaValue *array;
+  MLuaTableNode *nodes;
   double maxn = 0.0;
   Size i;
 
@@ -412,15 +442,17 @@ static int TableMaxn(MLuaState *L) {
     return 1;
   }
   th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl));
+  array = MLuaTableArrayData(th);
+  nodes = MLuaTableNodeData(th);
 
   for (i = 0; i < th->ArrayLen; i++) {
-    if (!IsNil(th->Array[i]) && (double)(i + 1) > maxn) {
+    if (!IsNil(array[i]) && (double)(i + 1) > maxn) {
       maxn = (double)(i + 1);
     }
   }
   for (i = 0; i < th->NodeCapacity; i++) {
-    if (!IsNil(th->Nodes[i].Key) && !IsNil(th->Nodes[i].Value)) {
-      MLuaValue k = th->Nodes[i].Key;
+    if (!IsNil(nodes[i].Key) && !IsNil(nodes[i].Value)) {
+      MLuaValue k = nodes[i].Key;
       if (IsInt(k)) {
         if ((double)GetInt(k) > maxn) {
           maxn = (double)GetInt(k);

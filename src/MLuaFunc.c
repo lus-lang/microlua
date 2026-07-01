@@ -21,7 +21,8 @@ MLuaClosure *MLuaClosureNew(MLuaState *L, MLuaProto *proto, U8 numUpvalues) {
     return NULL;
   }
   size = sizeof(MLuaClosure) + (Size)numUpvalues * sizeof(MLuaUpvalue *);
-  header = MLuaAllocObject(L, OBJTYPE_FUNCTION, size);
+  header = MLuaAllocObject(L, OBJTYPE_FUNCTION,
+                           size - sizeof(MLuaGCHeader));
 
   if (!header) {
     return NULL;
@@ -29,7 +30,6 @@ MLuaClosure *MLuaClosureNew(MLuaState *L, MLuaProto *proto, U8 numUpvalues) {
 
   cl = MLUA_CLOSURE(header);
   cl->Proto = proto;
-  cl->Env = L->Globals; /* Default environment */
   cl->NumUpvalues = numUpvalues;
 
   /* Initialize upvalue pointers to NULL */
@@ -52,7 +52,8 @@ MLuaCClosure *MLuaCClosureNew(MLuaState *L, MLuaCFunction func,
     return NULL;
   }
   size = sizeof(MLuaCClosure) + (Size)numUpvalues * sizeof(MLuaValue);
-  header = MLuaAllocObject(L, OBJTYPE_FUNCTION, size);
+  header = MLuaAllocObject(L, OBJTYPE_FUNCTION,
+                           size - sizeof(MLuaGCHeader));
 
   if (!header) {
     return NULL;
@@ -76,8 +77,8 @@ MLuaCClosure *MLuaCClosureNew(MLuaState *L, MLuaCFunction func,
 /* ========================================================================== */
 
 MLuaUpvalue *MLuaUpvalueNew(MLuaState *L, MLuaValue *slot) {
-  MLuaGCHeader *header =
-      MLuaAllocObject(L, OBJTYPE_UPVALUE, sizeof(MLuaUpvalue));
+  MLuaGCHeader *header = MLuaAllocObject(
+      L, OBJTYPE_UPVALUE, sizeof(MLuaUpvalue) - sizeof(MLuaGCHeader));
   MLuaUpvalue *uv;
 
   if (!header) {

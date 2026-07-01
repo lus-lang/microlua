@@ -9,7 +9,7 @@
 #include "MLuaCore.h"
 #include "MLuaValue.h"
 
-#define MLUA_BYTECODE_VERSION 2
+#define MLUA_BYTECODE_VERSION 3
 #define MLUA_BYTECODE_ENDIAN_LITTLE 0
 #define MLUA_BYTECODE_ENDIAN_BIG 1
 #define MLUA_BYTECODE_FLOAT_IEEE754 1

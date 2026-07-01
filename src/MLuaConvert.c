@@ -251,18 +251,15 @@ Size MLuaValueToStr(MLuaState *L, MLuaValue v, char *buf, Size bufLen) {
 
   /* Short string (inline) */
   if (IsShortStr(v)) {
-    Size len = 0;
-    char c0 = GetShortStrChar0(v);
-    char c1 = GetShortStrChar1(v);
-    char c2 = GetShortStrChar2(v);
-    if (c0 && len < bufLen - 1)
-      buf[len++] = c0;
-    if (c1 && len < bufLen - 1)
-      buf[len++] = c1;
-    if (c2 && len < bufLen - 1)
-      buf[len++] = c2;
-    buf[len] = '\0';
-    return len;
+    const char *s = MLuaStringData(v);
+    Size len = MLuaShortStrLen(v);
+    Size i;
+    Size out = 0;
+    for (i = 0; i < len && out < bufLen - 1; i++) {
+      buf[out++] = s[i];
+    }
+    buf[out] = '\0';
+    return out;
   }
 
   /* Light function */

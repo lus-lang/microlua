@@ -59,6 +59,8 @@ Size MLuaOpSize(MLuaOpCode op) {
   /* 2-byte instructions (opcode + 8-bit operand) */
   case OP_LOADINT:
   case OP_LOADK:
+  case OP_CLEARLOCAL:
+  case OP_GETLOCAL_CLEAR:
   case OP_GETLOCAL:
   case OP_SETLOCAL:
   case OP_GETARG:
@@ -274,6 +276,8 @@ const char *MLuaOpName(MLuaOpCode op) {
       [OP_LOADNIL] = "LOADNIL",
       [OP_LOADTRUE] = "LOADTRUE",
       [OP_LOADFALSE] = "LOADFALSE",
+      [OP_CLEARLOCAL] = "CLEARLOCAL",
+      [OP_GETLOCAL_CLEAR] = "GETLOCAL_CLEAR",
       [OP_LOADINT] = "LOADINT",
       [OP_LOADK] = "LOADK",
       [OP_LOADK_S] = "LOADK_S",

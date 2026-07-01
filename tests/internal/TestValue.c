@@ -138,10 +138,12 @@ TEST(ShortStr_Length) {
   MLuaValue v1 = MakeShortStr('a', 0, 0);
   MLuaValue v2 = MakeShortStr('a', 'b', 0);
   MLuaValue v3 = MakeShortStr('a', 'b', 'c');
+  MLuaValue v5 = MLuaMakeShortStr("hello", 5);
 
   ASSERT_EQ(MLuaShortStrLen(v1), 1);
   ASSERT_EQ(MLuaShortStrLen(v2), 2);
   ASSERT_EQ(MLuaShortStrLen(v3), 3);
+  ASSERT_EQ(MLuaShortStrLen(v5), MLUA_SHORTSTR_MAX);
 }
 
 TEST(ShortStr_FromCStr) {
@@ -153,7 +155,7 @@ TEST(ShortStr_FromCStr) {
 }
 
 TEST(ShortStr_TooLong) {
-  MLuaValue v = MLuaMakeShortStr("Hello", 5);
+  MLuaValue v = MLuaMakeShortStr("Hello!", 6);
   ASSERT(IsNil(v)); /* Should fail and return nil */
 }
 

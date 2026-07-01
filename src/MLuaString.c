@@ -87,7 +87,7 @@ static MLuaValue *StringTableFind(MLuaState *L, const char *str, Size len,
     gch = (MLuaGCHeader *)GetPtr(v);
     sh = MLUA_STRHEADER(gch);
 
-    if (sh->Hash == hash && sh->Length == len) {
+    if (sh->Hash == hash && (Size)sh->Length == len) {
       existingStr = MLUA_STRDATA(sh);
       if (MemCmp(existingStr, str, len) == 0) {
         /* Found it! */
@@ -127,7 +127,7 @@ static Bool StringTableResize(MLuaState *L) {
       MLuaGCHeader *gch = (MLuaGCHeader *)GetPtr(v);
       MLuaStringHeader *sh = MLUA_STRHEADER(gch);
       MLuaValue *slot =
-          StringTableFind(L, MLUA_STRDATA(sh), sh->Length, sh->Hash);
+          StringTableFind(L, MLUA_STRDATA(sh), (Size)sh->Length, sh->Hash);
       if (slot && IsNil(*slot)) {
         *slot = v;
         L->StringTableCount++;
@@ -166,20 +166,73 @@ static Bool StringTableInsert(MLuaState *L, MLuaValue strVal) {
   return FALSE;
 }
 
+Bool MLuaStringTableShrink(MLuaState *L) {
+  MLuaValue *oldEntries = L->StringTable;
+  Size oldCap = L->StringTableCap;
+  Size liveCount = 0;
+  Size newCap = MLUA_STRING_TABLE_INITIAL_SIZE;
+  Size bytesNeeded;
+  Size i;
+
+  if (!oldEntries || oldCap <= MLUA_STRING_TABLE_INITIAL_SIZE) {
+    return FALSE;
+  }
+
+  for (i = 0; i < oldCap; i++) {
+    if (IsPtr(oldEntries[i])) {
+      liveCount++;
+    }
+  }
+
+  while (liveCount >= (newCap * MLUA_STRING_TABLE_LOAD_FACTOR) / 100) {
+    newCap *= 2;
+  }
+
+  if (newCap * 2 >= oldCap) {
+    L->StringTableCount = liveCount;
+    return FALSE;
+  }
+
+  bytesNeeded = newCap * sizeof(MLuaValue);
+  L->StringTable = (MLuaValue *)MLuaAlloc(L, bytesNeeded);
+  if (!L->StringTable) {
+    L->StringTable = oldEntries;
+    return FALSE;
+  }
+
+  L->StringTableCap = newCap;
+  L->StringTableCount = 0;
+  for (i = 0; i < newCap; i++) {
+    L->StringTable[i] = MLUA_NIL;
+  }
+
+  for (i = 0; i < oldCap; i++) {
+    MLuaValue v = oldEntries[i];
+    if (IsPtr(v)) {
+      MLuaGCHeader *gch = (MLuaGCHeader *)GetPtr(v);
+      MLuaStringHeader *sh = MLUA_STRHEADER(gch);
+      MLuaValue *slot =
+          StringTableFind(L, MLUA_STRDATA(sh), (Size)sh->Length, sh->Hash);
+      if (slot && IsNil(*slot)) {
+        *slot = v;
+        L->StringTableCount++;
+      }
+    }
+  }
+
+  return TRUE;
+}
+
 /* ========================================================================== */
 /* String Creation                                                            */
 /* ========================================================================== */
 
 MLuaValue MLuaStringNewShort(const char *str, Size len) {
-  if (len > 3) {
+  if (len > MLUA_SHORTSTR_MAX) {
     return MLUA_NIL;
   }
 
-  char c0 = (len > 0) ? str[0] : 0;
-  char c1 = (len > 1) ? str[1] : 0;
-  char c2 = (len > 2) ? str[2] : 0;
-
-  return MakeShortStr(c0, c1, c2);
+  return MLuaMakeShortStr(str, len);
 }
 
 MLuaValue MLuaStringNew(MLuaState *L, const char *str, Size len) {
@@ -198,9 +251,13 @@ MLuaValue MLuaStringNew(MLuaState *L, const char *str, Size len) {
    * impossible: a non-NUL-terminated buffer would be read out of bounds.)
    */
 
-  /* Use short string for <= 3 bytes */
-  if (len <= 3) {
+  /* Use short string for small byte strings. */
+  if (len <= MLUA_SHORTSTR_MAX) {
     return MLuaStringNewShort(str, len);
+  }
+
+  if (len > (Size)0xFFFFFFFFU) {
+    return MLUA_NIL;
   }
 
   /* Initialize string table if needed */
@@ -233,7 +290,7 @@ MLuaValue MLuaStringNew(MLuaState *L, const char *str, Size len) {
 
   sh = MLUA_STRHEADER(gch);
   sh->Hash = hash;
-  sh->Length = len;
+  sh->Length = (U32)len;
 
   data = (char *)MLUA_STRDATA(sh);
   MemCpy(data, str, len);
@@ -262,7 +319,7 @@ MLuaValue MLuaStringNew(MLuaState *L, const char *str, Size len) {
  * until the fourth subsequent MLuaStringData call on a short string.
  */
 #define SHORTSTR_BUFFERS 4
-static char ShortStrBuffer[SHORTSTR_BUFFERS][4];
+static char ShortStrBuffer[SHORTSTR_BUFFERS][MLUA_SHORTSTR_MAX + 1];
 static unsigned ShortStrBufferIdx;
 
 Size MLuaStringLen(MLuaValue v) {
@@ -288,11 +345,29 @@ const char *MLuaStringData(MLuaValue v) {
 
   if (IsShortStr(v)) {
     char *buf = ShortStrBuffer[ShortStrBufferIdx];
+    Size len = MLuaShortStrLen(v);
+    Size i;
     ShortStrBufferIdx = (ShortStrBufferIdx + 1) % SHORTSTR_BUFFERS;
-    buf[0] = GetShortStrChar0(v);
-    buf[1] = GetShortStrChar1(v);
-    buf[2] = GetShortStrChar2(v);
-    buf[3] = '\0';
+    for (i = 0; i < len; i++) {
+      switch (i) {
+      case 0:
+        buf[i] = GetShortStrChar0(v);
+        break;
+      case 1:
+        buf[i] = GetShortStrChar1(v);
+        break;
+      case 2:
+        buf[i] = GetShortStrChar2(v);
+        break;
+      case 3:
+        buf[i] = GetShortStrChar3(v);
+        break;
+      default:
+        buf[i] = GetShortStrChar4(v);
+        break;
+      }
+    }
+    buf[len] = '\0';
     return buf;
   }
 
@@ -388,10 +463,10 @@ MLuaValue MLuaStringConcatMany(MLuaState *L, const MLuaValue *vals, int count) {
     totalLen += MLuaStringLen(vals[i]);
   }
 
-  /* Short result (<=3 bytes): assemble into a tiny buffer and return a short
+  /* Short result: assemble into a tiny buffer and return a short
    * string (short strings are never interned). */
-  if (totalLen <= 3) {
-    char tmp[4];
+  if (totalLen <= MLUA_SHORTSTR_MAX) {
+    char tmp[MLUA_SHORTSTR_MAX];
     Size t = 0;
     for (i = 0; i < count; i++) {
       const char *s = MLuaStringData(vals[i]);
@@ -459,7 +534,7 @@ MLuaValue MLuaStringConcatMany(MLuaState *L, const MLuaValue *vals, int count) {
     }
     sh->Hash = hash;
   }
-  sh->Length = totalLen;
+  sh->Length = (U32)totalLen;
   result = MakePtr(gch);
 
   /*

@@ -151,4 +151,64 @@ test.describe("multiple assignment", function()
     end)
 end)
 
+test.describe("lexical scopes", function()
+    test.it("does not leak do-block locals", function()
+        do
+            local scoped = 1
+            test.expect(scoped).toBe(1)
+        end
+        test.expect(scoped).toBeNil()
+    end)
+
+    test.it("does not leak branch locals", function()
+        if true then
+            local branch = 2
+            test.expect(branch).toBe(2)
+        else
+            local branch = 3
+            test.expect(branch).toBe(3)
+        end
+        test.expect(branch).toBeNil()
+    end)
+
+    test.it("does not leak loop-body locals", function()
+        local n = 0
+        while n < 1 do
+            local body = 4
+            test.expect(body).toBe(4)
+            n = n + 1
+        end
+        repeat
+            local repeated = 5
+            test.expect(repeated).toBe(5)
+            n = n + 1
+        until n == 2
+        for i = 1, 1 do
+            local numeric = i
+            test.expect(numeric).toBe(1)
+        end
+        for _, v in ipairs({ 6 }) do
+            local generic = v
+            test.expect(generic).toBe(6)
+        end
+        test.expect(body).toBeNil()
+        test.expect(repeated).toBeNil()
+        test.expect(numeric).toBeNil()
+        test.expect(generic).toBeNil()
+    end)
+
+    test.it("cleans locals on break without breaking captures", function()
+        local saved
+        while true do
+            do
+                local captured = 7
+                saved = function() return captured end
+                break
+            end
+        end
+        test.expect(saved()).toBe(7)
+        test.expect(captured).toBeNil()
+    end)
+end)
+
 assert(test.run())

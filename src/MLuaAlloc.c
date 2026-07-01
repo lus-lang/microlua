@@ -4,20 +4,38 @@
  */
 
 #include "MLuaAlloc.h"
+#include "MLuaCode.h"
 #include "MLuaGC.h"
+#include "MLuaString.h"
+#include "MLuaTable.h"
 
 /* ========================================================================== */
 /* State Initialization                                                       */
 /* ========================================================================== */
 
+Size MLuaNextGCThreshold(MLuaState *L, Size used) {
+  Size growth = (used * MLUA_DEFAULT_GC_THRESHOLD_PERCENT) / 100;
+  Size threshold;
+
+  if (growth < 4096) {
+    growth = 4096;
+  }
+  if (growth > L->HeapSize - used) {
+    return L->HeapSize;
+  }
+  threshold = used + growth;
+  return threshold > L->HeapSize ? L->HeapSize : threshold;
+}
+
 /* Common initialization logic */
 static void InitStateCommon(MLuaState *L, Size heapSize) {
   Size i;
+  UNUSED(heapSize);
 
   /* Initialize GC */
   L->GCEnabled = TRUE;
   L->GCPending = FALSE;
-  L->GCThreshold = (heapSize * MLUA_DEFAULT_GC_THRESHOLD_PERCENT) / 100;
+  L->GCThreshold = MLuaNextGCThreshold(L, L->HeapTop);
   L->GCPhase = 0;
   L->GCGrayQueue = 0;
 
@@ -150,6 +168,12 @@ MLuaState *MLuaNewConstrainedState(void *memory, Size size) {
   L->FrameCap = MLUA_DEFAULT_FRAMES_SIZE;
   L->FrameTop = 0;
   L->HeapTop += framesBytes;
+  L->HeapPeak = L->HeapTop;
+#ifdef MLUA_MEMORY_DIAGNOSTICS
+  L->AllocCount = 0;
+  L->AllocRequestedBytes = L->HeapTop;
+  L->AllocAlignedBytes = L->HeapTop;
+#endif
 
   InitStateCommon(L, size);
 
@@ -178,6 +202,12 @@ MLuaState *MLuaNewVectorState(void *ctx, MLuaAllocFunc allocFn,
   L->HeapBase = NULL; /* No fixed heap */
   L->HeapSize = 0;
   L->HeapTop = 0;
+#ifdef MLUA_MEMORY_DIAGNOSTICS
+  L->HeapPeak = 0;
+  L->AllocCount = 0;
+  L->AllocRequestedBytes = sizeof(MLuaState);
+  L->AllocAlignedBytes = sizeof(MLuaState);
+#endif
   L->AllocCtx = ctx;
   L->AllocFunc = allocFn;
   L->FreeFunc = freeFn;
@@ -261,6 +291,8 @@ MLuaState *MLuaNewVectorState(void *ctx, MLuaAllocFunc allocFn,
 
 Size MLuaMemoryUsed(MLuaState *L) { return L->HeapTop; }
 
+Size MLuaMemoryPeak(MLuaState *L) { return L->HeapPeak; }
+
 Size MLuaMemoryFree(MLuaState *L) {
   if (L->AllocFunc) {
     return (Size)-1; /* Unknown in vector mode */
@@ -269,6 +301,98 @@ Size MLuaMemoryFree(MLuaState *L) {
 }
 
 Size MLuaMemoryTotal(MLuaState *L) { return L->HeapSize; }
+
+void MLuaGetMemoryStats(MLuaState *L, MLuaMemoryStats *out) {
+  U8 *scan;
+  U8 *heapEnd;
+  Size firstObjOffset;
+
+  if (!out) {
+    return;
+  }
+  MemSet(out, 0, sizeof(*out));
+
+  out->HeapUsed = L->HeapTop;
+  out->HeapPeak = L->HeapPeak;
+  out->HeapTotal = L->HeapSize;
+  out->HeapBaseline = MLuaFirstObjOffset(L);
+  out->ExecReservedBytes =
+      ALIGN_UP(L->EvalStackSize * sizeof(MLuaValue), MLUA_ALIGNMENT) +
+      ALIGN_UP(L->LocalsSize * sizeof(MLuaValue), MLUA_ALIGNMENT) +
+      ALIGN_UP(L->ArgsSize * sizeof(MLuaValue), MLUA_ALIGNMENT) +
+      ALIGN_UP(L->FrameCap * sizeof(MLuaFrame), MLUA_ALIGNMENT);
+  out->StringTableBytes = L->StringTableCap * sizeof(MLuaValue);
+  out->LightFuncBytes = L->LightFuncCap * sizeof(void *);
+#ifdef MLUA_MEMORY_DIAGNOSTICS
+  out->AllocCount = L->AllocCount;
+  out->AllocRequestedBytes = L->AllocRequestedBytes;
+  out->AllocAlignedBytes = L->AllocAlignedBytes;
+#endif
+
+  if (L->AllocFunc || !L->HeapBase) {
+    return;
+  }
+
+  firstObjOffset = MLuaFirstObjOffset(L);
+  scan = L->HeapBase + firstObjOffset;
+  heapEnd = L->HeapBase + L->HeapTop;
+  while (scan < heapEnd) {
+    MLuaGCHeader *obj = (MLuaGCHeader *)scan;
+    Size objSize = MLuaObjectSize(obj);
+    U8 objType = MLUA_OBJTYPE(obj);
+
+    if (objSize == 0 || objSize > (Size)(heapEnd - scan)) {
+      break;
+    }
+
+    if (objType < MLUA_MEMORY_TYPE_SLOTS) {
+      out->ObjectCount[objType]++;
+      out->ObjectBytes[objType] += objSize;
+    }
+
+    switch (objType) {
+    case OBJTYPE_STRING: {
+      MLuaStringHeader *sh = MLUA_STRHEADER(obj);
+      out->StringPayloadBytes += sh->Length + 1;
+      break;
+    }
+    case OBJTYPE_TABLE: {
+      MLuaTableHeader *th = MLUA_TABLEHEADER(obj);
+      Size arrayBytes = th->ArraySize * sizeof(MLuaValue);
+      Size hashBytes = th->NodeCapacity * sizeof(MLuaTableNode);
+      out->TableArrayBytes += arrayBytes;
+      out->TableHashBytes += hashBytes;
+      if (MLuaTableArrayIsInline(th)) {
+        out->TableInlineArrayBytes += arrayBytes;
+        out->TableInlineArrayCount++;
+      } else {
+        out->TableExternalArrayBytes += arrayBytes;
+      }
+      if (MLuaTableHashIsInline(th)) {
+        out->TableInlineHashBytes += hashBytes;
+        out->TableInlineHashCount++;
+      } else {
+        out->TableExternalHashBytes += hashBytes;
+      }
+      break;
+    }
+    case OBJTYPE_PROTO: {
+      MLuaProto *proto = MLUA_PROTOHEADER(obj);
+      out->ProtoCodeBytes += proto->CodeCap * sizeof(U8);
+      out->ProtoConstantsBytes += proto->ConstantsCap * sizeof(MLuaValue);
+      out->ProtoProtosBytes += proto->ProtosSize * sizeof(MLuaProto *);
+      out->ProtoUpvaluesBytes += proto->UpvaluesSize * sizeof(MLuaUpvalDesc);
+      out->ProtoLineInfoBytes += proto->LineInfoCap * sizeof(U8);
+      out->ProtoLineMapBytes += proto->LineMapCap * sizeof(proto->LineMap[0]);
+      break;
+    }
+    default:
+      break;
+    }
+
+    scan += objSize;
+  }
+}
 
 /* ========================================================================== */
 /* Bump-Pointer Allocation                                                    */
@@ -326,6 +450,14 @@ static void *CoreAlloc(MLuaState *L, Size size) {
 
   ptr = L->HeapBase + L->HeapTop;
   L->HeapTop = newTop;
+#ifdef MLUA_MEMORY_DIAGNOSTICS
+  L->AllocCount++;
+  L->AllocRequestedBytes += size;
+  L->AllocAlignedBytes += aligned;
+#endif
+  if (L->HeapTop > L->HeapPeak) {
+    L->HeapPeak = L->HeapTop;
+  }
 
   /* Zero-initialize the allocation */
   MemSet(ptr, 0, aligned);
@@ -353,13 +485,16 @@ void *MLuaAlloc(MLuaState *L, Size size) {
     return NULL;
   }
   totalSize = sizeof(MLuaGCHeader) + size;
+  if (ALIGN_UP(totalSize, MLUA_ALIGNMENT) > (Size)0xFFFFFFFFU) {
+    return NULL;
+  }
   header = (MLuaGCHeader *)CoreAlloc(L, totalSize);
   if (!header) {
     return NULL;
   }
 
   header->Flags = (U8)OBJTYPE_RAW;
-  header->CachedSize = ALIGN_UP(totalSize, MLUA_ALIGNMENT);
+  header->CachedSize = (U32)ALIGN_UP(totalSize, MLUA_ALIGNMENT);
   header->Forward = NULL;
 
   return MLUA_OBJDATA(header);
@@ -378,6 +513,9 @@ MLuaGCHeader *MLuaAllocObject(MLuaState *L, U8 objType, Size dataSize) {
     return NULL;
   }
   totalSize = sizeof(MLuaGCHeader) + dataSize;
+  if (ALIGN_UP(totalSize, MLUA_ALIGNMENT) > (Size)0xFFFFFFFFU) {
+    return NULL;
+  }
 
   header = (MLuaGCHeader *)CoreAlloc(L, totalSize);
   if (!header) {
@@ -387,7 +525,7 @@ MLuaGCHeader *MLuaAllocObject(MLuaState *L, U8 objType, Size dataSize) {
   /* Initialize header with packed type in flags. CachedSize is the full
    * ALIGNED span so the heap walk steps exactly to the next header. */
   header->Flags = objType & GCFLAG_TYPE_MASK;
-  header->CachedSize = ALIGN_UP(totalSize, MLUA_ALIGNMENT);
+  header->CachedSize = (U32)ALIGN_UP(totalSize, MLUA_ALIGNMENT);
   header->Forward = NULL;
 
   return header;

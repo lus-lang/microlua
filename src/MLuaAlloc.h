@@ -52,6 +52,11 @@ MLuaState *MLuaNewVectorState(void *ctx, MLuaAllocFunc allocFn,
 Size MLuaMemoryUsed(MLuaState *L);
 
 /*
+ * Get peak constrained-heap usage since state creation.
+ */
+Size MLuaMemoryPeak(MLuaState *L);
+
+/*
  * Get amount of free memory remaining.
  */
 Size MLuaMemoryFree(MLuaState *L);
@@ -60,6 +65,45 @@ Size MLuaMemoryFree(MLuaState *L);
  * Get total heap size.
  */
 Size MLuaMemoryTotal(MLuaState *L);
+
+#define MLUA_MEMORY_TYPE_SLOTS 16
+
+typedef struct {
+  Size HeapUsed;
+  Size HeapPeak;
+  Size HeapTotal;
+  Size HeapBaseline;
+  Size AllocCount;
+  Size AllocRequestedBytes;
+  Size AllocAlignedBytes;
+  Size ObjectCount[MLUA_MEMORY_TYPE_SLOTS];
+  Size ObjectBytes[MLUA_MEMORY_TYPE_SLOTS];
+  Size ExecReservedBytes;
+  Size StringTableBytes;
+  Size LightFuncBytes;
+  Size StringPayloadBytes;
+  Size TableArrayBytes;
+  Size TableHashBytes;
+  Size TableInlineArrayBytes;
+  Size TableInlineHashBytes;
+  Size TableExternalArrayBytes;
+  Size TableExternalHashBytes;
+  Size TableInlineArrayCount;
+  Size TableInlineHashCount;
+  Size ProtoCodeBytes;
+  Size ProtoConstantsBytes;
+  Size ProtoProtosBytes;
+  Size ProtoUpvaluesBytes;
+  Size ProtoLineInfoBytes;
+  Size ProtoLineMapBytes;
+} MLuaMemoryStats;
+
+/*
+ * Collect a diagnostic memory snapshot. Object counts and bytes describe the
+ * currently walkable constrained heap. Allocation counters are non-zero only
+ * in builds compiled with MLUA_MEMORY_DIAGNOSTICS.
+ */
+void MLuaGetMemoryStats(MLuaState *L, MLuaMemoryStats *out);
 
 /* ========================================================================== */
 /* Allocation Interface                                                       */
@@ -103,6 +147,11 @@ Size MLuaObjectSize(MLuaGCHeader *header);
  * struct and the carved-out execution arrays). The GC heap walk starts here.
  */
 Size MLuaFirstObjOffset(MLuaState *L);
+
+/*
+ * Compute the next collection threshold from current live/retained usage.
+ */
+Size MLuaNextGCThreshold(MLuaState *L, Size used);
 
 /* ========================================================================== */
 /* Call Frames & Execution Contexts                                           */
@@ -165,6 +214,12 @@ struct MLuaState {
   U8 *HeapBase;  /* Start of heap memory (NULL for vector mode) */
   Size HeapSize; /* Total heap size (for constrained mode) */
   Size HeapTop;  /* Current bump pointer offset */
+  Size HeapPeak; /* Highest HeapTop reached since state creation */
+#ifdef MLUA_MEMORY_DIAGNOSTICS
+  Size AllocCount;
+  Size AllocRequestedBytes;
+  Size AllocAlignedBytes;
+#endif
 
   /* Custom Allocator (vector mode) */
   void *AllocCtx;          /* User context for allocator */

@@ -6,6 +6,7 @@
 #include "MLuaGC.h"
 #include "MLuaAlloc.h"
 #include "MLuaFunc.h"
+#include "MLuaString.h"
 #include "MLuaTable.h"
 #include "MLuaThread.h"
 
@@ -102,19 +103,25 @@ void MLuaGCMarkObject(MLuaState *L, MLuaGCHeader *obj) {
   case OBJTYPE_TABLE: {
     /* Mark table keys and values */
     MLuaTableHeader *th = MLUA_TABLEHEADER(obj);
+    MLuaValue *array = MLuaTableArrayData(th);
+    MLuaTableNode *nodes = MLuaTableNodeData(th);
     Size i;
     /* The array/node buffers are owned raw allocations */
-    MarkRaw(L, th->Array);
-    MarkRaw(L, th->Nodes);
+    if (!MLuaTableArrayIsInline(th) && th->ArraySize > 0) {
+      MarkRaw(L, array);
+    }
+    if (!MLuaTableHashIsInline(th) && th->NodeCapacity > 0) {
+      MarkRaw(L, nodes);
+    }
     /* Mark array part */
     for (i = 0; i < th->ArraySize; i++) {
-      MLuaGCMark(L, th->Array[i]);
+      MLuaGCMark(L, array[i]);
     }
     /* Mark hash part */
     for (i = 0; i < th->NodeCapacity; i++) {
-      if (!IsNil(th->Nodes[i].Key)) {
-        MLuaGCMark(L, th->Nodes[i].Key);
-        MLuaGCMark(L, th->Nodes[i].Value);
+      if (!IsNil(nodes[i].Key)) {
+        MLuaGCMark(L, nodes[i].Key);
+        MLuaGCMark(L, nodes[i].Value);
       }
     }
     /* Mark forward table */
@@ -125,8 +132,6 @@ void MLuaGCMarkObject(MLuaState *L, MLuaGCHeader *obj) {
     /* Mark closure's upvalues and prototype */
     MLuaClosure *cl = MLUA_CLOSURE(obj);
     Size i;
-    /* Mark environment */
-    MLuaGCMark(L, cl->Env);
     /* Mark the prototype (a GC object in its own right) */
     if (cl->Proto) {
       MLuaGCMarkObject(L, MLUA_OBJHEADER(cl->Proto));
@@ -520,25 +525,30 @@ static void UpdateReferences(MLuaState *L) {
       switch (objType) {
       case OBJTYPE_TABLE: {
         MLuaTableHeader *th = MLUA_TABLEHEADER(obj);
+        MLuaValue *array = MLuaTableArrayData(th);
+        MLuaTableNode *nodes = MLuaTableNodeData(th);
         Size i;
         /* Contents are updated through the OLD buffer (they move with it);
          * the buffer pointers are then remapped to the new locations. */
         for (i = 0; i < th->ArraySize; i++) {
-          th->Array[i] = UpdateValue(L, th->Array[i]);
+          array[i] = UpdateValue(L, array[i]);
         }
         for (i = 0; i < th->NodeCapacity; i++) {
-          th->Nodes[i].Key = UpdateValue(L, th->Nodes[i].Key);
-          th->Nodes[i].Value = UpdateValue(L, th->Nodes[i].Value);
+          nodes[i].Key = UpdateValue(L, nodes[i].Key);
+          nodes[i].Value = UpdateValue(L, nodes[i].Value);
         }
         th->Forward = UpdateValue(L, th->Forward);
-        th->Array = (MLuaValue *)UpdateDataPtr(L, th->Array);
-        th->Nodes = (MLuaTableNode *)UpdateDataPtr(L, th->Nodes);
+        if (!MLuaTableArrayIsInline(th) && th->ArraySize > 0) {
+          MLuaTableSetArrayData(th, (MLuaValue *)UpdateDataPtr(L, array));
+        }
+        if (!MLuaTableHashIsInline(th) && th->NodeCapacity > 0) {
+          MLuaTableSetNodeData(th, (MLuaTableNode *)UpdateDataPtr(L, nodes));
+        }
         break;
       }
       case OBJTYPE_FUNCTION: {
         MLuaClosure *cl = MLUA_CLOSURE(obj);
         Size i;
-        cl->Env = UpdateValue(L, cl->Env);
         cl->Proto = (MLuaProto *)UpdateDataPtr(L, cl->Proto);
         for (i = 0; i < cl->NumUpvalues; i++) {
           MLuaUpvalue **uvPtr = &MLUA_CLOSURE_UPVALS(cl)[i];
@@ -832,11 +842,17 @@ GC_TRACE("[gc] done (top=%lu)\n", (unsigned long)L->HeapTop);
   MLuaGCVerifyHeap(L, "collect-end");
 #endif
 
-  /* Update GC threshold based on new usage */
-  L->GCThreshold = L->HeapTop + (L->HeapSize - L->HeapTop) / 2;
-  if (L->GCThreshold > L->HeapSize) {
-    L->GCThreshold = L->HeapSize;
+  /* A weak string table can be mostly tombstones after update/compact. If a
+   * smaller backing array is installed, run one cleanup collection so the old
+   * backing raw buffer does not remain retained until the next cycle. */
+  if (MLuaStringTableShrink(L)) {
+    MLuaGCCollect(L);
+    return;
   }
+
+  /* Update GC threshold based on live growth, not total heap capacity. */
+  L->GCThreshold = MLuaNextGCThreshold(L, L->HeapTop);
+  L->GCPending = FALSE;
 }
 
 Bool MLuaGCStep(MLuaState *L) {

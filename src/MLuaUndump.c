@@ -185,6 +185,15 @@ static Bool ValidateCode(BCReader *r, MLuaProto *p) {
     }
 
     switch ((MLuaOpCode)op) {
+    case OP_CLEARLOCAL:
+    case OP_GETLOCAL:
+    case OP_GETLOCAL_CLEAR:
+    case OP_SETLOCAL:
+      if (operand >= p->NumLocals) {
+        Fail(r, "bytecode local index out of range");
+        return FALSE;
+      }
+      break;
     case OP_LOADK:
       if ((Size)operand >= p->ConstantsSize) {
         Fail(r, "bytecode constant index out of range");

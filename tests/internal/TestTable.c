@@ -58,6 +58,31 @@ TEST(Create_Sized) {
   ASSERT_EQ(MLuaTableLen(tbl), 0);
 }
 
+TEST(Create_SmallHintsUseInlineStorage) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  MLuaGCHeader *gch;
+  MLuaTableHeader *th;
+  ASSERT_NE(L, NULL);
+
+  MLuaValue arrayTbl = MLuaTableNewSized(L, 3, 0);
+  gch = (MLuaGCHeader *)GetPtr(arrayTbl);
+  th = MLUA_TABLEHEADER(gch);
+  ASSERT(MLuaTableArrayIsInline(th));
+  ASSERT(!MLuaTableHashIsInline(th));
+
+  MLuaValue hashTbl = MLuaTableNewSized(L, 0, 1);
+  gch = (MLuaGCHeader *)GetPtr(hashTbl);
+  th = MLUA_TABLEHEADER(gch);
+  ASSERT(!MLuaTableArrayIsInline(th));
+  ASSERT(MLuaTableHashIsInline(th));
+
+  MLuaValue mixedTbl = MLuaTableNewSized(L, 3, 1);
+  gch = (MLuaGCHeader *)GetPtr(mixedTbl);
+  th = MLUA_TABLEHEADER(gch);
+  ASSERT(MLuaTableArrayIsInline(th));
+  ASSERT(MLuaTableHashIsInline(th));
+}
+
 /* ========================================================================== */
 /* Array Part Tests                                                           */
 /* ========================================================================== */
@@ -85,6 +110,26 @@ TEST(Array_Sequential) {
 
   ASSERT_EQ(MLuaTableLen(tbl), 3);
   ASSERT_EQ(GetInt(MLuaTableGet(L, tbl, MakeInt(2))), 20);
+}
+
+TEST(Array_PromotesAfterInlineCapacity) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  MLuaGCHeader *gch;
+  MLuaTableHeader *th;
+  ASSERT_NE(L, NULL);
+
+  MLuaValue tbl = MLuaTableNew(L);
+  ASSERT(MLuaTableSet(L, tbl, MakeInt(1), MakeInt(10)));
+  ASSERT(MLuaTableSet(L, tbl, MakeInt(2), MakeInt(20)));
+  ASSERT(MLuaTableSet(L, tbl, MakeInt(3), MakeInt(30)));
+  gch = (MLuaGCHeader *)GetPtr(tbl);
+  th = MLUA_TABLEHEADER(gch);
+  ASSERT(MLuaTableArrayIsInline(th));
+
+  ASSERT(MLuaTableSet(L, tbl, MakeInt(4), MakeInt(40)));
+  ASSERT(!MLuaTableArrayIsInline(th));
+  ASSERT_EQ(GetInt(MLuaTableGet(L, tbl, MakeInt(1))), 10);
+  ASSERT_EQ(GetInt(MLuaTableGet(L, tbl, MakeInt(4))), 40);
 }
 
 TEST(Array_Append) {
@@ -155,6 +200,29 @@ TEST(Hash_Multiple) {
   ASSERT_EQ(GetInt(MLuaTableGet(L, tbl, k1)), 1);
   ASSERT_EQ(GetInt(MLuaTableGet(L, tbl, k2)), 2);
   ASSERT_EQ(GetInt(MLuaTableGet(L, tbl, k3)), 3);
+}
+
+TEST(Hash_PromotesAfterInlineCapacity) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  MLuaGCHeader *gch;
+  MLuaTableHeader *th;
+  MLuaValue tbl;
+  MLuaValue k1;
+  MLuaValue k2;
+  ASSERT_NE(L, NULL);
+
+  tbl = MLuaTableNew(L);
+  k1 = MLuaStringNew(L, "one", 3);
+  k2 = MLuaStringNew(L, "two", 3);
+  ASSERT(MLuaTableSet(L, tbl, k1, MakeInt(1)));
+  gch = (MLuaGCHeader *)GetPtr(tbl);
+  th = MLUA_TABLEHEADER(gch);
+  ASSERT(MLuaTableHashIsInline(th));
+
+  ASSERT(MLuaTableSet(L, tbl, k2, MakeInt(2)));
+  ASSERT(!MLuaTableHashIsInline(th));
+  ASSERT_EQ(GetInt(MLuaTableGet(L, tbl, k1)), 1);
+  ASSERT_EQ(GetInt(MLuaTableGet(L, tbl, k2)), 2);
 }
 
 TEST(Hash_Delete) {
@@ -248,16 +316,19 @@ int main(void) {
   printf("Creation:\n");
   RUN_TEST(Create_Empty);
   RUN_TEST(Create_Sized);
+  RUN_TEST(Create_SmallHintsUseInlineStorage);
 
   printf("\nArray Part:\n");
   RUN_TEST(Array_SetGet);
   RUN_TEST(Array_Sequential);
+  RUN_TEST(Array_PromotesAfterInlineCapacity);
   RUN_TEST(Array_Append);
   RUN_TEST(Array_NoHoles);
 
   printf("\nHash Part:\n");
   RUN_TEST(Hash_StringKey);
   RUN_TEST(Hash_Multiple);
+  RUN_TEST(Hash_PromotesAfterInlineCapacity);
   RUN_TEST(Hash_Delete);
 
   printf("\nForward Delegation:\n");

@@ -30,6 +30,17 @@ test_alloc = executable('test_alloc', 'TestAlloc.c',
 )
 test('TestAlloc', test_alloc)
 
+if memory_diagnostics
+    test_memory_diagnostics = executable('test_memory_diagnostics',
+        'TestMemoryDiagnostics.c',
+        include_directories: test_inc,
+        link_with: microlua_lib,
+        c_args: test_c_args
+    )
+    test('TestMemoryDiagnostics', test_memory_diagnostics,
+        suite: 'memory')
+endif
+
 # Test for garbage collector
 test_gc = executable('test_gc', 'TestGC.c',
     include_directories: test_inc,

@@ -43,7 +43,6 @@ typedef struct MLuaClosure MLuaClosure;
 struct MLuaClosure {
   MLuaGCHeader Header; /* GC header (type = OBJTYPE_FUNCTION) */
   MLuaProto *Proto;    /* Function prototype */
-  MLuaValue Env;       /* Function environment (_ENV) */
   U8 NumUpvalues;      /* Number of upvalues */
   /* MLuaUpvalue* Upvalues[NumUpvalues] follows in memory */
 };

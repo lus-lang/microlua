@@ -22,9 +22,9 @@
  */
 
 typedef struct {
-  U32 Hash;    /* Precomputed hash value */
-  Size Length; /* String length (not including null terminator) */
-               /* Followed by char data[Length + 1] */
+  U32 Hash;   /* Precomputed hash value */
+  U32 Length; /* String length (not including null terminator) */
+              /* Followed by char data[Length + 1] */
 } MLuaStringHeader;
 
 /* Get string data pointer from header */
@@ -67,7 +67,7 @@ Bool MLuaStringTableInit(MLuaState *L);
 MLuaValue MLuaStringNew(MLuaState *L, const char *str, Size len);
 
 /*
- * Create a short inline string (up to 3 bytes).
+ * Create a short inline string (up to MLUA_SHORTSTR_MAX bytes).
  * These are stored directly in the MLuaValue without heap allocation.
  */
 MLuaValue MLuaStringNewShort(const char *str, Size len);
@@ -116,5 +116,11 @@ MLuaValue MLuaStringConcatMany(MLuaState *L, const MLuaValue *vals, int count);
  * Hash function for strings (FNV-1a)
  */
 U32 MLuaStringHash(const char *str, Size len);
+
+/*
+ * Shrink and rehash the weak intern table after a GC has tombstoned dead
+ * strings. Returns TRUE when a smaller backing table was installed.
+ */
+Bool MLuaStringTableShrink(MLuaState *L);
 
 #endif /* MLUA_STRING_H */

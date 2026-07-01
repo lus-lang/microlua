@@ -16,3 +16,9 @@ option('port_header',
     value: '',
     description: 'Custom MicroLua port header to include with -DMLUA_PORT_HEADER'
 )
+
+option('memory_diagnostics',
+    type: 'boolean',
+    value: false,
+    description: 'Enable allocation counters and memory diagnostic snapshots'
+)

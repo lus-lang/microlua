@@ -166,6 +166,101 @@ static void AddLocal(MLuaParser *p, const char *name, Size len) {
   }
 }
 
+static void MarkCapturedLocal(MLuaFuncState *fs, int slot) {
+  if (!fs || slot < 0 || slot >= 256) {
+    return;
+  }
+  fs->CapturedSlots[(Size)slot / 32] |= (U32)1 << ((Size)slot % 32);
+  if (slot > fs->MaxCapturedSlot) {
+    fs->MaxCapturedSlot = slot;
+  }
+}
+
+static Bool IsCapturedLocal(MLuaFuncState *fs, int slot) {
+  if (!fs || slot < 0 || slot >= 256) {
+    return FALSE;
+  }
+  return (fs->CapturedSlots[(Size)slot / 32] & ((U32)1 << ((Size)slot % 32))) !=
+         0;
+}
+
+static Bool GrowScopeStack(MLuaParser *p) {
+  MLuaFuncState *fs = p->FS;
+  Size newCap = (fs->ScopeCap == 0) ? 8 : fs->ScopeCap * 2;
+  void *mem = MLuaAlloc(p->L, newCap * sizeof(fs->Scopes[0]));
+
+  if (!mem) {
+    Error(p, "out of memory");
+    return FALSE;
+  }
+  if (fs->Scopes) {
+    MemCpy(mem, fs->Scopes, fs->ScopeTop * sizeof(fs->Scopes[0]));
+  }
+  fs->Scopes = mem;
+  fs->ScopeCap = newCap;
+  return TRUE;
+}
+
+static void EmitLocalCleanup(MLuaParser *p, U8 base, U8 top) {
+  MLuaFuncState *fs = p->FS;
+  U8 slot;
+
+  if (top <= base) {
+    return;
+  }
+  if (fs->MaxCapturedSlot >= (int)base) {
+    MLuaEmitOpB(fs, OP_CLOSE, base);
+  }
+  for (slot = base; slot < top; slot++) {
+    MLuaEmitOpB(fs, OP_CLEARLOCAL, slot);
+  }
+}
+
+static void BeginScope(MLuaParser *p, Bool breakBoundary) {
+  MLuaFuncState *fs = p->FS;
+
+  if (fs->ScopeTop >= fs->ScopeCap && !GrowScopeStack(p)) {
+    return;
+  }
+  fs->Scopes[fs->ScopeTop].NumLocals = fs->NumLocals;
+  fs->Scopes[fs->ScopeTop].LocalsSize = fs->LocalsSize;
+  fs->Scopes[fs->ScopeTop].BreakBoundary = breakBoundary ? 1 : 0;
+  fs->ScopeTop++;
+}
+
+static void EndScope(MLuaParser *p) {
+  MLuaFuncState *fs = p->FS;
+  U8 base;
+  U8 top;
+
+  if (fs->ScopeTop == 0) {
+    return;
+  }
+  base = fs->Scopes[fs->ScopeTop - 1].NumLocals;
+  top = fs->NumLocals;
+  EmitLocalCleanup(p, base, top);
+  fs->NumLocals = base;
+  fs->LocalsSize = fs->Scopes[fs->ScopeTop - 1].LocalsSize;
+  fs->ScopeTop--;
+}
+
+static void EmitBreakCleanup(MLuaParser *p) {
+  MLuaFuncState *fs = p->FS;
+  Size i;
+
+  if (fs->ScopeTop == 0) {
+    return;
+  }
+  for (i = fs->ScopeTop; i > 0; i--) {
+    U8 base = fs->Scopes[i - 1].NumLocals;
+    U8 top = (i == fs->ScopeTop) ? fs->NumLocals : fs->Scopes[i].NumLocals;
+    EmitLocalCleanup(p, base, top);
+    if (fs->Scopes[i - 1].BreakBoundary) {
+      return;
+    }
+  }
+}
+
 /* ========================================================================== */
 /* Upvalue Resolution                                                         */
 /* ========================================================================== */
@@ -262,9 +357,7 @@ static int ResolveVar(MLuaParser *p, MLuaFuncState *fs, const char *name,
   if (kind == VAR_LOCAL) {
     /* fs->Prev's local 'outer' is now captured: remember the highest captured
      * slot so loops in that function know whether they must emit OP_CLOSE. */
-    if (outer > fs->Prev->MaxCapturedSlot) {
-      fs->Prev->MaxCapturedSlot = outer;
-    }
+    MarkCapturedLocal(fs->Prev, outer);
     *outIdx = AddUpval(p, fs, name, len, 1, (U8)outer);
     return (*outIdx >= 0) ? VAR_UPVAL : VAR_GLOBAL;
   }
@@ -416,6 +509,117 @@ static void EmitCloseIfCaptured(MLuaParser *p, U8 base) {
 
   if (fs->MaxCapturedSlot >= (int)base) {
     MLuaEmitOpB(fs, OP_CLOSE, base);
+  }
+}
+
+static void MarkLoopRange(U8 *mask, Size size, Size from, Size to) {
+  Size i;
+  if (from > to || from >= size) {
+    return;
+  }
+  if (to > size) {
+    to = size;
+  }
+  for (i = from; i < to; i++) {
+    mask[i] = 1;
+  }
+}
+
+static Bool HasLaterLocalRead(MLuaProto *proto, Size start, U8 slot) {
+  Size pc = start;
+
+  while (pc < proto->CodeSize) {
+    MLuaOpCode op = (MLuaOpCode)proto->Code[pc];
+    Size size = MLuaOpSize(op);
+
+    if (size == 0 || pc + size > proto->CodeSize) {
+      return TRUE;
+    }
+    if ((op == OP_GETLOCAL || op == OP_GETLOCAL_CLEAR) &&
+        proto->Code[pc + 1] == slot) {
+      return TRUE;
+    }
+    pc += size;
+  }
+  return FALSE;
+}
+
+static void OptimizeLastLocalUses(MLuaFuncState *fs) {
+  MLuaProto *proto = fs->Proto;
+  U8 *loopMask;
+  Size pc;
+  Bool hasLongBackward = FALSE;
+
+  if (!proto || proto->CodeSize == 0) {
+    return;
+  }
+
+  loopMask = (U8 *)MLuaAlloc(fs->L, proto->CodeSize);
+  if (!loopMask) {
+    return;
+  }
+  MemSet(loopMask, 0, proto->CodeSize);
+
+  pc = 0;
+  while (pc < proto->CodeSize) {
+    MLuaOpCode op = (MLuaOpCode)proto->Code[pc];
+    Size size = MLuaOpSize(op);
+
+    if (size == 0 || pc + size > proto->CodeSize) {
+      return;
+    }
+    if ((op == OP_JMP || op == OP_JMPF || op == OP_JMPT) && size == 2) {
+      I8 off = (I8)proto->Code[pc + 1];
+      if (off < 0) {
+        Size target = (Size)((IPtr)(pc + 2) + (IPtr)off);
+        MarkLoopRange(loopMask, proto->CodeSize, target, pc + size);
+      }
+    } else if (op == OP_LOOP && size == 2) {
+      U8 off = proto->Code[pc + 1];
+      Size target = (off > pc) ? 0 : pc - off;
+      MarkLoopRange(loopMask, proto->CodeSize, target, pc + size);
+    } else if (op == OP_LOOP_S) {
+      hasLongBackward = TRUE;
+    } else if (op == OP_NLOOP_PREP && size == 2) {
+      U8 base = proto->Code[pc + 1];
+      Size scan = pc + size;
+      while (scan < proto->CodeSize) {
+        MLuaOpCode scanOp = (MLuaOpCode)proto->Code[scan];
+        Size scanSize = MLuaOpSize(scanOp);
+        if (scanSize == 0 || scan + scanSize > proto->CodeSize) {
+          return;
+        }
+        if (scanOp == OP_NLOOP_STEP && scanSize == 2 &&
+            proto->Code[scan + 1] == base) {
+          MarkLoopRange(loopMask, proto->CodeSize, pc, scan + scanSize);
+          break;
+        }
+        scan += scanSize;
+      }
+    }
+    pc += size;
+  }
+
+  if (hasLongBackward) {
+    return;
+  }
+
+  pc = 0;
+  while (pc < proto->CodeSize) {
+    MLuaOpCode op = (MLuaOpCode)proto->Code[pc];
+    Size size = MLuaOpSize(op);
+
+    if (size == 0 || pc + size > proto->CodeSize) {
+      return;
+    }
+    if (op == OP_GETLOCAL && !loopMask[pc]) {
+      U8 slot = proto->Code[pc + 1];
+      if (!IsCapturedLocal(fs, slot) &&
+          !HasLaterLocalRead(proto, pc + size, slot)) {
+        proto->Code[pc] = (U8)OP_GETLOCAL_CLEAR;
+      }
+    }
+    pc += size;
   }
 }
 
@@ -1236,7 +1440,9 @@ static void ParseIf(MLuaParser *p) {
   jmpToElse = EmitFwdJump(p, OP_JMPF);
   StackPop(p, 1);
 
+  BeginScope(p, FALSE);
   ParseBlock(p);
+  EndScope(p);
 
   while (Check(p, TK_ELSEIF)) {
     PushPatch(p, EmitFwdJump(p, OP_JMP)); /* Arm done -> jump to end */
@@ -1250,7 +1456,9 @@ static void ParseIf(MLuaParser *p) {
     jmpToElse = EmitFwdJump(p, OP_JMPF);
     StackPop(p, 1);
 
+    BeginScope(p, FALSE);
     ParseBlock(p);
+    EndScope(p);
   }
 
   if (Check(p, TK_ELSE)) {
@@ -1260,7 +1468,9 @@ static void ParseIf(MLuaParser *p) {
     haveElse = TRUE;
 
     Advance(p); /* Skip 'else' */
+    BeginScope(p, FALSE);
     ParseBlock(p);
+    EndScope(p);
   }
 
   Expect(p, TK_END);
@@ -1289,10 +1499,12 @@ static void ParseWhile(MLuaParser *p) {
   StackPop(p, 1);
 
   bodyBase = fs->NumLocals; /* Body locals start here */
+  BeginScope(p, TRUE);
   ParseBlock(p);
   Expect(p, TK_END);
 
   /* End-of-iteration: close captures of body locals, then jump back */
+  EndScope(p);
   EmitCloseIfCaptured(p, bodyBase);
   EmitBackJump(p, OP_JMP, loopStart);
 
@@ -1313,6 +1525,7 @@ static void ParseRepeat(MLuaParser *p) {
 
   Advance(p); /* Skip 'repeat' */
 
+  BeginScope(p, TRUE);
   ParseBlock(p);
   Expect(p, TK_UNTIL);
 
@@ -1320,6 +1533,7 @@ static void ParseRepeat(MLuaParser *p) {
    * per-iteration close goes after the condition but before the jump. */
   ParseExpr(p);
   AdjustTo1(p);
+  EndScope(p);
   EmitCloseIfCaptured(p, bodyBase);
 
   /* Jump back if condition is false */
@@ -1438,7 +1652,9 @@ static void ParseFor(MLuaParser *p) {
     StackPop(p, 1); /* SETLOCAL consumes the pushed value */
 
     /* Loop body */
+    BeginScope(p, TRUE);
     ParseBlock(p);
+    EndScope(p);
     Expect(p, TK_END);
 
     /* End-of-iteration: close captures of the visible var and body locals
@@ -1452,6 +1668,7 @@ static void ParseFor(MLuaParser *p) {
     /* Exit point: zero-iteration jump, step fallthrough and breaks land here */
     Size exitPos = MLuaCodePos(fs);
     EmitCloseIfCaptured(p, (U8)(baseSlot + 4));
+    EmitLocalCleanup(p, (U8)baseSlot, (U8)(baseSlot + 5));
 
     /* Patch the placeholder constants with the absolute positions */
     fs->Proto->Constants[exitK] = MakeInt((I32)exitPos);
@@ -1655,7 +1872,9 @@ static void ParseFor(MLuaParser *p) {
     }
 
     /* Loop body */
+    BeginScope(p, TRUE);
     ParseBlock(p);
+    EndScope(p);
     Expect(p, TK_END);
 
     /* End-of-iteration: close captures of loop vars and body locals */
@@ -1667,6 +1886,7 @@ static void ParseFor(MLuaParser *p) {
     /* Exit point - nil-fallthrough jump and breaks land here */
     Size exitPos = MLuaCodePos(fs);
     EmitCloseIfCaptured(p, (U8)(iterSlot + 5));
+    EmitLocalCleanup(p, iterSlot, (U8)(iterSlot + 5 + varCount));
 
     /* Patch JMP-to-exit instruction to jump here */
     PatchFwdJump(p, jmpToExit, exitPos);
@@ -1854,6 +2074,7 @@ static int ParseFuncBody(MLuaParser *p, Bool isMethod) {
   proto->MaxStackSize = (U8)(fs.MaxStack > 2 ? fs.MaxStack : 2);
   proto->NumLocals =
       fs.MaxLocals; /* Reserve the PEAK slot count (loops release slots) */
+  OptimizeLastLocalUses(&fs);
 
   /* A short-jump overflow anywhere triggers the long-jump re-parse of the
    * whole chunk: bubble the flag to the top-level FuncState. */
@@ -1921,6 +2142,7 @@ static void ParseBreak(MLuaParser *p) {
 
   /* Emit jump with placeholder; the enclosing loop patches it to its exit
    * point (which also closes captured loop locals). */
+  EmitBreakCleanup(p);
   PushPatch(p, EmitFwdJump(p, OP_JMP));
 }
 
@@ -2235,7 +2457,9 @@ static void ParseStatement(MLuaParser *p) {
 
   case TK_DO:
     Advance(p);
+    BeginScope(p, FALSE);
     ParseBlock(p);
+    EndScope(p);
     Expect(p, TK_END);
     break;
 
@@ -2336,6 +2560,7 @@ static MLuaProto *ParseOnce(MLuaState *L, const char *source, Size len,
   proto->MaxStackSize = (U8)(fs.MaxStack > 2 ? fs.MaxStack : 2);
   proto->NumLocals =
       fs.MaxLocals; /* Reserve the PEAK slot count (loops release slots) */
+  OptimizeLastLocalUses(&fs);
 
   return proto;
 }

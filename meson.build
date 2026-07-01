@@ -8,10 +8,14 @@ cc = meson.get_compiler('c')
 # Debug mode option - enables libc and debug output
 debug_mode = get_option('buildtype') == 'debug'
 compiler_enabled = get_option('compiler')
+memory_diagnostics = get_option('memory_diagnostics')
 
 shared_c_args = [
     compiler_enabled ? '-DMLUA_ENABLE_COMPILER=1' : '-DMLUA_ENABLE_COMPILER=0',
 ]
+if memory_diagnostics
+    shared_c_args += ['-DMLUA_MEMORY_DIAGNOSTICS=1']
+endif
 
 port_header = get_option('port_header')
 port = get_option('port')

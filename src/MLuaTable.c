@@ -20,12 +20,14 @@ static U32 HashValue(MLuaValue key) {
 
   if (IsShortStr(key)) {
     /* Hash the short string bytes */
-    char buf[4];
-    buf[0] = GetShortStrChar0(key);
-    buf[1] = GetShortStrChar1(key);
-    buf[2] = GetShortStrChar2(key);
-    buf[3] = '\0';
-    return MLuaStringHash(buf, MLuaShortStrLen(key));
+    char buf[MLUA_SHORTSTR_MAX];
+    Size len = MLuaShortStrLen(key);
+    const char *s = MLuaStringData(key);
+    Size i;
+    for (i = 0; i < len; i++) {
+      buf[i] = s[i];
+    }
+    return MLuaStringHash(buf, len);
   }
 
   if (IsString(key)) {
@@ -62,41 +64,71 @@ MLuaValue MLuaTableNewSized(MLuaState *L, Size arrayHint, Size hashHint) {
   }
 
   th = MLUA_TABLEHEADER(gch);
-  th->Array = NULL;
   th->ArraySize = 0;
   th->ArrayLen = 0;
-  th->Nodes = NULL;
   th->NodeCapacity = 0;
-  th->NodeCount = 0;
   th->Forward = MLUA_NIL;
+  th->NodeState = 0;
+  for (i = 0; i < MLUA_TABLE_INLINE_ARRAY_CAP; i++) {
+    th->InlineArray[i] = MLUA_NIL;
+  }
+  for (i = 0; i < MLUA_TABLE_INLINE_HASH_CAP; i++) {
+    th->InlineNodes[i].Key = MLUA_NIL;
+    th->InlineNodes[i].Value = MLUA_NIL;
+  }
 
   /* Pre-allocate array part if hint given */
   if (arrayHint > 0) {
-    if (arrayHint > (Size)-1 / sizeof(MLuaValue)) {
-      return MakePtr(gch);
-    }
-    Size arrayBytes = arrayHint * sizeof(MLuaValue);
-    th->Array = (MLuaValue *)MLuaAlloc(L, arrayBytes);
-    if (th->Array) {
-      th->ArraySize = arrayHint;
-      for (i = 0; i < arrayHint; i++) {
-        th->Array[i] = MLUA_NIL;
+    if (arrayHint <= MLUA_TABLE_INLINE_ARRAY_CAP) {
+      MLuaTableSetArrayInline(th, TRUE);
+      th->ArraySize = (U32)MLUA_TABLE_INLINE_ARRAY_CAP;
+      for (i = 0; i < MLUA_TABLE_INLINE_ARRAY_CAP; i++) {
+        th->InlineArray[i] = MLUA_NIL;
+      }
+    } else {
+      if (arrayHint > (Size)0xFFFFFFFFU) {
+        return MakePtr(gch);
+      }
+      if (arrayHint > (Size)-1 / sizeof(MLuaValue)) {
+        return MakePtr(gch);
+      }
+      Size arrayBytes = arrayHint * sizeof(MLuaValue);
+      MLuaValue *array = (MLuaValue *)MLuaAlloc(L, arrayBytes);
+      if (array) {
+        MLuaTableSetArrayData(th, array);
+        th->ArraySize = (U32)arrayHint;
+        for (i = 0; i < arrayHint; i++) {
+          array[i] = MLUA_NIL;
+        }
       }
     }
   }
 
   /* Pre-allocate hash part if hint given */
   if (hashHint > 0) {
-    if (hashHint > (Size)-1 / sizeof(MLuaTableNode)) {
-      return MakePtr(gch);
-    }
-    Size hashBytes = hashHint * sizeof(MLuaTableNode);
-    th->Nodes = (MLuaTableNode *)MLuaAlloc(L, hashBytes);
-    if (th->Nodes) {
-      th->NodeCapacity = hashHint;
-      for (i = 0; i < hashHint; i++) {
-        th->Nodes[i].Key = MLUA_NIL;
-        th->Nodes[i].Value = MLUA_NIL;
+    if (hashHint <= MLUA_TABLE_INLINE_HASH_CAP) {
+      MLuaTableSetHashInline(th, TRUE);
+      th->NodeCapacity = (U32)MLUA_TABLE_INLINE_HASH_CAP;
+      for (i = 0; i < MLUA_TABLE_INLINE_HASH_CAP; i++) {
+        th->InlineNodes[i].Key = MLUA_NIL;
+        th->InlineNodes[i].Value = MLUA_NIL;
+      }
+    } else {
+      if (hashHint > (Size)0xFFFFFFFFU) {
+        return MakePtr(gch);
+      }
+      if (hashHint > (Size)-1 / sizeof(MLuaTableNode)) {
+        return MakePtr(gch);
+      }
+      Size hashBytes = hashHint * sizeof(MLuaTableNode);
+      MLuaTableNode *nodes = (MLuaTableNode *)MLuaAlloc(L, hashBytes);
+      if (nodes) {
+        MLuaTableSetNodeData(th, nodes);
+        th->NodeCapacity = (U32)hashHint;
+        for (i = 0; i < hashHint; i++) {
+          nodes[i].Key = MLUA_NIL;
+          nodes[i].Value = MLUA_NIL;
+        }
       }
     }
   }
@@ -126,10 +158,14 @@ static Bool IsPositiveInt(MLuaValue key, Size *index) {
 
 static Bool ArrayGrow(MLuaState *L, MLuaTableHeader *th, Size newSize) {
   Size oldSize = th->ArraySize;
+  MLuaValue *oldArray = MLuaTableArrayData(th);
   Size newBytes;
   MLuaValue *newArray;
   Size i;
 
+  if (newSize > (Size)0xFFFFFFFFU) {
+    return FALSE;
+  }
   if (newSize > (Size)-1 / sizeof(MLuaValue)) {
     return FALSE;
   }
@@ -142,7 +178,7 @@ static Bool ArrayGrow(MLuaState *L, MLuaTableHeader *th, Size newSize) {
 
   /* Copy existing elements */
   for (i = 0; i < oldSize; i++) {
-    newArray[i] = th->Array[i];
+    newArray[i] = oldArray[i];
   }
 
   /* Initialize new elements to nil */
@@ -150,17 +186,20 @@ static Bool ArrayGrow(MLuaState *L, MLuaTableHeader *th, Size newSize) {
     newArray[i] = MLUA_NIL;
   }
 
-  th->Array = newArray;
-  th->ArraySize = newSize;
+  MLuaTableSetArrayData(th, newArray);
+  th->ArraySize = (U32)newSize;
+  MLuaTableSetArrayInline(th, FALSE);
 
   return TRUE;
 }
 
 static MLuaValue ArrayGet(MLuaTableHeader *th, Size index) {
+  MLuaValue *array;
   if (index == 0 || index > th->ArrayLen) {
     return MLUA_NIL;
   }
-  return th->Array[index - 1]; /* Lua indices are 1-based */
+  array = MLuaTableArrayData(th);
+  return array[index - 1]; /* Lua indices are 1-based */
 }
 
 static Bool ArraySet(MLuaState *L, MLuaTableHeader *th, Size index,
@@ -174,17 +213,32 @@ static Bool ArraySet(MLuaState *L, MLuaTableHeader *th, Size index,
   /* Grow array if needed */
   if (index > th->ArraySize) {
     Size newSize = th->ArraySize;
-    if (newSize == 0)
-      newSize = MLUA_TABLE_INITIAL_ARRAY_SIZE;
-    while (newSize < index) {
-      newSize *= 2;
+    if (newSize == 0) {
+      if (index <= MLUA_TABLE_INLINE_ARRAY_CAP) {
+        Size i;
+        MLuaTableSetArrayInline(th, TRUE);
+        th->ArraySize = (U32)MLUA_TABLE_INLINE_ARRAY_CAP;
+        for (i = 0; i < MLUA_TABLE_INLINE_ARRAY_CAP; i++) {
+          th->InlineArray[i] = MLUA_NIL;
+        }
+        newSize = th->ArraySize;
+      } else {
+        newSize = MLUA_TABLE_INITIAL_ARRAY_SIZE;
+      }
     }
-    if (!ArrayGrow(L, th, newSize)) {
+    while (newSize < index) {
+      if (newSize >= 1024) {
+        newSize += 256;
+      } else {
+        newSize *= 2;
+      }
+    }
+    if (index > th->ArraySize && !ArrayGrow(L, th, newSize)) {
       return FALSE;
     }
   }
 
-  th->Array[index - 1] = value;
+  MLuaTableArrayData(th)[index - 1] = value;
 
   /* Update length */
   if (IsNil(value)) {
@@ -207,10 +261,19 @@ static Bool ArraySet(MLuaState *L, MLuaTableHeader *th, Size index,
 
 static Bool HashGrow(MLuaState *L, MLuaTableHeader *th) {
   Size oldCap = th->NodeCapacity;
-  MLuaTableNode *oldNodes = th->Nodes;
+  MLuaTableNode *oldNodes = MLuaTableNodeData(th);
+  MLuaTableNode inlineCopy[MLUA_TABLE_INLINE_HASH_CAP];
+  Bool oldInline = MLuaTableHashIsInline(th);
   Size newCap;
   Size newBytes;
   Size i;
+
+  if (oldInline) {
+    for (i = 0; i < oldCap; i++) {
+      inlineCopy[i] = oldNodes[i];
+    }
+    oldNodes = inlineCopy;
+  }
 
   if (oldCap > ((Size)-1 / 2)) {
     return FALSE;
@@ -221,33 +284,34 @@ static Bool HashGrow(MLuaState *L, MLuaTableHeader *th) {
   }
   newBytes = newCap * sizeof(MLuaTableNode);
 
-  th->Nodes = (MLuaTableNode *)MLuaAlloc(L, newBytes);
-  if (!th->Nodes) {
-    th->Nodes = oldNodes;
+  MLuaTableNode *newNodes = (MLuaTableNode *)MLuaAlloc(L, newBytes);
+  if (!newNodes) {
     return FALSE;
   }
+  MLuaTableSetNodeData(th, newNodes);
 
-  th->NodeCapacity = newCap;
-  th->NodeCount = 0;
+  th->NodeCapacity = (U32)newCap;
+  MLuaTableSetNodeCount(th, 0);
+  MLuaTableSetHashInline(th, FALSE);
 
   /* Initialize new nodes */
   for (i = 0; i < newCap; i++) {
-    th->Nodes[i].Key = MLUA_NIL;
-    th->Nodes[i].Value = MLUA_NIL;
+    newNodes[i].Key = MLUA_NIL;
+    newNodes[i].Value = MLUA_NIL;
   }
 
   /* Reinsert old nodes */
   for (i = 0; i < oldCap; i++) {
-    if (!IsNil(oldNodes[i].Key)) {
+    if (oldNodes && !IsNil(oldNodes[i].Key)) {
       U32 hash = HashValue(oldNodes[i].Key);
       Size slot = hash % newCap;
       Size j;
 
       for (j = 0; j < newCap; j++) {
         Size idx = (slot + j) % newCap;
-        if (IsNil(th->Nodes[idx].Key)) {
-          th->Nodes[idx] = oldNodes[i];
-          th->NodeCount++;
+        if (IsNil(newNodes[idx].Key)) {
+          newNodes[idx] = oldNodes[i];
+          MLuaTableIncNodeCount(th);
           break;
         }
       }
@@ -258,6 +322,7 @@ static Bool HashGrow(MLuaState *L, MLuaTableHeader *th) {
 }
 
 static MLuaTableNode *HashFind(MLuaTableHeader *th, MLuaValue key) {
+  MLuaTableNode *nodes;
   U32 hash;
   Size slot;
   Size i;
@@ -266,12 +331,13 @@ static MLuaTableNode *HashFind(MLuaTableHeader *th, MLuaValue key) {
     return NULL;
   }
 
+  nodes = MLuaTableNodeData(th);
   hash = HashValue(key);
   slot = hash % th->NodeCapacity;
 
   for (i = 0; i < th->NodeCapacity; i++) {
     Size idx = (slot + i) % th->NodeCapacity;
-    MLuaTableNode *node = &th->Nodes[idx];
+    MLuaTableNode *node = &nodes[idx];
 
     if (IsNil(node->Key)) {
       /* Empty slot - key not found */
@@ -292,6 +358,7 @@ static Bool HashSet(MLuaState *L, MLuaTableHeader *th, MLuaValue key,
   Size slot;
   Size i;
   Size threshold;
+  MLuaTableNode *nodes;
 
   /* Find existing node */
   MLuaTableNode *existing = HashFind(th, key);
@@ -301,7 +368,7 @@ static Bool HashSet(MLuaState *L, MLuaTableHeader *th, MLuaValue key,
       /* Mark as deleted - for simplicity, we just set key to nil */
       /* A proper implementation would use tombstones */
       existing->Key = MLUA_NIL;
-      th->NodeCount--;
+      MLuaTableDecNodeCount(th);
     }
     return TRUE;
   }
@@ -312,23 +379,34 @@ static Bool HashSet(MLuaState *L, MLuaTableHeader *th, MLuaValue key,
   }
 
   /* Check if resize needed */
+  if (th->NodeCapacity == 0) {
+    MLuaTableSetHashInline(th, TRUE);
+    th->NodeCapacity = (U32)MLUA_TABLE_INLINE_HASH_CAP;
+    for (i = 0; i < MLUA_TABLE_INLINE_HASH_CAP; i++) {
+      th->InlineNodes[i].Key = MLUA_NIL;
+      th->InlineNodes[i].Value = MLUA_NIL;
+    }
+  }
   threshold = (th->NodeCapacity * MLUA_TABLE_LOAD_FACTOR) / 100;
-  if (th->NodeCount >= threshold || th->NodeCapacity == 0) {
+  if (MLuaTableNodeCount(th) >= th->NodeCapacity ||
+      (!MLuaTableHashIsInline(th) &&
+       MLuaTableNodeCount(th) >= threshold)) {
     if (!HashGrow(L, th)) {
       return FALSE;
     }
   }
 
   /* Insert new node */
+  nodes = MLuaTableNodeData(th);
   hash = HashValue(key);
   slot = hash % th->NodeCapacity;
 
   for (i = 0; i < th->NodeCapacity; i++) {
     Size idx = (slot + i) % th->NodeCapacity;
-    if (IsNil(th->Nodes[idx].Key)) {
-      th->Nodes[idx].Key = key;
-      th->Nodes[idx].Value = value;
-      th->NodeCount++;
+    if (IsNil(nodes[idx].Key)) {
+      nodes[idx].Key = key;
+      nodes[idx].Value = value;
+      MLuaTableIncNodeCount(th);
       return TRUE;
     }
   }
@@ -487,6 +565,8 @@ MLuaValue MLuaTableNext(MLuaValue tbl, MLuaValue key, MLuaValue *value) {
   MLuaTableHeader *th;
   Size i;
   Bool foundCurrent;
+  MLuaValue *array;
+  MLuaTableNode *nodes;
 
   if (!IsTable(tbl)) {
     return MLUA_NIL;
@@ -496,14 +576,15 @@ MLuaValue MLuaTableNext(MLuaValue tbl, MLuaValue key, MLuaValue *value) {
   th = MLUA_TABLEHEADER(gch);
 
   foundCurrent = IsNil(key); /* Start from beginning if key is nil */
+  array = MLuaTableArrayData(th);
 
   /* First iterate array part */
   for (i = 0; i < th->ArrayLen; i++) {
     MLuaValue arrKey = MakeInt((I32)(i + 1));
 
     if (foundCurrent) {
-      if (!IsNil(th->Array[i])) {
-        *value = th->Array[i];
+      if (!IsNil(array[i])) {
+        *value = array[i];
         return arrKey;
       }
     } else if (IsInt(key) && GetInt(key) == (I32)(i + 1)) {
@@ -512,8 +593,9 @@ MLuaValue MLuaTableNext(MLuaValue tbl, MLuaValue key, MLuaValue *value) {
   }
 
   /* Then iterate hash part */
+  nodes = MLuaTableNodeData(th);
   for (i = 0; i < th->NodeCapacity; i++) {
-    MLuaTableNode *node = &th->Nodes[i];
+    MLuaTableNode *node = &nodes[i];
 
     if (IsNil(node->Key)) {
       continue;

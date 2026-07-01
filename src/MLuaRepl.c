@@ -552,6 +552,7 @@ int main(int argc, char **argv) {
     printf("\n=== Memory Stats ===\n");
     printf("Heap Size:    %llu bytes\n", (unsigned long long)L->HeapSize);
     printf("Heap Used:    %llu bytes\n", (unsigned long long)L->HeapTop);
+    printf("Heap Peak:    %llu bytes\n", (unsigned long long)MLuaMemoryPeak(L));
     printf("Heap Free:    %llu bytes\n",
            (unsigned long long)(L->HeapSize - L->HeapTop));
     printf("EvalStack:    %llu (top=%llu)\n",

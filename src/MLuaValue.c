@@ -100,13 +100,17 @@ MLuaValue MLuaMakeIntSafe(I32 value) {
 /* ========================================================================== */
 
 /*
- * Get the length of a short string (0-3 chars).
- * Short strings are NUL-padded, so we count non-NUL bytes.
+ * Get the length of a short string.
+ * 64-bit values store the length explicitly so embedded NUL bytes work.
+ * 32-bit values retain the legacy NUL-padded 3-byte representation.
  */
 Size MLuaShortStrLen(MLuaValue v) {
   if (!IsShortStr(v))
     return 0;
 
+#if MLUA_PTR_SIZE == 8
+  return GetShortStrEncodedLen(v);
+#else
   Size len = 0;
   if (GetShortStrChar0(v))
     len = 1;
@@ -115,22 +119,29 @@ Size MLuaShortStrLen(MLuaValue v) {
   if (GetShortStrChar2(v))
     len = 3;
   return len;
+#endif
 }
 
 /*
- * Create a short string from a C string (max 3 chars).
+ * Create a short string from bytes.
  * Returns MLUA_NIL if the string is too long.
  */
 MLuaValue MLuaMakeShortStr(const char *s, Size len) {
-  if (len > 3) {
+  if (len > MLUA_SHORTSTR_MAX) {
     return MLUA_NIL; /* Too long for short string */
   }
 
   char c0 = (len > 0) ? s[0] : 0;
   char c1 = (len > 1) ? s[1] : 0;
   char c2 = (len > 2) ? s[2] : 0;
+#if MLUA_PTR_SIZE == 8
+  char c3 = (len > 3) ? s[3] : 0;
+  char c4 = (len > 4) ? s[4] : 0;
+  return MakeShortStr5(c0, c1, c2, c3, c4, len);
+#else
 
   return MakeShortStr(c0, c1, c2);
+#endif
 }
 
 /* ========================================================================== */

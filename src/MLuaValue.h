@@ -63,6 +63,8 @@ typedef UPtr MLuaValue;
 #define NANTYPE_SHORTSTR 6
 /* 7-15: Reserved */
 
+#define MLUA_SHORTSTR_MAX 5
+
 /* Check if value is a double (not a NaN-boxed value) */
 #define IsDouble(v)                                                            \
   (((v) & NANBOX_MASK) != NANBOX_TAG &&                                        \
@@ -103,6 +105,7 @@ typedef UPtr MLuaValue;
 
 #define TAG_MASK 7 /* Low 3 bits */
 #define TAG_BITS 3
+#define MLUA_SHORTSTR_MAX 3
 
 #endif /* MLUA_PTR_SIZE */
 
@@ -182,13 +185,26 @@ typedef UPtr MLuaValue;
                ((U64)(U32)(i))))
 #define GetInt(v) ((I32)(U32)((v) & 0xFFFFFFFFULL))
 
-/* Short string: 3 bytes in NaN payload */
-#define MakeShortStr(c0, c1, c2)                                               \
+/* Short string: explicit length plus up to 5 bytes in NaN payload */
+#define MLUA_SHORTSTR_LEN_SHIFT 40
+#define MLUA_SHORTSTR_LEN_MASK ((U64)0x7ULL << MLUA_SHORTSTR_LEN_SHIFT)
+#define MLUA_SHORTSTR_LEGACY_LEN(c0, c1, c2)                                   \
+  ((c2) ? 3U : ((c1) ? 2U : ((c0) ? 1U : 0U)))
+#define MakeShortStr5(c0, c1, c2, c3, c4, len)                                 \
   ((MLuaValue)(NANBOX_TAG | ((U64)NANTYPE_SHORTSTR << NANBOX_TYPE_SHIFT) |     \
-               ((U64)(U8)(c0) << 16) | ((U64)(U8)(c1) << 8) | (U64)(U8)(c2)))
-#define GetShortStrChar0(v) ((char)(((v) >> 16) & 0xFF))
+               ((U64)(U8)(c0)) | ((U64)(U8)(c1) << 8) |                       \
+               ((U64)(U8)(c2) << 16) | ((U64)(U8)(c3) << 24) |                \
+               ((U64)(U8)(c4) << 32) |                                        \
+               (((U64)(len) & 0x7ULL) << MLUA_SHORTSTR_LEN_SHIFT)))
+#define MakeShortStr(c0, c1, c2)                                               \
+  MakeShortStr5((c0), (c1), (c2), 0, 0,                                      \
+                MLUA_SHORTSTR_LEGACY_LEN((c0), (c1), (c2)))
+#define GetShortStrChar0(v) ((char)((v) & 0xFF))
 #define GetShortStrChar1(v) ((char)(((v) >> 8) & 0xFF))
-#define GetShortStrChar2(v) ((char)((v) & 0xFF))
+#define GetShortStrChar2(v) ((char)(((v) >> 16) & 0xFF))
+#define GetShortStrChar3(v) ((char)(((v) >> 24) & 0xFF))
+#define GetShortStrChar4(v) ((char)(((v) >> 32) & 0xFF))
+#define GetShortStrEncodedLen(v) ((Size)(((v) & MLUA_SHORTSTR_LEN_MASK) >> MLUA_SHORTSTR_LEN_SHIFT))
 
 /* Light function: index in NaN payload */
 #define MakeLightFunc(idx)                                                     \
@@ -233,6 +249,8 @@ static inline double GetDouble(MLuaValue v) {
 #define GetShortStrChar0(v) ((char)(((v) >> (TAG_BITS + 16)) & 0xFF))
 #define GetShortStrChar1(v) ((char)(((v) >> (TAG_BITS + 8)) & 0xFF))
 #define GetShortStrChar2(v) ((char)(((v) >> TAG_BITS) & 0xFF))
+#define GetShortStrChar3(v) ((char)0)
+#define GetShortStrChar4(v) ((char)0)
 
 /* Light function: index into C function table */
 #define MakeLightFunc(idx)                                                     \
@@ -289,11 +307,14 @@ static inline double GetDouble(MLuaValue v) {
  * Forward holds the relocation target during a mark-compact cycle; keeping
  * it in the header (Lisp-2's "extra field") means computing addresses never
  * clobbers object data the update phase still needs (Location, Proto, ...).
+ * MicroLua heaps are intentionally tiny; a 32-bit span is enough and keeps the
+ * 64-bit object header at 16 bytes.
  */
 typedef struct {
-  U8 Flags; /* [7:ROM][6:Pinned][5:Marked][4:Reserved][3-0:Type] */
-  Size CachedSize; /* Total aligned span including header */
   void *Forward;   /* Compaction forwarding address (GC use only) */
+  U32 CachedSize;  /* Total aligned span including header */
+  U8 Flags; /* [7:ROM][6:Pinned][5:Marked][4:Reserved][3-0:Type] */
+  U8 Reserved[3];
 } MLuaGCHeader;
 
 /* Get object type from header */

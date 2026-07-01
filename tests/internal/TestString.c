@@ -53,13 +53,13 @@ TEST(ShortStr_Empty) {
 }
 
 TEST(ShortStr_Data) {
-  MLuaValue v = MLuaStringNewShort("abc", 3);
+  MLuaValue v = MLuaStringNewShort("abcde", 5);
   const char *s = MLuaStringData(v);
-  ASSERT_STREQ(s, "abc");
+  ASSERT_STREQ(s, "abcde");
 }
 
 TEST(ShortStr_TooLong) {
-  MLuaValue v = MLuaStringNewShort("hello", 5);
+  MLuaValue v = MLuaStringNewShort("hello!", 6);
   ASSERT(IsNil(v));
 }
 
@@ -123,6 +123,8 @@ TEST(Intern_DifferentStrings) {
   MLuaValue v1 = MLuaStringNew(L, "hello", 5);
   MLuaValue v2 = MLuaStringNew(L, "world", 5);
 
+  ASSERT(IsShortStr(v1));
+  ASSERT(IsShortStr(v2));
   ASSERT_NE(v1, v2);
 }
 

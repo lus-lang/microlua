@@ -41,6 +41,7 @@
         <li><a href="#documentation">Documentation</a></li>
         <li><a href="#limitations">Limitations</a></li>
         <li><a href="#tests">Tests and Benchmarks</a></li>
+        <li><a href="#license">License</a></li>
       </ol>
     </nav>
   </header>
@@ -552,6 +553,66 @@ python3 bench/bench.py --quick</code></pre>
         native heap, and binary-size results. It skips cleanly when Lua 5.5 is
         not available.
       </p>
+      <p>
+        The memory comparison uses small standalone ports of relevant Lua
+        examples, scaled down for local runs and adjusted to avoid unsupported
+        MicroLua features such as metatables and generated <code>load</code>.
+        Each row passed a byte-identical stdout correctness gate.
+      </p>
+      <pre><code>python3 bench/benchmarksgame/bench.py
+python3 bench/benchmarksgame/bench.py --mlua builddir-release/mlua --lua /path/to/lua5.5</code></pre>
+      <table>
+        <caption>Memory benchmarks</caption>
+        <thead>
+          <tr>
+            <th scope="col">Workload</th>
+            <th scope="col">Source example</th>
+            <th scope="col">Memory-pressure focus</th>
+            <th scope="col">Lua exact peak</th>
+            <th scope="col">MicroLua exact peak</th>
+            <th scope="col">mlua/lua memory</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>binarytrees</code></td>
+            <td><code>binarytrees-lua-4</code></td>
+            <td>Allocation churn</td>
+            <td>1.19 MiB</td>
+            <td>546.1 KiB</td>
+            <td>0.45x</td>
+          </tr>
+          <tr>
+            <td><code>knucleotide</code></td>
+            <td><code>knucleotide-lua-2</code></td>
+            <td>Substring table pressure</td>
+            <td>76.9 KiB</td>
+            <td>71.8 KiB</td>
+            <td>0.93x</td>
+          </tr>
+          <tr>
+            <td><code>revcomp</code></td>
+            <td><code>revcomp-lua-5</code></td>
+            <td>String builder pressure</td>
+            <td>115.4 KiB</td>
+            <td>104.5 KiB</td>
+            <td>0.91x</td>
+          </tr>
+          <tr>
+            <td><code>spectralnorm</code></td>
+            <td><code>spectralnorm-lua-1</code></td>
+            <td>Numeric arrays</td>
+            <td>25.9 KiB</td>
+            <td>25.6 KiB</td>
+            <td>0.99x</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        Lua memory is exact peak Lua heap from a tracking
+        <code>lua_newstate</code> allocator. MicroLua memory is exact
+        constrained-heap high-water from a high-limit <code>--dump</code> run.
+      </p>
     </section>
 
     <section>
@@ -562,6 +623,24 @@ python3 bench/bench.py --quick</code></pre>
         manuals at <a href="https://www.lua.org/manual/">lua.org/manual</a>.
         This page documents only the features implemented by MicroLua.
       </p>
+    </section>
+
+    <section id="license">
+      <h2>License</h2>
+      <pre><code>BSD Zero Clause License
+
+Copyright (c) 2026 Louka Ménard Blondin &lt;hello@louka.sh&gt;
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.</code></pre>
     </section>
   </main>
 

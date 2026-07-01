@@ -61,6 +61,16 @@ test.describe("table.concat", function()
         test.expect(string.sub(r, -5)).toBe("abcde")
     end)
 
+    test.it("leaves large input tables reusable", function()
+        local t = {}
+        for i = 1, 600 do t[i] = "xy" end
+        test.expect(#table.concat(t)).toBe(1200)
+        t[601] = "z"
+        test.expect(#t).toBe(601)
+        test.expect(t[1]).toBe("xy")
+        test.expect(t[601]).toBe("z")
+    end)
+
     test.it("places separators only between elements (with a range)", function()
         local t = { "a", "b", "c", "d", "e" }
         test.expect(table.concat(t, "-", 2, 4)).toBe("b-c-d")  -- no leading/trailing sep

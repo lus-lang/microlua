@@ -528,13 +528,10 @@ MLuaValue MLuaConcat(MLuaState *L, int count) {
       MemCpy(p, s, len);
       p += len;
     } else if (IsShortStr(v)) {
+      const char *s = MLuaStringData(v);
       Size len = MLuaShortStrLen(v);
-      if (len >= 1)
-        *p++ = (U8)GetShortStrChar0(v);
-      if (len >= 2)
-        *p++ = (U8)GetShortStrChar1(v);
-      if (len >= 3)
-        *p++ = (U8)GetShortStrChar2(v);
+      MemCpy(p, s, len);
+      p += len;
     } else if (IsInt(v)) {
       /* Simple integer to string */
       I32 n = GetInt(v);
@@ -790,10 +787,24 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       break;
     }
 
+    case OP_GETLOCAL_CLEAR: {
+      U8 slot = READ_BYTE();
+      MLuaValue val = LOCAL_GET(slot);
+      LOCAL_SET(slot, MLUA_NIL);
+      STACK_PUSH(val);
+      break;
+    }
+
     case OP_SETLOCAL: {
       U8 slot = READ_BYTE();
       MLuaValue val = STACK_POP();
       LOCAL_SET(slot, val);
+      break;
+    }
+
+    case OP_CLEARLOCAL: {
+      U8 slot = READ_BYTE();
+      LOCAL_SET(slot, MLUA_NIL);
       break;
     }
 
