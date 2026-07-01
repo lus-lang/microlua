@@ -203,7 +203,7 @@ static int BaseSelect(MLuaState *L) {
   MLuaValue idx = MLuaGetStack(L, 1);
 
   if (IsInt(idx)) {
-    I32 n = GetInt(idx);
+    I32 n = MLuaGetIntVal(idx);
     int i;
     if (n < 0) {
       n = top + n + 1;
@@ -262,7 +262,7 @@ static int BaseTonumber(MLuaState *L) {
     } else {
       I64 result;
       if (MLuaStrToInt(s, len, base, &result)) {
-        MLuaPush(L, MakeInt((I32)result));
+        MLuaPush(L, MLuaMakeInt(L, (I32)result));
         return 1;
       }
     }
@@ -281,8 +281,12 @@ static int BaseTostring(MLuaState *L) {
   char buf[128];
   Size len;
 
-  /* Strings are returned as-is */
-  if (IsShortStr(v) || (IsPtr(v) && MLuaStringData(v))) {
+  /* Strings are returned as-is. Numbers must be formatted instead — and on the
+   * 32-bit path boxed integers and heap floats are heap pointers, while
+   * MLuaStringData returns "" (a non-NULL pointer) for non-strings, so the
+   * pointer test below cannot by itself exclude them. Gate on !MLuaIsNumber so
+   * every numeric value falls through to MLuaValueToStr. */
+  if (!MLuaIsNumber(v) && (IsShortStr(v) || (IsPtr(v) && MLuaStringData(v)))) {
     MLuaPush(L, v);
     return 1;
   }

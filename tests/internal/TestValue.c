@@ -94,25 +94,38 @@ TEST(Integer_Negative) {
 }
 
 TEST(Integer_MaxPositive) {
-  MLuaValue v = MakeInt(MLUA_INT_MAX);
+  /* Largest value that fits inline: the whole I32 range on the NaN-boxing path,
+   * the 29-bit range on the tagging path. Wider values are boxed (see the
+   * bigint interpreter tests), not stored by the raw inline MakeInt macro. */
+  MLuaValue v = MakeInt(MLUA_INLINE_INT_MAX);
   ASSERT(IsInt(v));
-  ASSERT_EQ(GetInt(v), MLUA_INT_MAX);
+  ASSERT_EQ(GetInt(v), MLUA_INLINE_INT_MAX);
 }
 
 TEST(Integer_MinNegative) {
-  MLuaValue v = MakeInt(MLUA_INT_MIN);
+  MLuaValue v = MakeInt(MLUA_INLINE_INT_MIN);
   ASSERT(IsInt(v));
-  ASSERT_EQ(GetInt(v), MLUA_INT_MIN);
+  ASSERT_EQ(GetInt(v), MLUA_INLINE_INT_MIN);
 }
 
 TEST(Integer_Fits) {
   ASSERT(MLuaIntFits(0));
   ASSERT(MLuaIntFits(100));
   ASSERT(MLuaIntFits(-100));
+  ASSERT(MLuaIntFits(MLUA_INLINE_INT_MAX));
+  ASSERT(MLuaIntFits(MLUA_INLINE_INT_MIN));
+#if MLUA_PTR_SIZE != 8
+  /* On the tagging path the inline range is narrower than I32; values past it
+   * do not fit inline (MLuaMakeIntSafe boxes them instead). */
+  ASSERT(!MLuaIntFits(MLUA_INLINE_INT_MAX + 1));
+  ASSERT(!MLuaIntFits(MLUA_INLINE_INT_MIN - 1));
+  ASSERT(!MLuaIntFits(MLUA_INT_MAX));
+  ASSERT(!MLuaIntFits(MLUA_INT_MIN));
+#else
+  /* On the NaN-boxing path the inline range is the whole I32 range. */
   ASSERT(MLuaIntFits(MLUA_INT_MAX));
   ASSERT(MLuaIntFits(MLUA_INT_MIN));
-  /* Note: On 64-bit platforms, all I32 values fit in tagged integer.
-   * Overflow tests would require I64 values. */
+#endif
 }
 
 /* ========================================================================== */
@@ -138,12 +151,16 @@ TEST(ShortStr_Length) {
   MLuaValue v1 = MakeShortStr('a', 0, 0);
   MLuaValue v2 = MakeShortStr('a', 'b', 0);
   MLuaValue v3 = MakeShortStr('a', 'b', 'c');
-  MLuaValue v5 = MLuaMakeShortStr("hello", 5);
 
   ASSERT_EQ(MLuaShortStrLen(v1), 1);
   ASSERT_EQ(MLuaShortStrLen(v2), 2);
   ASSERT_EQ(MLuaShortStrLen(v3), 3);
-  ASSERT_EQ(MLuaShortStrLen(v5), MLUA_SHORTSTR_MAX);
+#if MLUA_SHORTSTR_MAX >= 5
+  {
+    MLuaValue v5 = MLuaMakeShortStr("hello", 5);
+    ASSERT_EQ(MLuaShortStrLen(v5), MLUA_SHORTSTR_MAX);
+  }
+#endif
 }
 
 TEST(ShortStr_FromCStr) {

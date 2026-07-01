@@ -792,7 +792,7 @@ static void ParsePrefix(MLuaParser *p) {
       if ((I32)num >= -128 && (I32)num <= 127) {
         MLuaEmitOpB(fs, OP_LOADINT, (U8)(I8)(I32)num);
       } else {
-        int k = MLuaAddConstant(fs, MakeInt((I32)num));
+        int k = MLuaAddConstant(fs, MLuaMakeInt(p->L, (I32)num));
         MLuaEmitOpB(fs, OP_LOADK, (U8)k);
       }
     } else {

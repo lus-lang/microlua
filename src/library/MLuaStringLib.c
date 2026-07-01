@@ -45,11 +45,11 @@ static int StringByte(MLuaState *L) {
 
   if (top >= 2) {
     MLuaValue vi = MLuaGetStack(L, 2);
-    i = GetInt(vi);
+    i = MLuaGetIntVal(vi);
   }
   if (top >= 3) {
     MLuaValue vj = MLuaGetStack(L, 3);
-    j = GetInt(vj);
+    j = MLuaGetIntVal(vj);
   } else {
     j = i;
   }
@@ -101,7 +101,7 @@ static int StringChar(MLuaState *L) {
   /* Unicode-aware: arguments are CODEPOINTS, encoded as UTF-8 */
   for (i = 0; i < top; i++) {
     MLuaValue v = MLuaGetStack(L, i + 1);
-    U32 cp = (U32)GetInt(v);
+    U32 cp = (U32)MLuaGetIntVal(v);
     pos += MLuaUTF8Encode(cp, buf + pos);
   }
 
@@ -376,7 +376,7 @@ static int StringFind(MLuaState *L) {
 
   if (MLuaGetTop(L) >= 3) {
     MLuaValue vi = MLuaGetStack(L, 3);
-    init = (Size)GetInt(vi);
+    init = (Size)MLuaGetIntVal(vi);
   }
   if (MLuaGetTop(L) >= 4) {
     MLuaValue vp = MLuaGetStack(L, 4);
@@ -568,7 +568,7 @@ static int StringMatch(MLuaState *L) {
 
   if (MLuaGetTop(L) >= 3) {
     MLuaValue vi = MLuaGetStack(L, 3);
-    init = (Size)GetInt(vi);
+    init = (Size)MLuaGetIntVal(vi);
   }
 
   if (init < 1)
@@ -680,26 +680,26 @@ static int StringPack(MLuaState *L) {
     switch (c) {
     case 'b': { /* signed byte */
       MLuaValue v = MLuaGetStack(L, argIdx++);
-      I8 val = (I8)GetInt(v);
+      I8 val = (I8)MLuaGetIntVal(v);
       buf[pos++] = (char)val;
       break;
     }
     case 'B': { /* unsigned byte */
       MLuaValue v = MLuaGetStack(L, argIdx++);
-      U8 val = (U8)GetInt(v);
+      U8 val = (U8)MLuaGetIntVal(v);
       buf[pos++] = (char)val;
       break;
     }
     case 'h': { /* signed short */
       MLuaValue v = MLuaGetStack(L, argIdx++);
-      I16 val = (I16)GetInt(v);
+      I16 val = (I16)MLuaGetIntVal(v);
       buf[pos++] = (char)(val & 0xFF);
       buf[pos++] = (char)((val >> 8) & 0xFF);
       break;
     }
     case 'H': { /* unsigned short */
       MLuaValue v = MLuaGetStack(L, argIdx++);
-      U16 val = (U16)GetInt(v);
+      U16 val = (U16)MLuaGetIntVal(v);
       buf[pos++] = (char)(val & 0xFF);
       buf[pos++] = (char)((val >> 8) & 0xFF);
       break;
@@ -707,7 +707,7 @@ static int StringPack(MLuaState *L) {
     case 'i':
     case 'I': { /* signed/unsigned int */
       MLuaValue v = MLuaGetStack(L, argIdx++);
-      U32 val = (U32)GetInt(v);
+      U32 val = (U32)MLuaGetIntVal(v);
       buf[pos++] = (char)(val & 0xFF);
       buf[pos++] = (char)((val >> 8) & 0xFF);
       buf[pos++] = (char)((val >> 16) & 0xFF);
@@ -719,7 +719,7 @@ static int StringPack(MLuaState *L) {
     case 'n':
     case 'N': { /* 8-byte */
       MLuaValue v = MLuaGetStack(L, argIdx++);
-      U64 val = IsInt(v) ? (U64)(U32)GetInt(v) : (U64)MLuaToNumber(v);
+      U64 val = IsInt(v) ? (U64)(U32)MLuaGetIntVal(v) : (U64)MLuaToNumber(v);
       int i;
       for (i = 0; i < 8; i++) {
         buf[pos++] = (char)((val >> (i * 8)) & 0xFF);
@@ -849,7 +849,7 @@ static int StringRep(MLuaState *L) {
   Size len;
   const char *s = GetStrArg(L, 1, &len);
   MLuaValue vn = MLuaGetStack(L, 2);
-  I32 n = GetInt(vn);
+  I32 n = MLuaGetIntVal(vn);
   char *buf;
   Size total;
   Size bufpos = 0;
@@ -940,11 +940,11 @@ static int StringSub(MLuaState *L) {
 
   if (MLuaGetTop(L) >= 2) {
     MLuaValue vi = MLuaGetStack(L, 2);
-    i = GetInt(vi);
+    i = MLuaGetIntVal(vi);
   }
   if (MLuaGetTop(L) >= 3) {
     MLuaValue vj = MLuaGetStack(L, 3);
-    j = GetInt(vj);
+    j = MLuaGetIntVal(vj);
   }
 
   if (!s) {
@@ -991,7 +991,7 @@ static int StringUnpack(MLuaState *L) {
 
   if (MLuaGetTop(L) >= 3) {
     MLuaValue vpos = MLuaGetStack(L, 3);
-    pos = (Size)GetInt(vpos);
+    pos = (Size)MLuaGetIntVal(vpos);
   }
 
   if (!fmt || !data) {
@@ -1049,7 +1049,7 @@ static int StringUnpack(MLuaState *L) {
       U32 val = (U32)((U8)data[pos] | ((U8)data[pos + 1] << 8) |
                       ((U8)data[pos + 2] << 16) | ((U8)data[pos + 3] << 24));
       pos += 4;
-      MLuaPush(L, MakeInt((I32)val));
+      MLuaPush(L, MLuaMakeInt(L, (I32)val));
       count++;
       break;
     }
@@ -1067,7 +1067,7 @@ static int StringUnpack(MLuaState *L) {
       pos += 8;
       /* Convert to double for large values, int for small */
       if (val <= 0x7FFFFFFF) {
-        MLuaPush(L, MakeInt((I32)val));
+        MLuaPush(L, MLuaMakeInt(L, (I32)val));
       } else {
         MLuaPush(L, MLuaMakeNumber(L, (double)val));
       }

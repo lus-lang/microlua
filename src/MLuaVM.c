@@ -328,21 +328,21 @@ MLuaValue MLuaArith(MLuaState *L, MLuaOpCode op, MLuaValue a, MLuaValue b) {
 
   /* Integer fast-path: if both operands are integers, stay in integer domain */
   if (IsInt(a) && (op == OP_UNM || IsInt(b))) {
-    I32 ia = GetInt(a);
-    I32 ib = IsInt(b) ? GetInt(b) : 0;
+    I32 ia = MLuaGetIntVal(a);
+    I32 ib = IsInt(b) ? MLuaGetIntVal(b) : 0;
     switch (op) {
     case OP_ADD:
-      return MakeInt(ia + ib);
+      return MLuaMakeInt(L, ia + ib);
     case OP_SUB:
-      return MakeInt(ia - ib);
+      return MLuaMakeInt(L, ia - ib);
     case OP_MUL:
-      return MakeInt(ia * ib);
+      return MLuaMakeInt(L, ia * ib);
     case OP_IDIV:
-      return ib != 0 ? MakeInt(ia / ib) : MakeInt(0);
+      return ib != 0 ? MLuaMakeInt(L, ia / ib) : MakeInt(0);
     case OP_MOD:
-      return ib != 0 ? MakeInt(ia % ib) : MakeInt(0);
+      return ib != 0 ? MLuaMakeInt(L, ia % ib) : MakeInt(0);
     case OP_UNM:
-      return MakeInt(-ia);
+      return MLuaMakeInt(L, -ia);
     default:
       break; /* Fall through to float path */
     }
@@ -393,8 +393,8 @@ Bool MLuaCompare(MLuaState *L, MLuaOpCode op, MLuaValue a, MLuaValue b) {
   UNUSED(L);
 
   if (IsInt(a) && IsInt(b)) {
-    I32 ia = GetInt(a);
-    I32 ib = GetInt(b);
+    I32 ia = MLuaGetIntVal(a);
+    I32 ib = MLuaGetIntVal(b);
     switch (op) {
     case OP_EQ:
       return ia == ib;
@@ -454,7 +454,7 @@ Bool MLuaCompare(MLuaState *L, MLuaOpCode op, MLuaValue a, MLuaValue b) {
 
 MLuaValue MLuaLen(MLuaState *L, MLuaValue v) {
   if (IsString(v)) {
-    return MakeInt((I32)MLuaStringLen(v));
+    return MLuaMakeInt(L, (I32)MLuaStringLen(v));
   }
   if (IsShortStr(v)) {
     return MakeInt((I32)MLuaShortStrLen(v));
@@ -462,7 +462,7 @@ MLuaValue MLuaLen(MLuaState *L, MLuaValue v) {
   if (IsPtr(v)) {
     MLuaGCHeader *h = (MLuaGCHeader *)GetPtr(v);
     if (MLUA_OBJTYPE(h) == OBJTYPE_TABLE) {
-      return MakeInt((I32)MLuaTableLen(v));
+      return MLuaMakeInt(L, (I32)MLuaTableLen(v));
     }
   }
   /* Invalid type for length - set error message */
@@ -534,7 +534,7 @@ MLuaValue MLuaConcat(MLuaState *L, int count) {
       p += len;
     } else if (IsInt(v)) {
       /* Simple integer to string */
-      I32 n = GetInt(v);
+      I32 n = MLuaGetIntVal(v);
       char numBuf[16];
       char *np = numBuf + sizeof(numBuf) - 1;
       Bool neg = FALSE;
@@ -1017,9 +1017,9 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       MLuaValue limitVal = STACK_POP();
       MLuaValue startVal = STACK_POP();
 
-      I32 start = GetInt(startVal);
-      I32 limit = GetInt(limitVal);
-      I32 step = GetInt(stepVal);
+      I32 start = MLuaGetIntVal(startVal);
+      I32 limit = MLuaGetIntVal(limitVal);
+      I32 step = MLuaGetIntVal(stepVal);
       I32 bodyPC = GetInt(bodyTarget);
       I32 exitPC = GetInt(exitTarget);
 
@@ -1061,19 +1061,19 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       U8 base = READ_BYTE();
 
       /* Load loop state from shadow locals */
-      I32 idx = GetInt(LOCAL_GET(base));
-      I32 limit = GetInt(LOCAL_GET(base + 1));
-      I32 step = GetInt(LOCAL_GET(base + 2));
+      I32 idx = MLuaGetIntVal(LOCAL_GET(base));
+      I32 limit = MLuaGetIntVal(LOCAL_GET(base + 1));
+      I32 step = MLuaGetIntVal(LOCAL_GET(base + 2));
       I32 bodyPC = GetInt(LOCAL_GET(base + 3)); /* Stored body target PC */
 
       /* Increment index */
       idx += step;
-      LOCAL_SET(base, MakeInt(idx));
+      LOCAL_SET(base, MLuaMakeInt(L, idx));
 
       /* Boundary check */
       if ((step > 0 && idx <= limit) || (step < 0 && idx >= limit)) {
         /* Continue loop - push new index, jump to body */
-        STACK_PUSH(MakeInt(idx));
+        STACK_PUSH(MLuaMakeInt(L, idx));
         pc = proto->Code + bodyPC;
       }
       /* Else: loop ends, fallthrough */

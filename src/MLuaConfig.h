@@ -26,6 +26,19 @@
 #define MLUA_ALIGNMENT 8
 #endif
 
+/* Floating-point subtype. Defaults to C `double` (IEEE binary64). A target
+ * whose `double` is not 64-bit, or that wants a smaller float, can override
+ * MLUA_FLOAT (e.g. `float`) and MLUA_FLOAT_BITS (e.g. 32) in its port header;
+ * MLUA_FLOAT_BITS drives the width-agnostic bytecode number conversion. This
+ * only affects the 32-bit tagging path's heap number; the 64-bit NaN-boxing
+ * path always stores raw binary64. */
+#ifndef MLUA_FLOAT
+#define MLUA_FLOAT double
+#endif
+#ifndef MLUA_FLOAT_BITS
+#define MLUA_FLOAT_BITS 64
+#endif
+
 #ifndef MLUA_DEFAULT_STACK_SIZE
 #define MLUA_DEFAULT_STACK_SIZE 256
 #endif

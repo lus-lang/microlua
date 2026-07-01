@@ -319,7 +319,7 @@ static int OsGetenv(MLuaState *L) {
 
 static int OsExit(MLuaState *L) {
   MLuaValue code = MLuaGetArg(L, 0);
-  exit(IsInt(code) ? (int)GetInt(code) : 0);
+  exit(IsInt(code) ? (int)MLuaGetIntVal(code) : 0);
 }
 
 static int OsDate(MLuaState *L) {

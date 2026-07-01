@@ -5,6 +5,8 @@
 
 #include "MLuaValue.h"
 
+#include "MLuaAlloc.h"
+
 /* ========================================================================== */
 /* Value Type Names (for debugging/error messages)                            */
 /* ========================================================================== */
@@ -64,6 +66,13 @@ const char *MLuaTypeName(MLuaValue v) {
     }
     MLuaGCHeader *h = (MLuaGCHeader *)ptr;
     U8 objType = MLUA_OBJTYPE(h);
+#if MLUA_PTR_SIZE != 8
+    /* Heap numbers (floats) and boxed integers exist only on the 32-bit path
+     * and sit past OBJTYPE_THREAD in ObjTypeNames; classify them as numbers. */
+    if (objType == OBJTYPE_NUMBER || objType == OBJTYPE_INT) {
+      return "number";
+    }
+#endif
     if (objType > 0 && objType <= OBJTYPE_THREAD) {
       return ObjTypeNames[objType];
     }
@@ -78,21 +87,38 @@ const char *MLuaTypeName(MLuaValue v) {
 /* ========================================================================== */
 
 /*
- * Check if a 32-bit signed integer fits in our 29-bit representation.
+ * Check if a 32-bit signed integer fits inline (without a heap box). This is
+ * the whole I32 range on the NaN-boxing path and the 29-bit range on the 32-bit
+ * tagging path; values outside it must be boxed by MLuaMakeIntSafe.
  */
 Bool MLuaIntFits(I32 value) {
-  return (value >= MLUA_INT_MIN && value <= MLUA_INT_MAX);
+  return (value >= MLUA_INLINE_INT_MIN && value <= MLUA_INLINE_INT_MAX);
 }
 
 /*
- * Safely create an integer value, returns MLUA_NIL if overflow.
+ * Create an integer value. If it fits inline it is stored inline; otherwise
+ * (only possible on the 32-bit tagging path) it spills to a heap OBJTYPE_INT
+ * box so full 32-bit integer semantics are preserved. Mirrors the heap-number
+ * spill in MLuaMakeNumber and obeys the same allocation/safepoint discipline.
  */
-MLuaValue MLuaMakeIntSafe(I32 value) {
+MLuaValue MLuaMakeIntSafe(MLuaState *L, I32 value) {
   if (MLuaIntFits(value)) {
     return MakeInt(value);
   }
-  /* Overflow - caller should handle this (e.g., allocate heap number) */
-  return MLUA_NIL;
+#if MLUA_PTR_SIZE == 8
+  /* Unreachable on the NaN-boxing path: every I32 fits inline. */
+  UNUSED(L);
+  return MakeInt(value);
+#else
+  {
+    MLuaGCHeader *gch = MLuaAllocObject(L, OBJTYPE_INT, sizeof(I32));
+    if (!gch) {
+      return MakeInt(0); /* Allocation failed: match the heap-number fallback. */
+    }
+    MLUA_INTBOX(gch)->Value = value;
+    return MakePtr(gch);
+  }
+#endif
 }
 
 /* ========================================================================== */
@@ -150,9 +176,25 @@ MLuaValue MLuaMakeShortStr(const char *s, Size len) {
 
 /*
  * Raw equality check (same bits = equal).
- * For heap objects, this compares pointers, not contents.
+ * For heap objects, this compares pointers, not contents — except boxed
+ * integers, which compare by value so that two distinct boxes holding the same
+ * I32 are equal (table keys and constant dedup depend on this). Canonicalization
+ * guarantees an inline integer and a boxed integer never share a value, so the
+ * only bits-differ-but-equal case is boxed-vs-boxed.
  */
-Bool MLuaRawEqual(MLuaValue a, MLuaValue b) { return a == b; }
+Bool MLuaRawEqual(MLuaValue a, MLuaValue b) {
+#if MLUA_PTR_SIZE == 8
+  return a == b;
+#else
+  if (a == b) {
+    return TRUE;
+  }
+  if (IsBoxedInt(a) && IsBoxedInt(b)) {
+    return MLuaGetIntVal(a) == MLuaGetIntVal(b);
+  }
+  return FALSE;
+#endif
+}
 
 /*
  * Check if two integer values are equal.
@@ -161,14 +203,16 @@ Bool MLuaRawEqual(MLuaValue a, MLuaValue b) { return a == b; }
 Bool MLuaIntEqual(MLuaValue a, MLuaValue b) {
   if (!IsInt(a) || !IsInt(b))
     return FALSE;
+#if MLUA_PTR_SIZE == 8
   return a == b;
+#else
+  return MLuaGetIntVal(a) == MLuaGetIntVal(b);
+#endif
 }
 
 /* ========================================================================== */
 /* Heap Numbers                                                               */
 /* ========================================================================== */
-
-#include "MLuaAlloc.h"
 
 Bool MLuaIsNumber(MLuaValue v) {
   if (IsInt(v)) {
@@ -191,7 +235,7 @@ Bool MLuaIsNumber(MLuaValue v) {
 
 double MLuaToNumber(MLuaValue v) {
   if (IsInt(v)) {
-    return (double)GetInt(v);
+    return (double)MLuaGetIntVal(v);
   }
 #if MLUA_PTR_SIZE == 8
   /* On 64-bit: NaN-boxed doubles */
@@ -203,7 +247,7 @@ double MLuaToNumber(MLuaValue v) {
   if (IsPtr(v)) {
     MLuaGCHeader *h = (MLuaGCHeader *)GetPtr(v);
     if (MLUA_OBJTYPE(h) == OBJTYPE_NUMBER) {
-      return MLUA_NUMBER(h)->Value;
+      return (double)MLUA_NUMBER(h)->Value;
     }
   }
 #endif
@@ -215,11 +259,12 @@ MLuaValue MLuaMakeNumber(MLuaState *L, double n) {
   UNUSED(L);
 #endif
 
-  /* Try to fit in tagged integer first */
+  /* Try to represent as an integer first (inline, or boxed on the 32-bit path
+   * when the value is integral but outside the inline range). */
   if (n == (double)(I32)n) {
     I32 i = (I32)n;
     if (i >= MLUA_INT_MIN && i <= MLUA_INT_MAX) {
-      return MakeInt(i);
+      return MLuaMakeInt(L, i);
     }
   }
 
@@ -236,13 +281,13 @@ MLuaValue MLuaMakeNumber(MLuaState *L, double n) {
    * Must heap-allocate. This is unavoidable with 32-bit values.
    */
   {
-    MLuaGCHeader *gch = MLuaAllocObject(L, OBJTYPE_NUMBER, sizeof(double));
+    MLuaGCHeader *gch = MLuaAllocObject(L, OBJTYPE_NUMBER, sizeof(MLUA_FLOAT));
     MLuaNumber *num;
     if (!gch) {
       return MakeInt(0); /* Fallback */
     }
     num = MLUA_NUMBER(gch);
-    num->Value = n;
+    num->Value = (MLUA_FLOAT)n;
     return MakePtr(num);
   }
 #endif
@@ -253,13 +298,13 @@ MLuaValue MLuaMakeFloat(MLuaState *L, double n) {
   UNUSED(L);
   return MakeDouble(n);
 #else
-  MLuaGCHeader *gch = MLuaAllocObject(L, OBJTYPE_NUMBER, sizeof(double));
+  MLuaGCHeader *gch = MLuaAllocObject(L, OBJTYPE_NUMBER, sizeof(MLUA_FLOAT));
   MLuaNumber *num;
   if (!gch) {
     return MakeInt(0);
   }
   num = MLUA_NUMBER(gch);
-  num->Value = n;
+  num->Value = (MLUA_FLOAT)n;
   return MakePtr(num);
 #endif
 }

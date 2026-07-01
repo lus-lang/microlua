@@ -53,13 +53,23 @@ TEST(ShortStr_Empty) {
 }
 
 TEST(ShortStr_Data) {
+#if MLUA_SHORTSTR_MAX >= 5
   MLuaValue v = MLuaStringNewShort("abcde", 5);
   const char *s = MLuaStringData(v);
   ASSERT_STREQ(s, "abcde");
+#else
+  MLuaValue v = MLuaStringNewShort("abc", 3);
+  const char *s = MLuaStringData(v);
+  ASSERT_STREQ(s, "abc");
+#endif
 }
 
 TEST(ShortStr_TooLong) {
+#if MLUA_SHORTSTR_MAX >= 5
   MLuaValue v = MLuaStringNewShort("hello!", 6);
+#else
+  MLuaValue v = MLuaStringNewShort("abcd", 4);
+#endif
   ASSERT(IsNil(v));
 }
 
@@ -120,8 +130,13 @@ TEST(Intern_DifferentStrings) {
   MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
   ASSERT_NE(L, NULL);
 
+#if MLUA_SHORTSTR_MAX >= 5
   MLuaValue v1 = MLuaStringNew(L, "hello", 5);
   MLuaValue v2 = MLuaStringNew(L, "world", 5);
+#else
+  MLuaValue v1 = MLuaStringNew(L, "abc", 3);
+  MLuaValue v2 = MLuaStringNew(L, "def", 3);
+#endif
 
   ASSERT(IsShortStr(v1));
   ASSERT(IsShortStr(v2));

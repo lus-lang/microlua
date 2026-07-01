@@ -274,7 +274,7 @@ static int MathRandom(MLuaState *L) {
     I64 result = 1 + (I64)(r * (double)n);
     if (result > n)
       result = n;
-    MLuaPush(L, MakeInt((I32)result));
+    MLuaPush(L, MLuaMakeInt(L, (I32)result));
   } else {
     /* Two args: return [m, n] */
     I64 m = GetIntArg(L, 1);
@@ -282,7 +282,7 @@ static int MathRandom(MLuaState *L) {
     I64 result = m + (I64)(r * (double)(n - m + 1));
     if (result > n)
       result = n;
-    MLuaPush(L, MakeInt((I32)result));
+    MLuaPush(L, MLuaMakeInt(L, (I32)result));
   }
   return 1;
 }
@@ -374,7 +374,7 @@ static int MathTointeger(MLuaState *L) {
     double floored = MathFloor(d);
     if (d == floored && floored >= (double)MLUA_INT_MIN &&
         floored <= (double)MLUA_INT_MAX) {
-      MLuaPush(L, MakeInt((I32)floored));
+      MLuaPush(L, MLuaMakeInt(L, (I32)floored));
     } else {
       MLuaPush(L, MLUA_NIL);
     }
@@ -465,8 +465,8 @@ void MLuaOpenMath(MLuaState *L) {
   MLuaTableSet(L, lib, key, MLuaMakeNumber(L, MathHuge));
 
   key = MLuaStringNew(L, "maxinteger", 10);
-  MLuaTableSet(L, lib, key, MakeInt(MLUA_INT_MAX));
+  MLuaTableSet(L, lib, key, MLuaMakeInt(L, MLUA_INT_MAX));
 
   key = MLuaStringNew(L, "mininteger", 10);
-  MLuaTableSet(L, lib, key, MakeInt(MLUA_INT_MIN));
+  MLuaTableSet(L, lib, key, MLuaMakeInt(L, MLUA_INT_MIN));
 }
