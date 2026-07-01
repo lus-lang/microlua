@@ -5,6 +5,14 @@ project('microlua', 'c',
 
 cc = meson.get_compiler('c')
 
+# Hosted binaries (the REPL and the C test executables) must resolve the libm
+# calls that the freestanding core emits when its Math* macros lower through
+# __builtin_* (sin/cos/pow/...). The static core itself stays libc/libm-free
+# (enforced by the guard suite); only the final host binaries link -lm. This is
+# a no-op on platforms whose libm lives in the base C library (e.g. macOS
+# libSystem), so it is required: false.
+m_dep = cc.find_library('m', required: false)
+
 # Debug mode option - enables libc and debug output
 debug_mode = get_option('buildtype') == 'debug'
 compiler_enabled = get_option('compiler')
@@ -97,6 +105,7 @@ repl_c_args = shared_c_args + (debug_mode ? [] : size_c_args)
 mlua_exe = executable('mlua', ['src/MLuaRepl.c', 'src/extensions/MLuaStdLib.c'],
     include_directories: microlua_inc,
     link_with: microlua_lib,
+    dependencies: m_dep,
     c_args: repl_c_args,
     link_args: size_link_args,
     install: true
