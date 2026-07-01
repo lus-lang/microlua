@@ -69,6 +69,16 @@ test_widths = executable('test_widths', 'TestWidths.c',
 )
 test('TestWidths', test_widths)
 
+# Bytecode binary64<->binary32 conversions. Compiled at binary32 (regardless of
+# the build-dir's float config) so the narrowing path and wrappers are always
+# exercised on the host.
+test_floatbits = executable('test_floatbits', 'TestFloatBits.c',
+    include_directories: test_inc,
+    dependencies: m_dep,
+    c_args: test_c_args + ['-DMLUA_FLOAT=float', '-DMLUA_FLOAT_BITS=32']
+)
+test('TestFloatBits', test_floatbits)
+
 if compiler_enabled
     # Test for lexer
     test_lex = executable('test_lex', 'TestLex.c',

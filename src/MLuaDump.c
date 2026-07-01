@@ -6,6 +6,9 @@
 #include "MLuaDump.h"
 #include "MLuaFunc.h"
 #include "MLuaString.h"
+#if MLUA_FLOAT_BITS < 64
+#include "MLuaFloatBits.h" /* boundary conversion; not needed for binary64 */
+#endif
 
 #define BC_FORMAT_OFFICIAL 0
 #define BC_FLAGS_NONE 0
@@ -52,12 +55,17 @@ static Size DumpU64(char *buf, Size pos, Size cap, U64 val, int endian) {
 }
 
 static Size DumpNumber(char *buf, Size pos, Size cap, double d, int endian) {
+#if MLUA_FLOAT_BITS < 64
+  /* Widen the native (narrow) float to canonical binary64 for the wire. */
+  return DumpU64(buf, pos, cap, mlua_f_to_bits64((MLUA_FLOAT)d), endian);
+#else
   union {
     double d;
     U64 u;
   } conv;
   conv.d = d;
   return DumpU64(buf, pos, cap, conv.u, endian);
+#endif
 }
 
 static Bool FitsU32(Size value) { return value <= (Size)0xFFFFFFFFUL; }

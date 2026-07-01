@@ -6,6 +6,9 @@
 #include "MLuaUndump.h"
 #include "MLuaDump.h"
 #include "MLuaString.h"
+#if MLUA_FLOAT_BITS < 64
+#include "MLuaFloatBits.h" /* boundary conversion; not needed for binary64 */
+#endif
 
 #define BC_FORMAT_OFFICIAL 0
 #define BC_FLAGS_NONE 0
@@ -86,12 +89,17 @@ static U64 ReadU64(BCReader *r) {
 }
 
 static double ReadNumber(BCReader *r) {
+#if MLUA_FLOAT_BITS < 64
+  /* Narrow canonical binary64 from the wire to the native (narrow) float. */
+  return (double)mlua_bits64_to_f(ReadU64(r));
+#else
   union {
     double d;
     U64 u;
   } conv;
   conv.u = ReadU64(r);
   return conv.d;
+#endif
 }
 
 static Bool ReadBytes(BCReader *r, U8 *out, Size len) {
