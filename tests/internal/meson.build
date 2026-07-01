@@ -60,6 +60,15 @@ test_table = executable('test_table', 'TestTable.c',
 )
 test('TestTable', test_table)
 
+# Fixed-width / pointer-width type invariants (prints detected widths).
+test_widths = executable('test_widths', 'TestWidths.c',
+    include_directories: test_inc,
+    link_with: microlua_lib,
+    dependencies: m_dep,
+    c_args: test_c_args
+)
+test('TestWidths', test_widths)
+
 if compiler_enabled
     # Test for lexer
     test_lex = executable('test_lex', 'TestLex.c',

@@ -9,17 +9,57 @@
 #include "MLuaConfig.h"
 
 /* ========================================================================== */
+/* Compile-time assertions (C11 _Static_assert, C99 negative-array fallback)  */
+/* ========================================================================== */
+
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#define MLUA_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
+#else
+/* C99 fallback: declares an ill-formed negative-size array typedef when cond
+ * is false. `msg` is unused; the failing type name carries the source line.
+ * Must be used at file scope (a local typedef would trip -Wunused-local-typedefs). */
+#define MLUA_SA_CONCAT_(a, b) a##b
+#define MLUA_SA_CONCAT(a, b) MLUA_SA_CONCAT_(a, b)
+#define MLUA_STATIC_ASSERT(cond, msg)                                          \
+  typedef char MLUA_SA_CONCAT(MLuaStaticAssert_, __LINE__)[(cond) ? 1 : -1]
+#endif
+
+/* ========================================================================== */
 /* Fixed-width integer types (freestanding)                                   */
 /* ========================================================================== */
 
-typedef unsigned char U8;
-typedef signed char I8;
-typedef unsigned short U16;
-typedef signed short I16;
-typedef unsigned int U32;
-typedef signed int I32;
+/*
+ * U8..I32 are derived from the compiler's exact-width type macros so they are
+ * correct even where `int` is not 32-bit (e.g. AVR, where `int` is 16-bit and a
+ * hand-rolled `unsigned int` U32 would be wrong). U64/I64 stay `long long`,
+ * which is 64-bit on every supported target and keeps the LP64 host build's
+ * codegen unchanged. A port header may supply all of U8..I64 itself and define
+ * MLUA_HAVE_WIDTH_TYPES; a target lacking the width macros can opt into the
+ * freestanding <stdint.h> with MLUA_USE_STDINT.
+ */
+#ifndef MLUA_HAVE_WIDTH_TYPES
+#if defined(__UINT32_TYPE__) && defined(__INT32_TYPE__)
+typedef __UINT8_TYPE__ U8;
+typedef __INT8_TYPE__ I8;
+typedef __UINT16_TYPE__ U16;
+typedef __INT16_TYPE__ I16;
+typedef __UINT32_TYPE__ U32;
+typedef __INT32_TYPE__ I32;
+#elif defined(MLUA_USE_STDINT)
+#include <stdint.h>
+typedef uint8_t U8;
+typedef int8_t I8;
+typedef uint16_t U16;
+typedef int16_t I16;
+typedef uint32_t U32;
+typedef int32_t I32;
+#else
+#error "MicroLua: no fixed-width type source; define MLUA_USE_STDINT or provide U8..I64 in the port header and set MLUA_HAVE_WIDTH_TYPES"
+#endif
 typedef unsigned long long U64;
 typedef signed long long I64;
+#define MLUA_HAVE_WIDTH_TYPES 1
+#endif
 
 /* Pointer-sized integer */
 #if defined(__LP64__) || defined(_WIN64)
@@ -34,6 +74,18 @@ typedef I32 IPtr;
 
 /* Size type */
 typedef UPtr Size;
+
+/* Fixed-width and pointer-width invariants (compile-time). */
+MLUA_STATIC_ASSERT(sizeof(U8) == 1, "U8 must be 1 byte");
+MLUA_STATIC_ASSERT(sizeof(I8) == 1, "I8 must be 1 byte");
+MLUA_STATIC_ASSERT(sizeof(U16) == 2, "U16 must be 2 bytes");
+MLUA_STATIC_ASSERT(sizeof(I16) == 2, "I16 must be 2 bytes");
+MLUA_STATIC_ASSERT(sizeof(U32) == 4, "U32 must be 4 bytes");
+MLUA_STATIC_ASSERT(sizeof(I32) == 4, "I32 must be 4 bytes");
+MLUA_STATIC_ASSERT(sizeof(U64) == 8, "U64 must be 8 bytes");
+MLUA_STATIC_ASSERT(sizeof(I64) == 8, "I64 must be 8 bytes");
+MLUA_STATIC_ASSERT(sizeof(UPtr) >= sizeof(void *),
+                   "UPtr must be wide enough to hold a pointer");
 
 /* Boolean */
 typedef U8 Bool;
