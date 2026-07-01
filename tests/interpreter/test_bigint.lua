@@ -92,6 +92,15 @@ test.describe("boxed integers", function()
         test.expect(math.floor(300000000.5)).toBe(300000000)
         test.expect(math.type(math.floor(300000000.5))).toBe("integer")
     end)
+
+    test.it("heap floats stringify (32-bit path)", function()
+        -- Exact in both binary64 and binary32, so this holds on every build,
+        -- including -DMLUA_FLOAT=float. Guards the 32-bit heap-float tostring.
+        test.expect(tostring(0.75)).toBe("0.75")
+        test.expect(tostring(2.5)).toBe("2.5")
+        test.expect(tostring(-0.5)).toBe("-0.5")
+        test.expect(math.type(0.75)).toBe("float")
+    end)
 end)
 
 assert(test.run())

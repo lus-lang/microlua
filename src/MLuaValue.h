@@ -444,10 +444,15 @@ Bool MLuaIntEqual(MLuaValue a, MLuaValue b);
 /* Heap Numbers (for floats that don't fit in tagged integer)                 */
 /* ========================================================================== */
 
-/* Heap number structure - stores double value on heap */
+/* Heap number structure - stores a MLUA_FLOAT value on heap (32-bit path only;
+ * the NaN-boxing path stores raw binary64 inline and never allocates one). */
+#if MLUA_PTR_SIZE == 8
+MLUA_STATIC_ASSERT(sizeof(MLuaValue) == 8,
+                   "NaN-boxing requires a 64-bit value word");
+#endif
 typedef struct MLuaNumber {
   MLuaGCHeader Header;
-  double Value;
+  MLUA_FLOAT Value;
 } MLuaNumber;
 
 /* Macro to access number from GC header */

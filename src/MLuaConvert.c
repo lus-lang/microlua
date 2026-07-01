@@ -242,10 +242,16 @@ Size MLuaValueToStr(MLuaState *L, MLuaValue v, char *buf, Size bufLen) {
     return MLuaIntToStr(MLuaGetIntVal(v), buf);
   }
 
-  /* Float (NaN-boxed on 64-bit) */
+  /* Float: NaN-boxed inline on 64-bit, a heap OBJTYPE_NUMBER on the 32-bit
+   * tagging path. */
 #if MLUA_PTR_SIZE == 8
   if (IsDouble(v)) {
     return MLuaDoubleToStr(GetDouble(v), buf, -1);
+  }
+#else
+  if (IsPtr(v) &&
+      MLUA_OBJTYPE((MLuaGCHeader *)GetPtr(v)) == OBJTYPE_NUMBER) {
+    return MLuaDoubleToStr(MLuaToNumber(v), buf, -1);
   }
 #endif
 

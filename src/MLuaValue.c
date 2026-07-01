@@ -236,7 +236,7 @@ double MLuaToNumber(MLuaValue v) {
   if (IsPtr(v)) {
     MLuaGCHeader *h = (MLuaGCHeader *)GetPtr(v);
     if (MLUA_OBJTYPE(h) == OBJTYPE_NUMBER) {
-      return MLUA_NUMBER(h)->Value;
+      return (double)MLUA_NUMBER(h)->Value;
     }
   }
 #endif
@@ -270,13 +270,13 @@ MLuaValue MLuaMakeNumber(MLuaState *L, double n) {
    * Must heap-allocate. This is unavoidable with 32-bit values.
    */
   {
-    MLuaGCHeader *gch = MLuaAllocObject(L, OBJTYPE_NUMBER, sizeof(double));
+    MLuaGCHeader *gch = MLuaAllocObject(L, OBJTYPE_NUMBER, sizeof(MLUA_FLOAT));
     MLuaNumber *num;
     if (!gch) {
       return MakeInt(0); /* Fallback */
     }
     num = MLUA_NUMBER(gch);
-    num->Value = n;
+    num->Value = (MLUA_FLOAT)n;
     return MakePtr(num);
   }
 #endif
@@ -287,13 +287,13 @@ MLuaValue MLuaMakeFloat(MLuaState *L, double n) {
   UNUSED(L);
   return MakeDouble(n);
 #else
-  MLuaGCHeader *gch = MLuaAllocObject(L, OBJTYPE_NUMBER, sizeof(double));
+  MLuaGCHeader *gch = MLuaAllocObject(L, OBJTYPE_NUMBER, sizeof(MLUA_FLOAT));
   MLuaNumber *num;
   if (!gch) {
     return MakeInt(0);
   }
   num = MLUA_NUMBER(gch);
-  num->Value = n;
+  num->Value = (MLUA_FLOAT)n;
   return MakePtr(num);
 #endif
 }
