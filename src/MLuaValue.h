@@ -137,6 +137,9 @@ typedef UPtr MLuaValue;
 #define GetNanType(v) (((v) >> NANBOX_TYPE_SHIFT) & 0xF)
 #define IsPtr(v) (!IsDouble(v) && GetNanType(v) == NANTYPE_PTR)
 #define IsInt(v) (!IsDouble(v) && GetNanType(v) == NANTYPE_INT)
+/* Inline (non-boxed) integer test. On the NaN-boxing path every integer is
+ * inline, so this is identical to IsInt. */
+#define IsInlineInt(v) (!IsDouble(v) && GetNanType(v) == NANTYPE_INT)
 #define IsShortStr(v) (!IsDouble(v) && GetNanType(v) == NANTYPE_SHORTSTR)
 #define IsLightFunc(v) (!IsDouble(v) && GetNanType(v) == NANTYPE_LIGHTFUNC)
 #define IsInlineFloat(v) IsDouble(v)
@@ -147,6 +150,10 @@ typedef UPtr MLuaValue;
 #define GetTag(v) ((v) & TAG_MASK)
 #define IsPtr(v) (GetTag(v) == TAG_PTR)
 #define IsInt(v) (GetTag(v) == TAG_INT)
+/* Inline (non-boxed) integer test. Boxed integers (OBJTYPE_INT) are pointers;
+ * IsInt is widened to include them separately, so paths that must treat only
+ * the inline tag as an integer (array indices, next()) use IsInlineInt. */
+#define IsInlineInt(v) (GetTag(v) == TAG_INT)
 #define IsSpecial(v) (GetTag(v) == TAG_SPECIAL)
 #define IsShortStr(v) (GetTag(v) == TAG_SHORTSTR)
 #define IsLightFunc(v) (GetTag(v) == TAG_LIGHTFUNC)
@@ -221,9 +228,13 @@ static inline double GetDouble(MLuaValue v) {
 #define MakePtr(p) ((MLuaValue)(UPtr)(p))
 #define GetPtr(v) ((void *)((v) & ~(UPtr)TAG_MASK))
 
-/* Integer: shift left to make room for tag */
+/* Integer: shift left to make room for tag. GetInt shifts the signed
+ * pointer-width word right (arithmetic, sign-extending) before narrowing to
+ * I32: a logical shift of the unsigned word would drop the sign of negative
+ * inline integers on a true 32-bit value word, and casting to I32 before the
+ * shift would truncate values that a wider (64-bit) tagging word still holds. */
 #define MakeInt(i) ((MLuaValue)(((UPtr)(I32)(i) << TAG_BITS) | TAG_INT))
-#define GetInt(v) ((I32)((v) >> TAG_BITS))
+#define GetInt(v) ((I32)((IPtr)(v) >> TAG_BITS))
 
 /* Short string: pack 3 bytes + tag */
 #define MakeShortStr(c0, c1, c2)                                               \
@@ -247,6 +258,18 @@ static inline double GetDouble(MLuaValue v) {
 #endif
 #ifndef MLUA_INT_MIN
 #define MLUA_INT_MIN ((I32)(-0x7FFFFFFF - 1))
+#endif
+
+/* Largest/smallest integer that fits inline (without a heap box). On the
+ * NaN-boxing path the inline int holds a full 32 bits, so this is the whole I32
+ * range; on the 32-bit tagging path it holds 29 (3-bit tag), so wider values
+ * spill to an OBJTYPE_INT box. */
+#if MLUA_PTR_SIZE == 8
+#define MLUA_INLINE_INT_MAX MLUA_INT_MAX
+#define MLUA_INLINE_INT_MIN MLUA_INT_MIN
+#else
+#define MLUA_INLINE_INT_MAX ((I32)0x0FFFFFFF)
+#define MLUA_INLINE_INT_MIN ((I32)(-0x0FFFFFFF - 1))
 #endif
 
 /* Backward compatibility alias */

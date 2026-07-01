@@ -78,10 +78,12 @@ const char *MLuaTypeName(MLuaValue v) {
 /* ========================================================================== */
 
 /*
- * Check if a 32-bit signed integer fits in our 29-bit representation.
+ * Check if a 32-bit signed integer fits inline (without a heap box). This is
+ * the whole I32 range on the NaN-boxing path and the 29-bit range on the 32-bit
+ * tagging path; values outside it must be boxed by MLuaMakeIntSafe.
  */
 Bool MLuaIntFits(I32 value) {
-  return (value >= MLUA_INT_MIN && value <= MLUA_INT_MAX);
+  return (value >= MLUA_INLINE_INT_MIN && value <= MLUA_INLINE_INT_MAX);
 }
 
 /*
