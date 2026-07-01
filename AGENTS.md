@@ -1,7 +1,9 @@
 # MicroLua — Development Guide
 
-MicroLua (`mlua`) is a tiny, freestanding Lua runtime in C99: NaN-boxed values, a 1–2 byte
-stack-machine ISA, single-pass Pratt parser→bytecode, and a Lisp-2 mark-compact GC.
+MicroLua (`mlua`) is a tiny, freestanding Lua runtime in C99: NaN-boxed values
+on 64-bit, alignment-tagged values with boxed full-width integers on 32-bit, a
+1–2 byte stack-machine ISA, single-pass Pratt parser→bytecode, and a Lisp-2
+mark-compact GC.
 `README.md` is the product spec.
 
 ## Build & run
@@ -21,16 +23,19 @@ ninja -C builddir
   `generic32`, `cortex-m`, or `riscv32` for built-in presets, or
   `-Dport_header=path/to/header.h` to supply one board-specific header. That
   header may override pointer size, alignment, default stack/frame sizes, GC
-  threshold, math hooks, and `MLUA_ENABLE_COMPILER`.
+  threshold, fixed-width type source, native float subtype/width, math hooks,
+  and `MLUA_ENABLE_COMPILER`.
 - Source compilation is controlled by Meson `-Dcompiler=true|false`. When false,
   `libmicrolua.a` must not contain `MLuaLex`/`MLuaParse` symbols and callers must
   use `MLuaLoadBytecode` / `MLuaDoBytecode` or `MLuaLoadBuffer` / `MLuaDoBuffer`
   with a bytecode buffer. `-o`, `-e`, the REPL, `load`, and `loadfile` are
   compiler-enabled workflows only.
-- MicroLua bytecode format v2 uses fixed-width serialized fields and an explicit
+- MicroLua bytecode format v3 uses fixed-width serialized fields and an explicit
   endianness byte. It is portable across supported endian/pointer-size targets
-  with a compatible MicroLua bytecode version and numeric format; unsupported
-  headers must be rejected deterministically by `MLuaUndump`.
+  with a compatible MicroLua bytecode version. Numeric constants are serialized
+  as canonical IEEE-754 binary64 values and narrowed/widened at the boundary
+  when `MLUA_FLOAT_BITS` is 32; unsupported headers must be rejected
+  deterministically by `MLuaUndump`.
 - The static library (`libmicrolua.a`) must stay libc-free; only the REPL
   (`src/MLuaRepl.c`) and optional extensions may use libc. The only acceptable
   undefined symbols are libm functions (sin/cos/pow/...) from `__builtin_*`
@@ -115,7 +120,7 @@ size into `bench/RESULTS.md`. It auto-detects a local `lua5.5`/`lua` (verified `
 |---|---|
 | `src/MLuaCore.c/.h` | Freestanding libc replacements (MemCpy/StrLen/…), math builtins |
 | `src/MLuaConfig.h`, `src/ports/` | Central port/build configuration and default embedded presets |
-| `src/MLuaValue.c/.h` | Value representation: NaN-boxing (64-bit) / alignment tags (32-bit); GC headers |
+| `src/MLuaValue.c/.h` | Value representation: NaN-boxing (64-bit) / alignment tags plus boxed integers and heap floats (32-bit); GC headers |
 | `src/MLuaAlloc.c/.h` | `MLuaState`, bump-pointer heap, constrained/vector state creation, `MLuaGCRef` |
 | `src/MLuaGC.c/.h` | Lisp-2 mark-compact GC: mark → compute addresses → update refs → compact |
 | `src/MLuaLex.c/.h` | Pull lexer, UTF-8-aware, zero-copy tokens |
@@ -148,8 +153,9 @@ size into `bench/RESULTS.md`. It auto-detects a local `lua5.5`/`lua` (verified `
   raw pointers. Never store a raw `MLuaProto*`/code pointer across a safepoint.
 - Strings are interned (equal contents ⇒ same value) and the intern table is WEAK
   with `MLUA_FALSE` tombstones. Never mutate string bytes in place.
-- `MLuaStringData` on short strings (≤3 bytes) returns one of 4 rotating static
-  buffers — a pointer is valid until the 4th subsequent call.
+- `MLuaStringData` on short strings (`MLUA_SHORTSTR_MAX`: 5 bytes on 64-bit,
+  3 bytes on 32-bit) returns one of 4 rotating static buffers — a pointer is
+  valid until the 4th subsequent call.
 - No metatables anywhere — table delegation goes through the table's `Forward` field
   (`table.forward`). `rawget`/`rawset`/`rawequal`/`setmetatable` must not be added.
 - All C functions are **light**: no upvalues, registered via `MLuaRegisterCFunc` /

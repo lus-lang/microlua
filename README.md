@@ -40,6 +40,7 @@ exact constrained-heap high-water from a high-limit `--dump` run.
 - The core can run without dynamic memory allocation: pass your own pre-allocated heap to the interpreter[^1].
 - Interpreter is implemented as a stack machine, with instructions encoded as single or double bytes.
 - Single-pass Pratt parsing and code generation with minimal resource cost. The parser/compiler can also be compiled out for bytecode-only embedded targets.
+- Port configuration supports 64-bit NaN-boxing, 32-bit alignment tagging with boxed full-width integers, compiler-derived fixed-width C types, and optional single-precision heap floats for targets whose `double` is not binary64.
 - Garbage collection that reclaims and defragments the heap to conserve memory.
 - Holes in table arrays are runtime errors to ensure heap compactness.
 - Strings and scripts are encoded as UTF-8.
@@ -87,17 +88,24 @@ ninja -C build-bytecode
 
 When `-Dcompiler=false`, `libmicrolua.a` omits the lexer and parser and exposes
 `MLuaLoadBytecode`/`MLuaDoBytecode` for embedded callers.
+MicroLua bytecode has a versioned header, records endianness, serializes
+execution-critical fields with fixed widths, and stores numeric constants as
+canonical IEEE-754 binary64 values. A target may use a narrower native
+`MLUA_FLOAT`, but bytecode remains tied to the MicroLua bytecode version and
+supported numeric formats.
 
 Port-specific settings are centralized in `src/MLuaConfig.h`. A board port can
 override pointer size, heap alignment, default stack/frame sizes, GC threshold,
-math hooks, and compiler support by providing one header:
+fixed-width type source, native float subtype/width, math hooks, and compiler
+support by providing one header:
 
 ```sh
 meson setup build-board -Dport_header=path/to/my_board_mlua.h
 ```
 
 Built-in presets are available with `-Dport=generic64`, `generic32`,
-`cortex-m`, or `riscv32`.
+`cortex-m`, or `riscv32`. See `src/ports/README.md` for the full port-knob
+reference and verification matrix.
 
 ## License
 

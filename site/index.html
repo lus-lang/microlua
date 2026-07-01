@@ -101,7 +101,10 @@ ninja -C build-bytecode</code></pre>
         <pre><code>meson setup build-board -Dport_header=path/to/my_board_mlua.h</code></pre>
         <p>
           A port header can override pointer size, heap alignment, default
-          stack and frame sizes, GC threshold, math hooks, and compiler support.
+          stack and frame sizes, GC threshold, fixed-width type source, native
+          float subtype and width, math hooks, and compiler support.
+          MicroLua supports 64-bit NaN-boxing and a 32-bit alignment-tagging
+          representation with boxed full-width integers.
         </p>
       </section>
       <section>
@@ -140,8 +143,10 @@ ninja -C build-bytecode</code></pre>
           portable <code>.mlu</code> bytecode file. Bytecode has a versioned
           header with an explicit endianness byte and fixed-width serialized
           fields, so it can be moved across supported endian and pointer-size
-          targets with a compatible MicroLua bytecode version and numeric
-          format.
+          targets with a compatible MicroLua bytecode version. Numeric
+          constants are stored as canonical IEEE-754 binary64 values and are
+          narrowed or widened at the boundary for targets using a narrower
+          native <code>MLUA_FLOAT</code>.
         </p>
       </section>
 

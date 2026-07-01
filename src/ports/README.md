@@ -76,7 +76,7 @@ that is internally inconsistent (e.g. NaN-boxing requested on a 32-bit word).
 
 ## Verifying a port
 
-Configure a build-dir per target and run `meson test`; the matrix used in CI:
+Configure a build-dir per target and run `meson test`; the validation matrix is:
 
 ```sh
 meson setup builddir                                        # host, NaN-boxing
