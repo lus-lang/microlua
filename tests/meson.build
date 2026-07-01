@@ -16,6 +16,7 @@ if compiler_enabled
         'test_math',
         'test_io',
         'test_operators',
+        'test_bigint',
     ]
     foreach t : interpreter_tests
         test('interp_' + t, mlua_exe,

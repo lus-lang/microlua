@@ -298,6 +298,7 @@ static inline double GetDouble(MLuaValue v) {
 #define OBJTYPE_RAW 0x09      /* Raw buffer (MLuaAlloc payload): pinned,
                                  always live, no references — makes the GC
                                  heap walk well-defined */
+#define OBJTYPE_INT 0x0A      /* Heap-boxed 32-bit integer (tagging path only) */
 
 /* Flag bits in header byte */
 #define GCFLAG_TYPE_MASK 0x0F /* Low 4 bits: type */
@@ -313,11 +314,16 @@ static inline double GetDouble(MLuaValue v) {
  * it in the header (Lisp-2's "extra field") means computing addresses never
  * clobbers object data the update phase still needs (Location, Proto, ...).
  */
+/* Aligned to MLUA_ALIGNMENT so the payload that follows (at offset
+ * sizeof(MLuaGCHeader)) is itself MLUA_ALIGNMENT-aligned. Without this the
+ * header is 12 bytes on a 32-bit target (U8 + U32 + 4-byte pointer), leaving
+ * MLuaAlloc payloads only 4-aligned; the 64-bit header is already 24 bytes, so
+ * this is a no-op there. */
 typedef struct {
   U8 Flags; /* [7:ROM][6:Pinned][5:Marked][4:Reserved][3-0:Type] */
   Size CachedSize; /* Total aligned span including header */
   void *Forward;   /* Compaction forwarding address (GC use only) */
-} MLuaGCHeader;
+} MLUA_ALIGNAS(MLUA_ALIGNMENT) MLuaGCHeader;
 
 /* Get object type from header */
 #define MLUA_OBJTYPE(h) ((h)->Flags & GCFLAG_TYPE_MASK)
@@ -418,8 +424,9 @@ const char *MLuaTypeName(MLuaValue v);
 /* Check if integer fits in tagged format */
 Bool MLuaIntFits(I32 i);
 
-/* Create integer, handling overflow */
-MLuaValue MLuaMakeIntSafe(I32 i);
+/* Create an integer value, spilling to a heap box when it does not fit inline
+ * (the state is needed to allocate the box). */
+MLuaValue MLuaMakeIntSafe(MLuaState *L, I32 i);
 
 /* Get short string length (0-3) */
 Size MLuaShortStrLen(MLuaValue v);
@@ -445,6 +452,54 @@ typedef struct MLuaNumber {
 
 /* Macro to access number from GC header */
 #define MLUA_NUMBER(h) ((MLuaNumber *)(h))
+
+/* ========================================================================== */
+/* Boxed Integers (32-bit tagging path)                                        */
+/* ========================================================================== */
+
+/*
+ * On the 32-bit tagging path an inline integer only spans MLUA_INLINE_INT_MIN..
+ * MAX (29 bits); a wider I32 is stored in a heap OBJTYPE_INT box so the runtime
+ * keeps full 32-bit integer semantics. Values are canonical: anything that fits
+ * inline is always inline, so the inline and boxed ranges are disjoint and an
+ * inline integer and a boxed integer can never encode the same value. Like a
+ * heap number, an int box is a GC leaf with no internal references.
+ *
+ * On the NaN-boxing path the inline integer already holds a full 32 bits, so no
+ * boxing ever happens; the helpers below collapse to the plain inline ops,
+ * which keeps the default build byte-identical.
+ */
+typedef struct MLuaIntBox {
+  MLuaGCHeader Header;
+  I32 Value;
+} MLuaIntBox;
+#define MLUA_INTBOX(h) ((MLuaIntBox *)(h))
+
+#if MLUA_PTR_SIZE == 8
+#define IsBoxedInt(v) (0)
+#define MLuaGetIntVal(v) GetInt(v)
+#define MLuaMakeInt(L, i) MakeInt(i)
+#else
+/* A boxed integer is a heap pointer to an OBJTYPE_INT object. */
+static inline Bool IsBoxedInt(MLuaValue v) {
+  if (!IsPtr(v))
+    return FALSE;
+  return MLUA_OBJTYPE((MLuaGCHeader *)GetPtr(v)) == OBJTYPE_INT;
+}
+/* IsInt now covers both inline-tagged and heap-boxed integers. Paths that must
+ * treat only the inline tag as an integer keep using IsInlineInt. */
+#undef IsInt
+#define IsInt(v) (IsInlineInt(v) || IsBoxedInt(v))
+/* Read the full I32 value whether it is inline or boxed. */
+static inline I32 MLuaGetIntVal(MLuaValue v) {
+  if (IsBoxedInt(v)) {
+    return MLUA_INTBOX((MLuaGCHeader *)GetPtr(v))->Value;
+  }
+  return GetInt(v);
+}
+/* Make an integer value, spilling to a box when it does not fit inline. */
+#define MLuaMakeInt(L, i) MLuaMakeIntSafe((L), (i))
+#endif
 
 /* Check if value is a number (integer or heap number) */
 Bool MLuaIsNumber(MLuaValue v);

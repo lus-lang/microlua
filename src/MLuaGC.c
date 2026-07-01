@@ -31,7 +31,7 @@ int MLuaGCVerifyHeap(MLuaState *L, const char *where) {
     MLuaGCHeader *obj = (MLuaGCHeader *)scan;
     Size objSize = obj->CachedSize;
     U8 type = MLUA_OBJTYPE(obj);
-    if (objSize == 0 || objSize > L->HeapSize || type == 0 || type > 0x09) {
+    if (objSize == 0 || objSize > L->HeapSize || type == 0 || type > 0x0A) {
       fprintf(stderr,
               "[gc] HEAP CORRUPT at %s: off=%lu flags=0x%02x size=%lu\n",
               where, (unsigned long)(scan - L->HeapBase), obj->Flags,
@@ -212,6 +212,7 @@ void MLuaGCMarkObject(MLuaState *L, MLuaGCHeader *obj) {
   case OBJTYPE_USERDATA:
   case OBJTYPE_NUMBER:
   case OBJTYPE_RAW:
+  case OBJTYPE_INT:
     /* These don't contain GC references */
     break;
   }

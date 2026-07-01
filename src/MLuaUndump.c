@@ -116,7 +116,7 @@ static MLuaValue ReadValue(BCReader *r) {
   case 2:
     return MLUA_TRUE;
   case 3:
-    return MakeInt(ReadI32(r));
+    return MLuaMakeInt(r->L, ReadI32(r));
   case 4:
     return MLuaMakeNumber(r->L, ReadNumber(r));
   case 5:

@@ -31,10 +31,10 @@ static int TableConcat(MLuaState *L) {
     seplen = MLuaStringLen(sepval);
   }
   if (top >= 3) {
-    startI = GetInt(MLuaGetStack(L, 3));
+    startI = MLuaGetIntVal(MLuaGetStack(L, 3));
   }
   if (top >= 4) {
-    j = GetInt(MLuaGetStack(L, 4));
+    j = MLuaGetIntVal(MLuaGetStack(L, 4));
   } else {
     j = (IPtr)MLuaTableLen(tbl);
   }
@@ -128,11 +128,11 @@ static int TableInsert(MLuaState *L) {
     /* Position must land inside the sequence or exactly one past its end;
        anything else would create a hole. (Also guards the loop below from
        an unsigned underflow when pos < 1.) */
-    if (GetInt(posv) < 1 || (Size)GetInt(posv) > len + 1) {
+    if (MLuaGetIntVal(posv) < 1 || (Size)MLuaGetIntVal(posv) > len + 1) {
       L->ErrorMsg = "bad argument #2 to 'insert' (position out of bounds)";
       return -1;
     }
-    pos = (Size)GetInt(posv);
+    pos = (Size)MLuaGetIntVal(posv);
 
     /* Shift elements up (top-down, so the array never transiently holds a
        hole) */
@@ -180,10 +180,10 @@ static int TableUnpack(MLuaState *L) {
   Size count = 0;
 
   if (top >= 2) {
-    i = GetInt(MLuaGetStack(L, 2));
+    i = MLuaGetIntVal(MLuaGetStack(L, 2));
   }
   if (top >= 3) {
-    j = GetInt(MLuaGetStack(L, 3));
+    j = MLuaGetIntVal(MLuaGetStack(L, 3));
   } else {
     j = (IPtr)MLuaTableLen(tbl);
   }
@@ -221,7 +221,7 @@ static int TableRemove(MLuaState *L) {
   }
 
   if (top >= 2) {
-    pos = (Size)GetInt(MLuaGetStack(L, 2));
+    pos = (Size)MLuaGetIntVal(MLuaGetStack(L, 2));
   } else {
     pos = len;
   }
@@ -422,8 +422,8 @@ static int TableMaxn(MLuaState *L) {
     if (!IsNil(th->Nodes[i].Key) && !IsNil(th->Nodes[i].Value)) {
       MLuaValue k = th->Nodes[i].Key;
       if (IsInt(k)) {
-        if ((double)GetInt(k) > maxn) {
-          maxn = (double)GetInt(k);
+        if ((double)MLuaGetIntVal(k) > maxn) {
+          maxn = (double)MLuaGetIntVal(k);
         }
       } else if (MLuaIsNumber(k)) {
         double kn = MLuaToNumber(k);
@@ -435,7 +435,7 @@ static int TableMaxn(MLuaState *L) {
   }
 
   if (maxn == (double)(I32)maxn) {
-    MLuaPush(L, MakeInt((I32)maxn));
+    MLuaPush(L, MLuaMakeInt(L, (I32)maxn));
   } else {
     MLuaPush(L, MLuaMakeNumber(L, maxn));
   }

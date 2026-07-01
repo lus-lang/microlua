@@ -13,8 +13,8 @@
 
 static U32 HashValue(MLuaValue key) {
   if (IsInt(key)) {
-    /* Simple integer hash */
-    I32 i = GetInt(key);
+    /* Simple integer hash (by value, so a boxed int hashes like its I32) */
+    I32 i = MLuaGetIntVal(key);
     return (U32)((i * 2654435761U) & 0xFFFFFFFF);
   }
 
@@ -111,11 +111,15 @@ MLuaValue MLuaTableNewSized(MLuaState *L, Size arrayHint, Size hashHint) {
 static Bool IsPositiveInt(MLuaValue key, Size *index) {
   I32 i;
 
+  /* Use the full integer value (inline or boxed) so a large positive key is
+   * treated identically on every target: MicroLua rejects array holes by
+   * design, so t[huge] is a runtime error on both the tagging and NaN-boxing
+   * paths, never silently a hash-part key on one and an error on the other. */
   if (!IsInt(key)) {
     return FALSE;
   }
 
-  i = GetInt(key);
+  i = MLuaGetIntVal(key);
   if (i > 0) {
     *index = (Size)i;
     return TRUE;
@@ -506,7 +510,7 @@ MLuaValue MLuaTableNext(MLuaValue tbl, MLuaValue key, MLuaValue *value) {
         *value = th->Array[i];
         return arrKey;
       }
-    } else if (IsInt(key) && GetInt(key) == (I32)(i + 1)) {
+    } else if (IsInt(key) && MLuaGetIntVal(key) == (I32)(i + 1)) {
       foundCurrent = TRUE;
     }
   }

@@ -239,7 +239,7 @@ Size MLuaValueToStr(MLuaState *L, MLuaValue v, char *buf, Size bufLen) {
 
   /* Integer */
   if (IsInt(v)) {
-    return MLuaIntToStr(GetInt(v), buf);
+    return MLuaIntToStr(MLuaGetIntVal(v), buf);
   }
 
   /* Float (NaN-boxed on 64-bit) */
@@ -700,7 +700,7 @@ Size MLuaFormat(MLuaState *L, const char *fmt, Size fmtLen, MLuaValue *args,
       case 'i': {
         if (argIdx < nargs) {
           MLuaValue v = args[argIdx++];
-          I64 n = IsInt(v) ? GetInt(v) : (I64)MLuaToNumber(v);
+          I64 n = IsInt(v) ? MLuaGetIntVal(v) : (I64)MLuaToNumber(v);
           tmpLen = MLuaIntToStr(n, tmp);
         }
         break;
@@ -709,7 +709,7 @@ Size MLuaFormat(MLuaState *L, const char *fmt, Size fmtLen, MLuaValue *args,
       case 'u': {
         if (argIdx < nargs) {
           MLuaValue v = args[argIdx++];
-          U64 n = IsInt(v) ? (U64)(U32)GetInt(v) : (U64)MLuaToNumber(v);
+          U64 n = IsInt(v) ? (U64)(U32)MLuaGetIntVal(v) : (U64)MLuaToNumber(v);
           tmpLen = FmtUnsigned(n, tmp, sizeof(tmp), 10, FALSE);
         }
         break;
@@ -719,7 +719,7 @@ Size MLuaFormat(MLuaState *L, const char *fmt, Size fmtLen, MLuaValue *args,
       case 'X': {
         if (argIdx < nargs) {
           MLuaValue v = args[argIdx++];
-          U64 n = IsInt(v) ? (U64)(U32)GetInt(v) : (U64)MLuaToNumber(v);
+          U64 n = IsInt(v) ? (U64)(U32)MLuaGetIntVal(v) : (U64)MLuaToNumber(v);
           tmpLen = FmtUnsigned(n, tmp, sizeof(tmp), 16, spec == 'X');
         }
         break;
@@ -728,7 +728,7 @@ Size MLuaFormat(MLuaState *L, const char *fmt, Size fmtLen, MLuaValue *args,
       case 'o': {
         if (argIdx < nargs) {
           MLuaValue v = args[argIdx++];
-          U64 n = IsInt(v) ? (U64)(U32)GetInt(v) : (U64)MLuaToNumber(v);
+          U64 n = IsInt(v) ? (U64)(U32)MLuaGetIntVal(v) : (U64)MLuaToNumber(v);
           tmpLen = FmtUnsigned(n, tmp, sizeof(tmp), 8, FALSE);
         }
         break;
@@ -752,7 +752,7 @@ Size MLuaFormat(MLuaState *L, const char *fmt, Size fmtLen, MLuaValue *args,
       case 'c': {
         if (argIdx < nargs) {
           MLuaValue v = args[argIdx++];
-          I32 c = IsInt(v) ? GetInt(v) : (I32)MLuaToNumber(v);
+          I32 c = IsInt(v) ? MLuaGetIntVal(v) : (I32)MLuaToNumber(v);
           tmp[0] = (char)c;
           tmpLen = 1;
         }

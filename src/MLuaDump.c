@@ -79,7 +79,7 @@ static Size DumpValue(MLuaState *L, MLuaValue v, char *buf, Size pos, Size cap,
   }
   if (IsInt(v)) {
     pos = DumpByte(buf, pos, cap, 3);
-    return DumpI32(buf, pos, cap, GetInt(v), endian);
+    return DumpI32(buf, pos, cap, MLuaGetIntVal(v), endian);
   }
   if (MLuaIsNumber(v)) {
     pos = DumpByte(buf, pos, cap, 4);
