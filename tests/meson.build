@@ -84,3 +84,35 @@ if not debug_mode
         suite: 'guard',
     )
 endif
+
+# Freestanding embeddability: a minimal bring-your-own-arena + output-hook
+# embedder links the static core and runs an integer-only chunk. Complements
+# libc_free_symbols (no libc symbols) by proving the core actually links + runs.
+# Needs the compiler for MLuaDoString.
+if compiler_enabled
+    embed_smoke = executable('embed_smoke', 'embed/embed_smoke.c',
+        include_directories: microlua_inc,
+        link_with: microlua_lib,
+        dependencies: m_dep,
+        c_args: shared_c_args,
+    )
+    test('embed_smoke', embed_smoke, suite: 'guard')
+endif
+
+# Cross-compile width canaries: verify (never assume) a nonstandard target's
+# type widths from the compiler, then confirm the freestanding core compiles
+# there. Skip-with-notice (exit 77) when the toolchain is absent. AVR is the
+# non-32-bit-int / non-binary64-double case; riscv32 is a real 32-bit ABI.
+cross_canary = files('../tools/cross_canary.py')
+cross_srcroot = meson.project_source_root()
+
+test('canary_avr', python_prog,
+    args: [cross_canary, 'avr-gcc', cross_srcroot, '2', '2', '4',
+           '-mmcu=atmega328p'],
+    suite: 'guard',
+)
+test('canary_riscv32', python_prog,
+    args: [cross_canary, 'riscv64-linux-gnu-gcc', cross_srcroot, '4', '4', '8',
+           '-march=rv32imac', '-mabi=ilp32'],
+    suite: 'guard',
+)
