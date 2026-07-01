@@ -242,8 +242,12 @@ static inline double GetDouble(MLuaValue v) {
 #endif /* MLUA_PTR_SIZE */
 
 /* Integer range limits */
+#ifndef MLUA_INT_MAX
 #define MLUA_INT_MAX ((I32)0x7FFFFFFF)
+#endif
+#ifndef MLUA_INT_MIN
 #define MLUA_INT_MIN ((I32)(-0x7FFFFFFF - 1))
+#endif
 
 /* Backward compatibility alias */
 #define GetLightFuncIdx GetLightFuncIndex
@@ -291,9 +295,6 @@ typedef struct {
   Size CachedSize; /* Total aligned span including header */
   void *Forward;   /* Compaction forwarding address (GC use only) */
 } MLuaGCHeader;
-
-/* Minimum alignment for heap objects */
-#define MLUA_ALIGNMENT 8
 
 /* Get object type from header */
 #define MLUA_OBJTYPE(h) ((h)->Flags & GCFLAG_TYPE_MASK)

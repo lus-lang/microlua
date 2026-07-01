@@ -49,10 +49,10 @@ static int BaseError(MLuaState *L) {
   return -1; /* Error */
 }
 
+#if MLUA_ENABLE_COMPILER
 /* ========================================================================== */
 /* load                                                                       */
 /* ========================================================================== */
-
 static int BaseLoad(MLuaState *L) {
   MLuaValue chunk = MLuaGetStack(L, 1);
   const char *chunkname = "=(load)";
@@ -79,20 +79,20 @@ static int BaseLoad(MLuaState *L) {
     return 2;
   }
 
-  /* Compile the chunk */
-  status = MLuaLoadString(L, source, len, chunkname);
+  status = MLuaLoadBuffer(L, source, len, chunkname);
 
   if (status == MLUA_OK) {
-    /* Function is already on stack from MLuaLoadString */
+    /* Function is already on stack from MLuaLoadBuffer */
     return 1;
   } else {
-    /* Error message is on stack from MLuaLoadString */
+    /* Error message is on stack from MLuaLoadBuffer */
     MLuaValue err = MLuaPop(L);
     MLuaPush(L, MLUA_NIL);
     MLuaPush(L, err);
     return 2;
   }
 }
+#endif
 
 /* ========================================================================== */
 /* next                                                                       */
@@ -367,8 +367,10 @@ static int BaseXpcall(MLuaState *L) {
 void MLuaOpenBase(MLuaState *L) {
   MLuaRegisterGlobal(L, "assert", BaseAssert);
   MLuaRegisterGlobal(L, "error", BaseError);
+#if MLUA_ENABLE_COMPILER
   MLuaRegisterGlobal(L, "load", BaseLoad);
   MLuaRegisterGlobal(L, "loadstring", BaseLoad); /* Lua 5.1 alias */
+#endif
   MLuaRegisterGlobal(L, "next", BaseNext);
   MLuaRegisterGlobal(L, "pairs", BasePairs);
   MLuaRegisterGlobal(L, "ipairs", BaseIpairs);

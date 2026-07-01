@@ -25,6 +25,12 @@
       MicroLua is a tiny Lua runtime for embedded systems and other places
       where portability, a small footprint, and predictable memory use matter.
     </p>
+    <p>
+      In a local macOS size build with similar build flags, MicroLua's
+      compiler/parser-less runtime artifacts total 218 KiB, or 259 KiB with
+      the parser. That is about 2.8x smaller than Lua 5.5.0's runtime artifacts
+      at 612 KiB.
+    </p>
     <nav aria-label="Contents">
       <h2>Contents</h2>
       <ol>
@@ -71,6 +77,32 @@ ninja -C builddir-release</code></pre>
         In release mode, the core library is compiled with freestanding flags.
         The command-line executable still uses libc for file and console I/O.
       </p>
+      <p>
+        For embedded systems that should not carry the source parser, build a
+        bytecode-only runtime:
+      </p>
+      <pre><code>meson setup build-bytecode -Dcompiler=false --buildtype=release
+ninja -C build-bytecode</code></pre>
+      <p>
+        The bytecode-only library omits the lexer and parser. It accepts
+        precompiled MicroLua bytecode through <code>MLuaLoadBytecode</code>,
+        <code>MLuaDoBytecode</code>, <code>MLuaLoadBuffer</code>, or
+        <code>MLuaDoBuffer</code>.
+      </p>
+      <section>
+        <h3>Port Configuration</h3>
+        <p>
+          Port settings live in <code>src/MLuaConfig.h</code>. Use
+          <code>-Dport=generic64</code>, <code>generic32</code>,
+          <code>cortex-m</code>, or <code>riscv32</code> for bundled presets,
+          or provide a board-specific header:
+        </p>
+        <pre><code>meson setup build-board -Dport_header=path/to/my_board_mlua.h</code></pre>
+        <p>
+          A port header can override pointer size, heap alignment, default
+          stack and frame sizes, GC threshold, math hooks, and compiler support.
+        </p>
+      </section>
       <section>
         <h3>Build Outputs</h3>
         <dl>
@@ -80,6 +112,10 @@ ninja -C builddir-release</code></pre>
           <dd>The embeddable MicroLua static library.</dd>
           <dt><code>builddir-release/libmicrolua.a</code></dt>
           <dd>The freestanding release static library.</dd>
+          <dt><code>build-bytecode/mlua</code></dt>
+          <dd>The bytecode-only command-line runner.</dd>
+          <dt><code>build-bytecode/libmicrolua.a</code></dt>
+          <dd>The embeddable bytecode-only static library without the lexer or parser.</dd>
         </dl>
       </section>
     </section>
@@ -91,11 +127,20 @@ ninja -C builddir-release</code></pre>
         <pre><code>./builddir/mlua script.lua
 ./builddir/mlua
 ./builddir/mlua -e 'print(1 + 2 * 3)'
-./builddir/mlua -o chunk.mlu script.lua</code></pre>
+./builddir/mlua -o chunk.mlu script.lua
+./build-bytecode/mlua chunk.mlu</code></pre>
         <p>
           Running <code>mlua</code> with no file starts the interactive REPL.
           The REPL evaluates one line as one chunk, so local variables do not
           persist across lines. Put multi-line programs in a file.
+        </p>
+        <p>
+          Use <code>-o</code> on a compiler-enabled host build to create a
+          portable <code>.mlu</code> bytecode file. Bytecode has a versioned
+          header with an explicit endianness byte and fixed-width serialized
+          fields, so it can be moved across supported endian and pointer-size
+          targets with a compatible MicroLua bytecode version and numeric
+          format.
         </p>
       </section>
 
@@ -115,15 +160,15 @@ ninja -C builddir-release</code></pre>
             </tr>
             <tr>
               <td><code>-e EXPR</code>, <code>--eval EXPR</code></td>
-              <td>Evaluate a chunk supplied on the command line.</td>
+              <td>Evaluate a source chunk supplied on the command line. Requires a compiler-enabled build.</td>
             </tr>
             <tr>
               <td><code>-i</code>, <code>--interactive</code></td>
-              <td>Enter interactive mode.</td>
+              <td>Enter interactive mode. Requires a compiler-enabled build.</td>
             </tr>
             <tr>
               <td><code>-I FILE</code>, <code>--include FILE</code></td>
-              <td>Include a file through the REPL's require support.</td>
+              <td>Include a file through the REPL's require support. Requires a compiler-enabled build.</td>
             </tr>
             <tr>
               <td><code>-d</code>, <code>--dump</code></td>
@@ -139,7 +184,7 @@ ninja -C builddir-release</code></pre>
             </tr>
             <tr>
               <td><code>-o FILE</code></td>
-              <td>Compile a source file or <code>-e</code> chunk and write MicroLua bytecode to <code>FILE</code>.</td>
+              <td>Compile a source file or <code>-e</code> chunk and write MicroLua bytecode to <code>FILE</code>. Requires a compiler-enabled build.</td>
             </tr>
             <tr>
               <td><code>-v</code>, <code>--version</code></td>
@@ -180,6 +225,14 @@ print(total)</code></pre>
         Optional <code>io</code>, <code>os</code>, <code>dofile</code>, and
         <code>loadfile</code> support lives in <code>src/extensions/MLuaStdLib.c</code>
         and requires libc.
+      </p>
+      <p>
+        A common embedded workflow is to compile source on a development host
+        with <code>mlua -o app.mlu app.lua</code>, include the resulting bytes
+        in firmware or external storage, then call <code>MLuaDoBytecode</code>
+        or <code>MLuaLoadBytecode</code> on the target. A bytecode-only build
+        rejects source-only workflows such as <code>-e</code>, the REPL,
+        <code>load</code>, and <code>loadfile</code>.
       </p>
     </section>
 
@@ -485,6 +538,7 @@ print(total)</code></pre>
       </p>
       <pre><code>meson test -C builddir --suite interpreter
 meson test -C builddir --suite smoke
+meson test -C builddir --suite bytecode
 meson test -C builddir --suite guard
 meson test -C builddir --suite cli
 meson test -C builddir --suite security</code></pre>

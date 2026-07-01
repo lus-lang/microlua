@@ -114,9 +114,9 @@ MLuaState *MLuaNewConstrainedState(void *memory, Size size) {
   evalBytes = ALIGN_UP(evalBytes, MLUA_ALIGNMENT);
   localsBytes = MLUA_DEFAULT_STACK_SIZE * sizeof(MLuaValue);
   localsBytes = ALIGN_UP(localsBytes, MLUA_ALIGNMENT);
-  argsBytes = 64 * sizeof(MLuaValue); /* Smaller args array */
+  argsBytes = MLUA_DEFAULT_ARGS_SIZE * sizeof(MLuaValue);
   argsBytes = ALIGN_UP(argsBytes, MLUA_ALIGNMENT);
-  framesBytes = 64 * sizeof(MLuaFrame);
+  framesBytes = MLUA_DEFAULT_FRAMES_SIZE * sizeof(MLuaFrame);
   framesBytes = ALIGN_UP(framesBytes, MLUA_ALIGNMENT);
 
   remaining = size - L->HeapTop;
@@ -139,7 +139,7 @@ MLuaState *MLuaNewConstrainedState(void *memory, Size size) {
 
   /* Allocate Args */
   L->Args = (MLuaValue *)(base + L->HeapTop);
-  L->ArgsSize = 64;
+  L->ArgsSize = MLUA_DEFAULT_ARGS_SIZE;
   L->ArgsBase = 0;
   L->ArgsTop = 0;
   L->ArgsCount = 0;
@@ -147,7 +147,7 @@ MLuaState *MLuaNewConstrainedState(void *memory, Size size) {
 
   /* Allocate Frames */
   L->Frames = (MLuaFrame *)(base + L->HeapTop);
-  L->FrameCap = 64;
+  L->FrameCap = MLUA_DEFAULT_FRAMES_SIZE;
   L->FrameTop = 0;
   L->HeapTop += framesBytes;
 
@@ -208,7 +208,7 @@ MLuaState *MLuaNewVectorState(void *ctx, MLuaAllocFunc allocFn,
   L->LocalsTop = 0;
 
   /* Allocate Args */
-  argsBytes = 64 * sizeof(MLuaValue);
+  argsBytes = MLUA_DEFAULT_ARGS_SIZE * sizeof(MLuaValue);
   L->Args = (MLuaValue *)allocFn(L, ctx, argsBytes);
   if (!L->Args) {
     if (freeFn) {
@@ -218,13 +218,14 @@ MLuaState *MLuaNewVectorState(void *ctx, MLuaAllocFunc allocFn,
     }
     return NULL;
   }
-  L->ArgsSize = 64;
+  L->ArgsSize = MLUA_DEFAULT_ARGS_SIZE;
   L->ArgsBase = 0;
   L->ArgsTop = 0;
   L->ArgsCount = 0;
 
   /* Allocate Frames */
-  L->Frames = (MLuaFrame *)allocFn(L, ctx, 64 * sizeof(MLuaFrame));
+  L->Frames =
+      (MLuaFrame *)allocFn(L, ctx, MLUA_DEFAULT_FRAMES_SIZE * sizeof(MLuaFrame));
   if (!L->Frames) {
     if (freeFn) {
       freeFn(L, ctx, L->Args);
@@ -234,7 +235,7 @@ MLuaState *MLuaNewVectorState(void *ctx, MLuaAllocFunc allocFn,
     }
     return NULL;
   }
-  L->FrameCap = 64;
+  L->FrameCap = MLUA_DEFAULT_FRAMES_SIZE;
   L->FrameTop = 0;
 
   /* Initialize arrays with nil */

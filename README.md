@@ -15,7 +15,7 @@ MicroLua (`mlua`) is a tiny, reasonably complete Lua runtime. It is good for emb
  *   -v, --version         Print version
 ```
 
-In a local macOS size build with similar build flags, MicroLua's runtime artifacts total 259 KiB, around 2.4x smaller than Lua 5.5.0's runtime artifacts at 612 KiB. Re-run `python3 bench/bench.py` to regenerate local comparison results.
+In a local macOS size build with similar build flags, MicroLua's runtime artifacts total 218 KiB (259 KiB with the parser), around 2.8x smaller than Lua 5.5.0's runtime artifacts at 612 KiB. Re-run `python3 bench/bench.py` to regenerate local comparison results.
 
 ## At a glance
 
@@ -23,7 +23,7 @@ In a local macOS size build with similar build flags, MicroLua's runtime artifac
 - The core static library has no dependence on the C standard library.
 - The core can run without dynamic memory allocation: pass your own pre-allocated heap to the interpreter[^1].
 - Interpreter is implemented as a stack machine, with instructions encoded as single or double bytes.
-- Single-pass Pratt parsing and code generation with minimal resource cost.
+- Single-pass Pratt parsing and code generation with minimal resource cost. The parser/compiler can also be compiled out for bytecode-only embedded targets.
 - Garbage collection that reclaims and defragments the heap to conserve memory.
 - Holes in table arrays are runtime errors to ensure heap compactness.
 - Strings and scripts are encoded as UTF-8.
@@ -58,6 +58,30 @@ meson test -C builddir --suite smoke          # standalone smoke scripts
 ```
 
 A freestanding release build (`meson setup builddir-release --buildtype=release`) compiles the core with `-ffreestanding -fno-builtin`.
+
+For embedded deployments that do not need source parsing on the target, build a
+bytecode-only runtime:
+
+```sh
+meson setup build-bytecode -Dcompiler=false --buildtype=release
+ninja -C build-bytecode
+./builddir/mlua -o app.mlu app.lua            # host-side precompile step
+./build-bytecode/mlua app.mlu                 # target/runtime accepts bytecode
+```
+
+When `-Dcompiler=false`, `libmicrolua.a` omits the lexer and parser and exposes
+`MLuaLoadBytecode`/`MLuaDoBytecode` for embedded callers.
+
+Port-specific settings are centralized in `src/MLuaConfig.h`. A board port can
+override pointer size, heap alignment, default stack/frame sizes, GC threshold,
+math hooks, and compiler support by providing one header:
+
+```sh
+meson setup build-board -Dport_header=path/to/my_board_mlua.h
+```
+
+Built-in presets are available with `-Dport=generic64`, `generic32`,
+`cortex-m`, or `riscv32`.
 
 [^1]: You can optionally choose to provide allocators for dynamic memory allocation.
 

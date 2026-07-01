@@ -82,6 +82,7 @@ static char *ReadFile(const char *path, Size *outLen) {
   return buf;
 }
 
+#if MLUA_ENABLE_COMPILER
 static MLuaValue ReplRequire(MLuaState *L, const char *modname) {
   char path[512];
   char *source;
@@ -101,7 +102,7 @@ static MLuaValue ReplRequire(MLuaState *L, const char *modname) {
    * Three-array architecture: results are on EvalStack.
    */
   savedEvalTop = L->EvalTop;
-  status = MLuaDoString(L, source, len, modname);
+  status = MLuaDoBuffer(L, source, len, modname);
   free(source);
 
   if (status != MLUA_OK) {
@@ -122,6 +123,7 @@ static MLuaValue ReplRequire(MLuaState *L, const char *modname) {
   /* No return value - return true to indicate successful load */
   return MLUA_TRUE;
 }
+#endif
 
 /* ========================================================================== */
 /* Help and Version                                                           */
@@ -131,13 +133,17 @@ static void PrintHelp(const char *progname) {
   printf("Usage: %s [options] [file [args]]\n", progname);
   printf("Options:\n");
   printf("  -h, --help            List options\n");
+#if MLUA_ENABLE_COMPILER
   printf("  -e, --eval EXPR       Evaluate EXPR\n");
   printf("  -i, --interactive     Go to interactive mode\n");
   printf("  -I, --include FILE    Include (require) FILE\n");
+#endif
   printf("  -d, --dump            Dump memory usage stats\n");
   printf("      --memory-limit N  Limit memory to N bytes\n");
   printf("      --no-column       No column in debug info\n");
+#if MLUA_ENABLE_COMPILER
   printf("  -o FILE               Save bytecode to FILE\n");
+#endif
   printf("  -v, --version         Print version\n");
 }
 
@@ -148,6 +154,7 @@ static void PrintVersion(void) {
 
 static int WriteBytecode(MLuaState *L, const char *source, Size len,
                          const char *name, const char *outputFile) {
+#if MLUA_ENABLE_COMPILER
   MLuaStatus status;
   MLuaValue func;
   Size size;
@@ -197,6 +204,15 @@ static int WriteBytecode(MLuaState *L, const char *source, Size len,
 
   free(buf);
   return 0;
+#else
+  UNUSED(L);
+  UNUSED(source);
+  UNUSED(len);
+  UNUSED(name);
+  UNUSED(outputFile);
+  fprintf(stderr, "Error: -o requires a compiler-enabled build\n");
+  return 1;
+#endif
 }
 
 /* ========================================================================== */
@@ -204,6 +220,7 @@ static int WriteBytecode(MLuaState *L, const char *source, Size len,
 /* ========================================================================== */
 
 static void RunInteractive(MLuaState *L) {
+#if MLUA_ENABLE_COMPILER
   char line[4096];
 
   printf("%s\n", MLUA_VERSION);
@@ -253,6 +270,10 @@ static void RunInteractive(MLuaState *L) {
       }
     }
   }
+#else
+  UNUSED(L);
+  fprintf(stderr, "Error: interactive mode requires a compiler-enabled build\n");
+#endif
 }
 
 /* ========================================================================== */
@@ -281,17 +302,28 @@ int main(int argc, char **argv) {
         PrintVersion();
         return 0;
       } else if (strcmp(arg, "-i") == 0 || strcmp(arg, "--interactive") == 0) {
+#if MLUA_ENABLE_COMPILER
         interactive = 1;
+#else
+        fprintf(stderr, "Error: interactive mode requires a compiler-enabled build\n");
+        return 1;
+#endif
       } else if (strcmp(arg, "-d") == 0 || strcmp(arg, "--dump") == 0) {
         dumpMemory = 1;
       } else if (strcmp(arg, "-e") == 0 || strcmp(arg, "--eval") == 0) {
+#if MLUA_ENABLE_COMPILER
         if (i + 1 < argc) {
           evalExpr = argv[++i];
         } else {
           fprintf(stderr, "Error: -e requires an argument\n");
           return 1;
         }
+#else
+        fprintf(stderr, "Error: -e requires a compiler-enabled build\n");
+        return 1;
+#endif
       } else if (strcmp(arg, "-I") == 0 || strcmp(arg, "--include") == 0) {
+#if MLUA_ENABLE_COMPILER
         if (i + 1 < argc) {
           /* Handle includes after state creation */
           i++;
@@ -299,13 +331,22 @@ int main(int argc, char **argv) {
           fprintf(stderr, "Error: -I requires an argument\n");
           return 1;
         }
+#else
+        fprintf(stderr, "Error: -I requires a compiler-enabled build\n");
+        return 1;
+#endif
       } else if (strcmp(arg, "-o") == 0) {
+#if MLUA_ENABLE_COMPILER
         if (i + 1 < argc) {
           outputFile = argv[++i];
         } else {
           fprintf(stderr, "Error: -o requires an argument\n");
           return 1;
         }
+#else
+        fprintf(stderr, "Error: -o requires a compiler-enabled build\n");
+        return 1;
+#endif
       } else if (strcmp(arg, "--memory-limit") == 0) {
         if (i + 1 < argc) {
           memoryLimit = (Size)atol(argv[++i]);
@@ -338,7 +379,12 @@ int main(int argc, char **argv) {
 
   /* Default to interactive if no script or eval */
   if (!scriptFile && !evalExpr && !outputFile) {
+#if MLUA_ENABLE_COMPILER
     interactive = 1;
+#else
+    fprintf(stderr, "Error: bytecode-only build requires a bytecode file\n");
+    return 1;
+#endif
   }
 
   /* Create state */
@@ -351,7 +397,9 @@ int main(int argc, char **argv) {
 
   /* Set up I/O */
   MLuaSetOutput(L, ReplOutput);
+#if MLUA_ENABLE_COMPILER
   MLuaSetRequirer(L, ReplRequire);
+#endif
 
   /* Open standard libraries + the optional io/os extension (footnote 2 of
    * the README: the repl provides these) */
@@ -403,6 +451,7 @@ int main(int argc, char **argv) {
   }
 
   /* Handle -I includes (second pass) */
+#if MLUA_ENABLE_COMPILER
   for (i = 1; i < argc; i++) {
     if ((strcmp(argv[i], "-I") == 0 || strcmp(argv[i], "--include") == 0) &&
         i + 1 < argc) {
@@ -412,7 +461,7 @@ int main(int argc, char **argv) {
 
       source = ReadFile(path, &len);
       if (source) {
-        MLuaDoString(L, source, len, path);
+        MLuaDoBuffer(L, source, len, path);
         free(source);
       } else {
         fprintf(stderr, "Warning: Could not read '%s'\n", path);
@@ -420,6 +469,7 @@ int main(int argc, char **argv) {
       i++;
     }
   }
+#endif
 
   if (outputFile) {
     if (evalExpr) {
@@ -443,7 +493,7 @@ int main(int argc, char **argv) {
       free(source);
     }
   } else if (evalExpr) {
-    MLuaStatus status = MLuaDoString(L, evalExpr, StrLen(evalExpr), "=eval");
+    MLuaStatus status = MLuaDoBuffer(L, evalExpr, StrLen(evalExpr), "=eval");
     if (status != MLUA_OK) {
       if (L->ErrorMsg) {
         if (L->ErrorLine > 0) {
@@ -472,7 +522,7 @@ int main(int argc, char **argv) {
       return 1;
     }
 
-    MLuaStatus status = MLuaDoString(L, source, len, scriptFile);
+    MLuaStatus status = MLuaDoBuffer(L, source, len, scriptFile);
     free(source);
 
     if (status != MLUA_OK) {

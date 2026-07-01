@@ -91,8 +91,9 @@ MLuaStatus MLuaCall(MLuaState *L, int nargs, int nresults);
  */
 MLuaStatus MLuaPCall(MLuaState *L, int nargs, int nresults, int errfunc);
 
+#if MLUA_ENABLE_COMPILER
 /*
- * Load and execute a chunk.
+ * Load and execute a source chunk.
  */
 MLuaStatus MLuaDoString(MLuaState *L, const char *source, Size len,
                         const char *name);
@@ -104,6 +105,29 @@ MLuaStatus MLuaDoString(MLuaState *L, const char *source, Size len,
  */
 MLuaStatus MLuaLoadString(MLuaState *L, const char *source, Size len,
                           const char *name);
+#endif
+
+/*
+ * Load and execute a precompiled bytecode chunk.
+ */
+MLuaStatus MLuaDoBytecode(MLuaState *L, const char *data, Size len,
+                          const char *name);
+
+/*
+ * Load a precompiled bytecode chunk without executing.
+ * On success, pushes the function onto the stack.
+ */
+MLuaStatus MLuaLoadBytecode(MLuaState *L, const char *data, Size len,
+                            const char *name);
+
+/*
+ * Load a buffer by inspecting its magic. Bytecode is always accepted; source
+ * text requires MLUA_ENABLE_COMPILER.
+ */
+MLuaStatus MLuaLoadBuffer(MLuaState *L, const char *data, Size len,
+                          const char *name);
+MLuaStatus MLuaDoBuffer(MLuaState *L, const char *data, Size len,
+                        const char *name);
 
 /*
  * Get global variable.

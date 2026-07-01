@@ -255,10 +255,6 @@ struct MLuaState {
 #define MLUA_OUTPUT_ERROR 1  /* Error messages */
 #define MLUA_OUTPUT_SYSTEM 2 /* System messages */
 
-/* Default sizes */
-#define MLUA_DEFAULT_STACK_SIZE 256
-#define MLUA_DEFAULT_GC_THRESHOLD_PERCENT 75
-
 /* ========================================================================== */
 /* GC Reference API                                                           */
 /* ========================================================================== */

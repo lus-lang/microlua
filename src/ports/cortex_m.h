@@ -1,0 +1,14 @@
+/*
+ * ARM Cortex-M style 32-bit MicroLua port preset.
+ */
+
+#ifndef MLUA_PORT_CORTEX_M_H
+#define MLUA_PORT_CORTEX_M_H
+
+#define MLUA_PTR_SIZE 4
+#define MLUA_ALIGNMENT 8
+#define MLUA_DEFAULT_STACK_SIZE 128
+#define MLUA_DEFAULT_ARGS_SIZE 32
+#define MLUA_DEFAULT_FRAMES_SIZE 32
+
+#endif /* MLUA_PORT_CORTEX_M_H */

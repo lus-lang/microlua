@@ -36,7 +36,7 @@ static int TestsFailed = 0;
 
 /* Test heap size */
 #define TEST_HEAP_SIZE (64 * 1024) /* 64 KB */
-static U8 TestHeap[TEST_HEAP_SIZE] __attribute__((aligned(8)));
+static U8 TestHeap[TEST_HEAP_SIZE] MLUA_ALIGNAS(MLUA_ALIGNMENT);
 
 /* ========================================================================== */
 /* GC Control Tests                                                           */

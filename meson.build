@@ -7,6 +7,25 @@ cc = meson.get_compiler('c')
 
 # Debug mode option - enables libc and debug output
 debug_mode = get_option('buildtype') == 'debug'
+compiler_enabled = get_option('compiler')
+
+shared_c_args = [
+    compiler_enabled ? '-DMLUA_ENABLE_COMPILER=1' : '-DMLUA_ENABLE_COMPILER=0',
+]
+
+port_header = get_option('port_header')
+port = get_option('port')
+if port_header != ''
+    shared_c_args += ['-DMLUA_PORT_HEADER="' + port_header + '"']
+elif port == 'generic64'
+    shared_c_args += ['-DMLUA_PORT_HEADER="ports/generic64.h"']
+elif port == 'generic32'
+    shared_c_args += ['-DMLUA_PORT_HEADER="ports/generic32.h"']
+elif port == 'cortex-m'
+    shared_c_args += ['-DMLUA_PORT_HEADER="ports/cortex_m.h"']
+elif port == 'riscv32'
+    shared_c_args += ['-DMLUA_PORT_HEADER="ports/riscv32.h"']
+endif
 
 size_c_args = []
 size_link_args = []
@@ -35,10 +54,9 @@ microlua_sources = [
     'src/MLuaString.c',
     'src/MLuaTable.c',
     'src/MLuaUTF8.c',
-    'src/MLuaLex.c',
-    'src/MLuaParse.c',
     'src/MLuaCode.c',
     'src/MLuaDump.c',
+    'src/MLuaUndump.c',
     'src/MLuaFunc.c',
     'src/MLuaThread.c',
     'src/MLuaVM.c',
@@ -50,15 +68,21 @@ microlua_sources = [
     'src/library/MLuaBaseLib.c',
 ]
 
+if compiler_enabled
+    microlua_sources += [
+        'src/MLuaLex.c',
+        'src/MLuaParse.c',
+    ]
+endif
+
 microlua_inc = include_directories('src', 'src/library')
 
-# Library c_args: freestanding in release, libc+debug in debug
-# MLUA_PTR_SIZE must be set to enable correct NaN-boxing on 64-bit platforms
+# Library c_args: freestanding in release, libc+debug in debug.
 if debug_mode
-    lib_c_args = ['-DMLUA_PTR_SIZE=8']
+    lib_c_args = shared_c_args
 else
     lib_c_args = ['-ffreestanding', '-fno-builtin', '-fno-stack-protector',
-                  '-DMLUA_PTR_SIZE=8'] + size_c_args
+                  ] + shared_c_args + size_c_args
 endif
 
 microlua_lib = static_library('microlua', microlua_sources,
@@ -69,7 +93,7 @@ microlua_lib = static_library('microlua', microlua_sources,
 
 # REPL binary - always uses libc for I/O. It also links the OPTIONAL io/os
 # extension (libc-dependent, deliberately NOT part of the freestanding core).
-repl_c_args = ['-DMLUA_PTR_SIZE=8'] + (debug_mode ? [] : size_c_args)
+repl_c_args = shared_c_args + (debug_mode ? [] : size_c_args)
 mlua_exe = executable('mlua', ['src/MLuaRepl.c', 'src/extensions/MLuaStdLib.c'],
     include_directories: microlua_inc,
     link_with: microlua_lib,

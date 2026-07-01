@@ -350,6 +350,7 @@ static int OsDate(MLuaState *L) {
 /* dofile / loadfile                                                          */
 /* ========================================================================== */
 
+#if MLUA_ENABLE_COMPILER
 static char *SlurpFile(const char *path, Size *outLen) {
   FILE *f = fopen(path, "rb");
   long size;
@@ -400,10 +401,10 @@ static int BaseLoadfile(MLuaState *L) {
     return 2;
   }
 
-  st = MLuaLoadString(L, src, len, pathBuf);
+  st = MLuaLoadBuffer(L, src, len, pathBuf);
   free(src);
   if (st != MLUA_OK) {
-    /* MLuaLoadString pushed an error message; prepend nil */
+    /* MLuaLoadBuffer pushed an error message; prepend nil */
     MLuaValue err = MLuaPop(L);
     MLuaPush(L, MLUA_NIL);
     MLuaPush(L, err);
@@ -434,13 +435,14 @@ static int BaseDofile(MLuaState *L) {
   }
 
   before = L->EvalTop;
-  st = MLuaDoString(L, src, len, pathBuf);
+  st = MLuaDoBuffer(L, src, len, pathBuf);
   free(src);
   if (st != MLUA_OK) {
     return -1; /* ErrorMsg already set */
   }
   return (int)(L->EvalTop - before); /* Chunk results */
 }
+#endif
 
 /* ========================================================================== */
 /* Registration                                                               */
@@ -467,6 +469,8 @@ void MLuaOpenStdLib(MLuaState *L) {
   MLuaRegisterLib(L, io, IoEntries);
   MLuaRegisterLib(L, os, OsEntries);
 
+#if MLUA_ENABLE_COMPILER
   MLuaRegisterGlobal(L, "dofile", BaseDofile);
   MLuaRegisterGlobal(L, "loadfile", BaseLoadfile);
+#endif
 }

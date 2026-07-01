@@ -1,0 +1,18 @@
+option('compiler',
+    type: 'boolean',
+    value: true,
+    description: 'Build the Lua source compiler/parser into the runtime'
+)
+
+option('port',
+    type: 'combo',
+    choices: ['default', 'generic64', 'generic32', 'cortex-m', 'riscv32'],
+    value: 'default',
+    description: 'Built-in MicroLua port configuration preset'
+)
+
+option('port_header',
+    type: 'string',
+    value: '',
+    description: 'Custom MicroLua port header to include with -DMLUA_PORT_HEADER'
+)

@@ -1,24 +1,18 @@
 /*
  * MicroLua - MLuaDump.c
- * Bytecode serialization
+ * Portable bytecode serialization.
  */
 
 #include "MLuaDump.h"
 #include "MLuaFunc.h"
 #include "MLuaString.h"
 
-/*
- * MicroLua bytecode format:
- * [4] Magic: "\x1bMLu"
- * [1] Version: 0x01
- * [1] Format: 0x00 (official)
- * [1] Endian: 0x01 (little)
- * [1] Int size: sizeof(int)
- * [1] Size_t size: sizeof(Size)
- * [1] Instruction size: 1 (variable)
- * [1] Number size: 8 (double)
- * Then follows the function prototype.
- */
+#define BC_FORMAT_OFFICIAL 0
+#define BC_FLAGS_NONE 0
+#define BC_INT_SIZE 4
+#define BC_SIZE_FIELD_SIZE 4
+#define BC_INSTRUCTION_SIZE 1
+#define BC_NUMBER_SIZE 8
 
 static Size DumpByte(char *buf, Size pos, Size cap, U8 b) {
   if (buf && pos < cap) {
@@ -27,130 +21,170 @@ static Size DumpByte(char *buf, Size pos, Size cap, U8 b) {
   return pos + 1;
 }
 
-static Size DumpInt(char *buf, Size pos, Size cap, U32 val) {
-  int i;
-  for (i = 0; i < 4; i++) {
-    if (buf && pos < cap) {
-      buf[pos] = (char)(val & 0xFF);
-    }
-    pos++;
-    val >>= 8;
-  }
-  return pos;
-}
-
-static Size DumpSize(char *buf, Size pos, Size cap, Size val) {
-  Size i;
-  for (i = 0; i < sizeof(Size); i++) {
-    if (buf && pos < cap) {
-      buf[pos] = (char)(val & 0xFF);
-    }
-    pos++;
-    val >>= 8;
-  }
-  return pos;
-}
-
 static Size DumpBytes(char *buf, Size pos, Size cap, const U8 *data, Size len) {
   Size i;
   for (i = 0; i < len; i++) {
-    if (buf && pos < cap) {
-      buf[pos] = (char)data[i];
-    }
-    pos++;
+    pos = DumpByte(buf, pos, cap, data[i]);
   }
   return pos;
 }
 
-static Size DumpNumber(char *buf, Size pos, Size cap, double d) {
+static Size DumpU32(char *buf, Size pos, Size cap, U32 val, int endian) {
+  int i;
+  for (i = 0; i < 4; i++) {
+    int shift = (endian == MLUA_BYTECODE_ENDIAN_BIG) ? (24 - i * 8) : (i * 8);
+    pos = DumpByte(buf, pos, cap, (U8)((val >> shift) & 0xFF));
+  }
+  return pos;
+}
+
+static Size DumpI32(char *buf, Size pos, Size cap, I32 val, int endian) {
+  return DumpU32(buf, pos, cap, (U32)val, endian);
+}
+
+static Size DumpU64(char *buf, Size pos, Size cap, U64 val, int endian) {
+  int i;
+  for (i = 0; i < 8; i++) {
+    int shift = (endian == MLUA_BYTECODE_ENDIAN_BIG) ? (56 - i * 8) : (i * 8);
+    pos = DumpByte(buf, pos, cap, (U8)((val >> shift) & 0xFF));
+  }
+  return pos;
+}
+
+static Size DumpNumber(char *buf, Size pos, Size cap, double d, int endian) {
   union {
     double d;
-    U8 b[8];
-  } u;
-  Size i;
-  u.d = d;
-  for (i = 0; i < 8; i++) {
-    if (buf && pos < cap) {
-      buf[pos] = (char)u.b[i];
-    }
-    pos++;
-  }
-  return pos;
+    U64 u;
+  } conv;
+  conv.d = d;
+  return DumpU64(buf, pos, cap, conv.u, endian);
 }
 
-static Size DumpProto(MLuaState *L, MLuaProto *proto, char *buf, Size pos,
-                      Size cap);
+static Bool FitsU32(Size value) { return value <= (Size)0xFFFFFFFFUL; }
 
-static Size DumpValue(MLuaState *L, MLuaValue v, char *buf, Size pos,
-                      Size cap) {
+static Size DumpProto(MLuaState *L, MLuaProto *proto, char *buf, Size pos,
+                      Size cap, int endian);
+
+static Size DumpValue(MLuaState *L, MLuaValue v, char *buf, Size pos, Size cap,
+                      int endian) {
   UNUSED(L);
   if (IsNil(v)) {
-    pos = DumpByte(buf, pos, cap, 0);
-  } else if (IsFalse(v)) {
-    pos = DumpByte(buf, pos, cap, 1);
-  } else if (IsTrue(v)) {
-    pos = DumpByte(buf, pos, cap, 2);
-  } else if (IsInt(v)) {
+    return DumpByte(buf, pos, cap, 0);
+  }
+  if (IsFalse(v)) {
+    return DumpByte(buf, pos, cap, 1);
+  }
+  if (IsTrue(v)) {
+    return DumpByte(buf, pos, cap, 2);
+  }
+  if (IsInt(v)) {
     pos = DumpByte(buf, pos, cap, 3);
-    pos = DumpInt(buf, pos, cap, (U32)GetInt(v));
-  } else if (MLuaIsNumber(v)) {
+    return DumpI32(buf, pos, cap, GetInt(v), endian);
+  }
+  if (MLuaIsNumber(v)) {
     pos = DumpByte(buf, pos, cap, 4);
-    pos = DumpNumber(buf, pos, cap, MLuaToNumber(v));
-  } else {
+    return DumpNumber(buf, pos, cap, MLuaToNumber(v), endian);
+  }
+  if (IsAnyString(v)) {
     const char *s = MLuaStringData(v);
     Size slen = MLuaStringLen(v);
     pos = DumpByte(buf, pos, cap, 5);
-    pos = DumpSize(buf, pos, cap, slen);
-    pos = DumpBytes(buf, pos, cap, (const U8 *)s, slen);
+    pos = DumpU32(buf, pos, cap, (U32)slen, endian);
+    return DumpBytes(buf, pos, cap, (const U8 *)s, slen);
   }
-  return pos;
+  return DumpByte(buf, pos, cap, 0);
 }
 
 static Size DumpProto(MLuaState *L, MLuaProto *proto, char *buf, Size pos,
-                      Size cap) {
+                      Size cap, int endian) {
   Size i;
 
-  pos = DumpValue(L, proto->Source, buf, pos, cap);
-  pos = DumpInt(buf, pos, cap, (U32)proto->LineDefined);
+  pos = DumpValue(L, proto->Source, buf, pos, cap, endian);
+  pos = DumpU32(buf, pos, cap, (U32)proto->LineDefined, endian);
 
   pos = DumpByte(buf, pos, cap, proto->NumParams);
+  pos = DumpByte(buf, pos, cap, proto->NumLocals);
   pos = DumpByte(buf, pos, cap, proto->IsVararg);
   pos = DumpByte(buf, pos, cap, proto->MaxStackSize);
 
-  pos = DumpSize(buf, pos, cap, proto->CodeSize);
+  pos = DumpU32(buf, pos, cap, (U32)proto->CodeSize, endian);
   pos = DumpBytes(buf, pos, cap, proto->Code, proto->CodeSize);
 
-  pos = DumpSize(buf, pos, cap, proto->ConstantsSize);
+  pos = DumpU32(buf, pos, cap, (U32)proto->ConstantsSize, endian);
   for (i = 0; i < proto->ConstantsSize; i++) {
-    pos = DumpValue(L, proto->Constants[i], buf, pos, cap);
+    pos = DumpValue(L, proto->Constants[i], buf, pos, cap, endian);
   }
 
-  pos = DumpSize(buf, pos, cap, proto->UpvaluesSize);
+  pos = DumpU32(buf, pos, cap, (U32)proto->UpvaluesSize, endian);
   for (i = 0; i < proto->UpvaluesSize; i++) {
     pos = DumpByte(buf, pos, cap, proto->Upvalues[i].InStack);
     pos = DumpByte(buf, pos, cap, proto->Upvalues[i].Index);
   }
 
-  pos = DumpSize(buf, pos, cap, proto->ProtosSize);
+  pos = DumpU32(buf, pos, cap, (U32)proto->ProtosSize, endian);
   for (i = 0; i < proto->ProtosSize; i++) {
-    pos = DumpProto(L, proto->Protos[i], buf, pos, cap);
+    pos = DumpProto(L, proto->Protos[i], buf, pos, cap, endian);
+  }
+
+  pos = DumpU32(buf, pos, cap, (U32)proto->LineInfoSize, endian);
+  pos = DumpBytes(buf, pos, cap, proto->LineInfo, proto->LineInfoSize);
+
+  pos = DumpU32(buf, pos, cap, (U32)proto->LineMapSize, endian);
+  for (i = 0; i < proto->LineMapSize; i++) {
+    pos = DumpU32(buf, pos, cap, (U32)proto->LineMap[i].PC, endian);
+    pos = DumpU32(buf, pos, cap, (U32)proto->LineMap[i].Line, endian);
   }
 
   return pos;
 }
 
-Size MLuaDumpFunction(MLuaState *L, MLuaValue func, char *buf, Size cap) {
+static Bool ProtoFits(MLuaProto *proto) {
+  Size i;
+  if (!FitsU32(proto->LineDefined) || !FitsU32(proto->CodeSize) ||
+      !FitsU32(proto->ConstantsSize) || !FitsU32(proto->UpvaluesSize) ||
+      !FitsU32(proto->ProtosSize) || !FitsU32(proto->LineInfoSize) ||
+      !FitsU32(proto->LineMapSize)) {
+    return FALSE;
+  }
+  if (IsAnyString(proto->Source) && !FitsU32(MLuaStringLen(proto->Source))) {
+    return FALSE;
+  }
+  for (i = 0; i < proto->ConstantsSize; i++) {
+    MLuaValue v = proto->Constants[i];
+    if (IsAnyString(v) && !FitsU32(MLuaStringLen(v))) {
+      return FALSE;
+    }
+  }
+  for (i = 0; i < proto->LineMapSize; i++) {
+    if (!FitsU32(proto->LineMap[i].PC) || !FitsU32(proto->LineMap[i].Line)) {
+      return FALSE;
+    }
+  }
+  for (i = 0; i < proto->ProtosSize; i++) {
+    if (!ProtoFits(proto->Protos[i])) {
+      return FALSE;
+    }
+  }
+  return TRUE;
+}
+
+Size MLuaDumpFunctionEndian(MLuaState *L, MLuaValue func, char *buf, Size cap,
+                            int endian) {
   MLuaClosure *cl;
   MLuaProto *proto;
   Size pos = 0;
 
+  if (endian != MLUA_BYTECODE_ENDIAN_LITTLE &&
+      endian != MLUA_BYTECODE_ENDIAN_BIG) {
+    return 0;
+  }
   if (!IsPtr(func)) {
     return 0;
   }
 
   cl = (MLuaClosure *)GetPtr(func);
   proto = cl->Proto;
-  if (!proto) {
+  if (!proto || !ProtoFits(proto)) {
     return 0;
   }
 
@@ -158,13 +192,20 @@ Size MLuaDumpFunction(MLuaState *L, MLuaValue func, char *buf, Size cap) {
   pos = DumpByte(buf, pos, cap, 'M');
   pos = DumpByte(buf, pos, cap, 'L');
   pos = DumpByte(buf, pos, cap, 'u');
-  pos = DumpByte(buf, pos, cap, 0x01);
-  pos = DumpByte(buf, pos, cap, 0x00);
-  pos = DumpByte(buf, pos, cap, 0x01);
-  pos = DumpByte(buf, pos, cap, sizeof(int));
-  pos = DumpByte(buf, pos, cap, sizeof(Size));
-  pos = DumpByte(buf, pos, cap, 1);
-  pos = DumpByte(buf, pos, cap, 8);
+  pos = DumpByte(buf, pos, cap, MLUA_BYTECODE_VERSION);
+  pos = DumpByte(buf, pos, cap, BC_FORMAT_OFFICIAL);
+  pos = DumpByte(buf, pos, cap, (U8)endian);
+  pos = DumpByte(buf, pos, cap, BC_FLAGS_NONE);
+  pos = DumpByte(buf, pos, cap, BC_INT_SIZE);
+  pos = DumpByte(buf, pos, cap, BC_SIZE_FIELD_SIZE);
+  pos = DumpByte(buf, pos, cap, BC_INSTRUCTION_SIZE);
+  pos = DumpByte(buf, pos, cap, BC_NUMBER_SIZE);
+  pos = DumpByte(buf, pos, cap, MLUA_BYTECODE_FLOAT_IEEE754);
 
-  return DumpProto(L, proto, buf, pos, cap);
+  return DumpProto(L, proto, buf, pos, cap, endian);
+}
+
+Size MLuaDumpFunction(MLuaState *L, MLuaValue func, char *buf, Size cap) {
+  return MLuaDumpFunctionEndian(L, func, buf, cap,
+                               MLUA_BYTECODE_ENDIAN_LITTLE);
 }

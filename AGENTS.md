@@ -9,12 +9,28 @@ stack-machine ISA, single-pass Pratt parser→bytecode, and a Lisp-2 mark-compac
 ```sh
 meson setup builddir                                   # debug: libc allowed, MLUA_DEBUG output
 meson setup builddir-release --buildtype=release       # freestanding: -ffreestanding -fno-builtin
+meson setup build-bytecode -Dcompiler=false            # bytecode-only: no lexer/parser
 ninja -C builddir
 ./builddir/mlua script.lua                             # run a script
+./builddir/mlua -o script.mlu script.lua               # compile source to bytecode
+./build-bytecode/mlua script.mlu                       # run precompiled bytecode
 ./builddir/mlua                                        # interactive REPL
 ```
 
-- `-DMLUA_PTR_SIZE=8` is set by meson; required for NaN-boxing on 64-bit.
+- Port/build knobs live in `src/MLuaConfig.h`. Use Meson `-Dport=generic64`,
+  `generic32`, `cortex-m`, or `riscv32` for built-in presets, or
+  `-Dport_header=path/to/header.h` to supply one board-specific header. That
+  header may override pointer size, alignment, default stack/frame sizes, GC
+  threshold, math hooks, and `MLUA_ENABLE_COMPILER`.
+- Source compilation is controlled by Meson `-Dcompiler=true|false`. When false,
+  `libmicrolua.a` must not contain `MLuaLex`/`MLuaParse` symbols and callers must
+  use `MLuaLoadBytecode` / `MLuaDoBytecode` or `MLuaLoadBuffer` / `MLuaDoBuffer`
+  with a bytecode buffer. `-o`, `-e`, the REPL, `load`, and `loadfile` are
+  compiler-enabled workflows only.
+- MicroLua bytecode format v2 uses fixed-width serialized fields and an explicit
+  endianness byte. It is portable across supported endian/pointer-size targets
+  with a compatible MicroLua bytecode version and numeric format; unsupported
+  headers must be rejected deterministically by `MLuaUndump`.
 - The static library (`libmicrolua.a`) must stay libc-free; only the REPL
   (`src/MLuaRepl.c`) and optional extensions may use libc. The only acceptable
   undefined symbols are libm functions (sin/cos/pow/...) from `__builtin_*`
@@ -98,12 +114,14 @@ size into `bench/RESULTS.md`. It auto-detects a local `lua5.5`/`lua` (verified `
 | File(s) | Role |
 |---|---|
 | `src/MLuaCore.c/.h` | Freestanding libc replacements (MemCpy/StrLen/…), math builtins |
+| `src/MLuaConfig.h`, `src/ports/` | Central port/build configuration and default embedded presets |
 | `src/MLuaValue.c/.h` | Value representation: NaN-boxing (64-bit) / alignment tags (32-bit); GC headers |
 | `src/MLuaAlloc.c/.h` | `MLuaState`, bump-pointer heap, constrained/vector state creation, `MLuaGCRef` |
 | `src/MLuaGC.c/.h` | Lisp-2 mark-compact GC: mark → compute addresses → update refs → compact |
 | `src/MLuaLex.c/.h` | Pull lexer, UTF-8-aware, zero-copy tokens |
 | `src/MLuaParse.c` | Single-pass Pratt parser; emits bytecode directly (no AST); jump backpatching |
 | `src/MLuaCode.c/.h` | Opcode definitions (1–2 bytes), emission helpers, `MLuaProto`, `MLuaFuncState` |
+| `src/MLuaDump.c/.h`, `src/MLuaUndump.c/.h` | Portable bytecode serialization/deserialization |
 | `src/MLuaVM.c/.h` | Dispatch loop, calls/frames, stack ops, embedding API (`MLuaSetOutput`/`MLuaSetRequirer`) |
 | `src/MLuaFunc.c/.h` | Closures, upvalues (open/closed lifecycle), light C functions |
 | `src/MLuaThread.c/.h` | Coroutines |

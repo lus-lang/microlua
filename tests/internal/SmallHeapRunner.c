@@ -14,7 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static U8 Heap[1024 * 1024] __attribute__((aligned(8)));
+static U8 Heap[1024 * 1024] MLUA_ALIGNAS(MLUA_ALIGNMENT);
 
 int main(int argc, char **argv) {
   FILE *f;

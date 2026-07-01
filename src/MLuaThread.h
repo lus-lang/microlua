@@ -61,12 +61,6 @@ typedef struct MLuaThread {
 /* Get thread header from GC header */
 #define MLUA_THREAD(gch) ((MLuaThread *)MLUA_OBJDATA(gch))
 
-/* Per-thread context sizes (entries, not bytes) */
-#define MLUA_THREAD_EVAL_SIZE 64
-#define MLUA_THREAD_LOCALS_SIZE 64
-#define MLUA_THREAD_ARGS_SIZE 32
-#define MLUA_THREAD_FRAMES_SIZE 16
-
 /* ========================================================================== */
 /* Thread API                                                                 */
 /* ========================================================================== */

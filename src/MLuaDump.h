@@ -9,6 +9,11 @@
 #include "MLuaCore.h"
 #include "MLuaValue.h"
 
+#define MLUA_BYTECODE_VERSION 2
+#define MLUA_BYTECODE_ENDIAN_LITTLE 0
+#define MLUA_BYTECODE_ENDIAN_BIG 1
+#define MLUA_BYTECODE_FLOAT_IEEE754 1
+
 /*
  * Serialize a Lua closure in MicroLua's bytecode format.
  *
@@ -17,5 +22,12 @@
  * returning the total required size, so callers can detect truncation.
  */
 Size MLuaDumpFunction(MLuaState *L, MLuaValue func, char *buf, Size cap);
+
+/*
+ * Serialize with an explicit byte order. Endian must be
+ * MLUA_BYTECODE_ENDIAN_LITTLE or MLUA_BYTECODE_ENDIAN_BIG.
+ */
+Size MLuaDumpFunctionEndian(MLuaState *L, MLuaValue func, char *buf, Size cap,
+                            int endian);
 
 #endif /* MLUA_DUMP_H */

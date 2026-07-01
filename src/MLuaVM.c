@@ -9,9 +9,15 @@
 #include "MLuaDebug.h"
 #include "MLuaError.h"
 #include "MLuaGC.h"
+#if MLUA_ENABLE_COMPILER
 #include "MLuaParse.h"
+#endif
 #include "MLuaString.h"
+#include "MLuaUndump.h"
 
+#define IS_BYTECODE(data, len)                                                 \
+  ((len) >= 4 && (U8)(data)[0] == 0x1B && (data)[1] == 'M' &&                 \
+   (data)[2] == 'L' && (data)[3] == 'u')
 
 /* ========================================================================== */
 /* VM Error Handling with Line Info                                           */
@@ -1667,6 +1673,7 @@ MLuaStatus MLuaPCall(MLuaState *L, int nargs, int nresults, int errfunc) {
   return status;
 }
 
+#if MLUA_ENABLE_COMPILER
 MLuaStatus MLuaDoString(MLuaState *L, const char *source, Size len,
                         const char *name) {
   MLuaProto *proto;
@@ -1711,6 +1718,75 @@ MLuaStatus MLuaLoadString(MLuaState *L, const char *source, Size len,
   MLuaPush(L, MakePtr(cl));
 
   return MLUA_OK;
+}
+#endif
+
+MLuaStatus MLuaLoadBytecode(MLuaState *L, const char *data, Size len,
+                            const char *name) {
+  MLuaProto *proto;
+  MLuaClosure *cl;
+
+  UNUSED(name);
+
+  proto = MLuaUndump(L, data, len);
+  if (!proto) {
+    const char *msg = L->ErrorMsg ? L->ErrorMsg : "bytecode load error";
+    MLuaPush(L, MLuaStringNew(L, msg, StrLen(msg)));
+    return MLUA_ERRRUN;
+  }
+
+  cl = MLuaClosureNew(L, proto, 0);
+  if (!cl) {
+    MLuaPush(L, MLuaStringNew(L, "memory error", 12));
+    return MLUA_ERRMEM;
+  }
+
+  MLuaPush(L, MakePtr(cl));
+  return MLUA_OK;
+}
+
+MLuaStatus MLuaDoBytecode(MLuaState *L, const char *data, Size len,
+                          const char *name) {
+  MLuaStatus status;
+  MLuaValue func;
+  MLuaClosure *cl;
+
+  status = MLuaLoadBytecode(L, data, len, name);
+  if (status != MLUA_OK) {
+    return status;
+  }
+  func = MLuaPop(L);
+  cl = MLUA_CLOSURE((MLuaGCHeader *)GetPtr(func));
+  return MLuaExecute(L, cl, 0, 0);
+}
+
+MLuaStatus MLuaLoadBuffer(MLuaState *L, const char *data, Size len,
+                          const char *name) {
+  if (IS_BYTECODE(data, len)) {
+    return MLuaLoadBytecode(L, data, len, name);
+  }
+#if MLUA_ENABLE_COMPILER
+  return MLuaLoadString(L, data, len, name);
+#else
+  UNUSED(name);
+  L->ErrorMsg = "source compiler disabled";
+  MLuaPush(L, MLuaStringNew(L, L->ErrorMsg, StrLen(L->ErrorMsg)));
+  return MLUA_ERRRUN;
+#endif
+}
+
+MLuaStatus MLuaDoBuffer(MLuaState *L, const char *data, Size len,
+                        const char *name) {
+  if (IS_BYTECODE(data, len)) {
+    return MLuaDoBytecode(L, data, len, name);
+  }
+#if MLUA_ENABLE_COMPILER
+  return MLuaDoString(L, data, len, name);
+#else
+  UNUSED(name);
+  L->ErrorMsg = "source compiler disabled";
+  return MLUA_ERRRUN;
+#endif
 }
 
 /* ==========================================================================

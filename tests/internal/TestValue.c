@@ -174,7 +174,7 @@ TEST(LightFunc) {
 
 TEST(Pointer) {
   /* Use a statically allocated aligned object */
-  static U64 aligned_obj __attribute__((aligned(MLUA_ALIGNMENT))) = 0xDEADBEEF;
+  static U64 aligned_obj MLUA_ALIGNAS(MLUA_ALIGNMENT) = 0xDEADBEEF;
   void *ptr = &aligned_obj;
 
   /* Verify the pointer is actually 8-byte aligned */
