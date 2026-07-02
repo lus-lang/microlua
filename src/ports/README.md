@@ -32,6 +32,7 @@ directly. A port header is a plain C header of `#define`s.
 | `MLUA_THREAD_ARGS_SIZE` | `32` | Per-coroutine argument slots. |
 | `MLUA_THREAD_FRAMES_SIZE` | `16` | Per-coroutine frame depth. |
 | `MLUA_DEFAULT_GC_THRESHOLD_PERCENT` | `75` | Heap-fill percent that triggers a collection. |
+| `MLUA_PARSE_MAX_DEPTH` | `256` | Parser recursion bound (C-stack depth, roughly one `ParseExpr` frame per level). Lower it on targets with a small C stack. |
 
 ## Numeric limits and math backend (in `MLuaCore.h` / `MLuaValue.h`)
 

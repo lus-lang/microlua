@@ -30,7 +30,11 @@ static int ParseFuncBody(MLuaParser *p, Bool isMethod);
 /* Parser Helpers                                                             */
 /* ========================================================================== */
 
+/* Port-overridable: bounds the parser's C-stack recursion, so targets with a
+ * small C stack must lower it (each level is roughly a ParseExpr frame). */
+#ifndef MLUA_PARSE_MAX_DEPTH
 #define MLUA_PARSE_MAX_DEPTH 256
+#endif
 
 static void Error(MLuaParser *p, const char *msg) {
   if (!p->Error) {
