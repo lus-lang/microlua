@@ -34,6 +34,15 @@
  * build only barely fits user RAM - drop the bytecode serializer. */
 #define MLUA_ENABLE_DUMP 0
 
+/* Same footprint reasoning for the string.pack format engine: the
+ * calculator has no byte-oriented I/O to pack for. */
+#define MLUA_ENABLE_PACK 0
+
+/* Dropping the pack engine bought the image room for computed-goto
+ * dispatch, which is worth more per byte here: the eZ80 pays heavily for
+ * the switch's bounds check + jump on every instruction. */
+#define MLUA_VM_COMPUTED_GOTO 1
+
 /* Math backend: the MLuaCore.h defaults follow MLUA_FLOAT_BITS, so this
  * port automatically gets the f-suffixed builtins (sinf, powf, ...). */
 
