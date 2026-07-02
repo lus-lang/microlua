@@ -1505,6 +1505,8 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
           L->ArgsCount = nargs_call;
           L->ArgsTop = win + nargs_call;
 
+          U32 gcBefore = L->GCCycleCount;
+
           L->Frames[L->FrameTop - 1].PC = (Size)(pc - proto->Code);
           savedInC = L->InCCall;
           L->InCCall = TRUE;
@@ -1526,9 +1528,13 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
           }
 
           /* The C function may have called back into Lua and triggered a
-           * compacting GC. Re-derive all frame-local raw pointers before
-           * touching proto/pc/cl again. */
-          RELOAD_FRAME();
+           * compacting GC, which moves proto/cl (the frames array itself
+           * is fixed-capacity, and nested calls restore the register
+           * fields on their way out). Re-derive the raw pointers only
+           * when a collection actually ran. */
+          if (L->GCCycleCount != gcBefore) {
+            RELOAD_FRAME();
+          }
 
           /* Release the C call's window, restore this frame's */
           L->ArgsTop = win;
