@@ -139,9 +139,9 @@ Before landing a change that touches core code, from `platform/ti84ce/`:
    self-reported by the scripts; every row must be at or below its
    recorded value (allow ~2% CEmu jitter). Update the table when a change
    legitimately shifts a number.
-- C stack: ~4 KB. Parser recursion is capped (`MLUA_PARSE_MAX_DEPTH 32`);
-  deeply nested table constructors are bounded by GC mark recursion
-  (roughly 60-100 levels).
+- C stack: ~4 KB. Parser recursion is capped (`MLUA_PARSE_MAX_DEPTH 32`).
+  The GC marks iteratively (gray list through the header Forward field), so
+  object-graph depth no longer touches the C stack.
 
 ## Known limits
 

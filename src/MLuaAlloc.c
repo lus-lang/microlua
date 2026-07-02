@@ -67,7 +67,7 @@ static void InitStateCommon(MLuaState *L, Size heapSize) {
   L->GCPending = FALSE;
   L->GCThreshold = MLuaNextGCThreshold(L, L->HeapTop);
   L->GCPhase = 0;
-  L->GCGrayQueue = 0;
+  L->GCGrayHead = NULL;
 
   /* Initialize globals as nil (will be tables later) */
   L->Registry = MLUA_NIL;

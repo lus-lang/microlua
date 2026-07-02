@@ -243,7 +243,8 @@ struct MLuaState {
                                   safepoint (allocations never move objects
                                   out from under running C code) */
   Size GCThreshold;            /* Trigger GC when HeapTop exceeds this */
-  Size GCGrayQueue;            /* Offset to head of gray object queue */
+  MLuaGCHeader *GCGrayHead;    /* Gray list head during the mark phase,
+                                  threaded through header Forward fields */
   struct MLuaGCRef *GCRefHead; /* Head of C-side GCRef list */
   U32 GCCycleCount;            /* Completed collections; lets callers detect
                                   that a GC ran across a call boundary */

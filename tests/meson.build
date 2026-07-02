@@ -82,6 +82,12 @@ if compiler_enabled
         args: [files('error_lines.py'), mlua_exe],
         suite: 'cli',
     )
+
+    test('gc_deep', python_prog,
+        args: [files('gc_deep.py'), mlua_exe],
+        suite: ['cli', 'gc'],
+        timeout: 90,
+    )
 endif
 
 # Guard: the freestanding core must stay libc-free (see CLAUDE.md). The source
