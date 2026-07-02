@@ -13,6 +13,12 @@
 #define MLUA_PTR_SIZE 4  /* tagging representation (32-bit value word) */
 #define MLUA_ALIGNMENT 8 /* allocator-enforced; frees low 3 bits for tags */
 
+/* The eZ80 has no alignment requirements, so pack the GC header (3-byte
+ * Forward + U32 + U8 = 8 bytes instead of 16): every heap object shrinks by
+ * 8 bytes and float/int boxes drop from 24 to 16. Object addresses stay
+ * 8-aligned via MLUA_ALIGNMENT; only the payload offset changes. */
+#define MLUA_GC_HEADER_ALIGN 1
+
 /* Native double is binary32; narrow canonical binary64 bytecode on load. */
 #define MLUA_FLOAT float
 #define MLUA_FLOAT_BITS 32

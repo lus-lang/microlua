@@ -58,6 +58,18 @@
 #define MLUA_ALIGNMENT 8
 #endif
 
+/* Alignment (and therefore padded size) of the per-object GC header. Object
+ * ADDRESSES and spans always align to MLUA_ALIGNMENT — the tagging path
+ * stores its 3 tag bits in the pointer's low bits and needs that. This knob
+ * only sets where the payload starts (at sizeof(MLuaGCHeader)). A port whose
+ * loads/stores tolerate payload fields at that offset may lower it: on a
+ * target with byte alignment and 3-byte pointers the header packs from 16
+ * down to 8 bytes, cutting every float/int box from 24 to 16 bytes. Ports
+ * that need naturally-aligned payloads must leave the default. */
+#ifndef MLUA_GC_HEADER_ALIGN
+#define MLUA_GC_HEADER_ALIGN MLUA_ALIGNMENT
+#endif
+
 /* Floating-point subtype. Defaults to C `double` (IEEE binary64). A target
  * whose `double` is not 64-bit, or that wants a smaller float, can override
  * MLUA_FLOAT (e.g. `float`) and MLUA_FLOAT_BITS (e.g. 32) in its port header;

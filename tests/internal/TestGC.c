@@ -6,6 +6,8 @@
 #include "MLuaAlloc.h"
 #include "MLuaCore.h"
 #include "MLuaGC.h"
+#include "MLuaString.h"
+#include "MLuaTable.h"
 #include <stdio.h>
 
 static int TestsPassed = 0;
@@ -194,6 +196,77 @@ TEST(GCCollect_ReferencedByGCRef) {
 }
 
 /* ========================================================================== */
+/* Header Layout Tests                                                        */
+/* ========================================================================== */
+
+/* Walk the heap by CachedSize verifying the invariants the header-packing
+ * knob (MLUA_GC_HEADER_ALIGN) relies on: every object address and span is
+ * MLUA_ALIGNMENT-aligned and carries a plausible type. */
+static int WalkHeap(MLuaState *L) {
+  U8 *scan = L->HeapBase + MLuaFirstObjOffset(L);
+  U8 *heapEnd = L->HeapBase + L->HeapTop;
+  int objects = 0;
+  while (scan < heapEnd) {
+    MLuaGCHeader *obj = (MLuaGCHeader *)scan;
+    Size objSize = obj->CachedSize;
+    U8 type = MLUA_OBJTYPE(obj);
+    if ((UPtr)scan % MLUA_ALIGNMENT != 0 || objSize == 0 ||
+        objSize % MLUA_ALIGNMENT != 0 || objSize > L->HeapSize ||
+        type > 0x0A) {
+      return -1;
+    }
+    scan += objSize;
+    objects++;
+  }
+  return (scan == heapEnd) ? objects : -1;
+}
+
+TEST(GCHeaderPackedWalk) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  static const char longStr[] =
+      "a string long enough to always live on the heap";
+  MLuaGCRef strRef, tblRef, numRef, intRef;
+  MLuaValue elem;
+  int round;
+  ASSERT_NE(L, NULL);
+
+  MLuaGCEnable(L, FALSE);
+
+  /* A mix of object shapes: interned string, table with array + hash parts,
+   * a heap number, a (possibly boxed) large integer, and garbage between. */
+  MLuaPushGCRef(L, &strRef, MLuaStringNew(L, longStr, sizeof(longStr) - 1));
+  MLuaPushGCRef(L, &tblRef, MLuaTableNew(L));
+  MLuaPushGCRef(L, &numRef, MLuaMakeFloat(L, 3.25));
+  MLuaPushGCRef(L, &intRef, MLuaMakeIntSafe(L, (I32)0x7FFFFFF0));
+  ASSERT(IsPtr(strRef.Value));
+  ASSERT(MLuaTableSet(L, tblRef.Value, MakeInt(1), MLuaMakeFloat(L, 1.5)));
+  ASSERT(MLuaTableSet(L, tblRef.Value, strRef.Value, MakeInt(7)));
+
+  ASSERT_GT(WalkHeap(L), 0);
+
+  /* Repeated collections move everything; contents must survive intact and
+   * the heap must stay linearly walkable each time. */
+  for (round = 0; round < 3; round++) {
+    MLuaAllocObject(L, OBJTYPE_STRING, 40 + (Size)round); /* garbage */
+    MLuaGCCollect(L);
+    ASSERT_GT(WalkHeap(L), 0);
+
+    ASSERT(MLuaStringLen(strRef.Value) == sizeof(longStr) - 1);
+    ASSERT(MLuaToNumber(numRef.Value) == 3.25);
+    ASSERT(MLuaGetIntVal(intRef.Value) == (I32)0x7FFFFFF0);
+    elem = MLuaTableGet(L, tblRef.Value, MakeInt(1));
+    ASSERT(MLuaToNumber(elem) == 1.5);
+    elem = MLuaTableGet(L, tblRef.Value, strRef.Value);
+    ASSERT(IsInt(elem) && MLuaGetIntVal(elem) == 7);
+  }
+
+  MLuaPopGCRef(L, &intRef);
+  MLuaPopGCRef(L, &numRef);
+  MLuaPopGCRef(L, &tblRef);
+  MLuaPopGCRef(L, &strRef);
+}
+
+/* ========================================================================== */
 /* Mark Tests                                                                 */
 /* ========================================================================== */
 
@@ -230,6 +303,7 @@ int main(void) {
 
   printf("GC Control:\n");
   RUN_TEST(GCEnable);
+  RUN_TEST(GCHeaderPackedWalk);
   RUN_TEST(GCThreshold);
 
   printf("\nGCRef:\n");

@@ -334,17 +334,32 @@ static inline double GetDouble(MLuaValue v) {
  * MicroLua heaps are intentionally tiny; a 32-bit span is enough and keeps the
  * 64-bit object header at 16 bytes.
  */
-/* Aligned to MLUA_ALIGNMENT so the payload that follows (at offset
- * sizeof(MLuaGCHeader)) is itself MLUA_ALIGNMENT-aligned. Without this the
- * compact header is 12 bytes on a 32-bit target (4-byte pointer + U32 + U8 +
- * padding), leaving MLuaAlloc payloads only 4-aligned. The 64-bit header is
- * already 16 bytes, so this is a no-op there. */
+/* Aligned to MLUA_GC_HEADER_ALIGN (default MLUA_ALIGNMENT) so the payload
+ * that follows (at offset sizeof(MLuaGCHeader)) is aligned to what the port
+ * can tolerate. With the default, the header pads to 16 bytes on both the
+ * 64-bit and 32-bit paths and payloads are MLUA_ALIGNMENT-aligned. A port
+ * with no hardware alignment requirements can lower MLUA_GC_HEADER_ALIGN to
+ * pack the header (8 bytes with a 3-byte pointer), paying with unaligned
+ * payload fields. Object ADDRESSES still align to MLUA_ALIGNMENT either way:
+ * CachedSize spans stay ALIGN_UP'd, which the tagging path's low-bit tags
+ * depend on. */
 typedef struct {
   void *Forward;   /* Compaction forwarding address (GC use only) */
   U32 CachedSize;  /* Total aligned span including header */
   U8 Flags; /* [7:ROM][6:Pinned][5:Marked][4:Reserved][3-0:Type] */
-  U8 Reserved[3];
-} MLUA_ALIGNAS(MLUA_ALIGNMENT) MLuaGCHeader;
+} MLUA_ALIGNAS(MLUA_GC_HEADER_ALIGN) MLuaGCHeader;
+
+/* The payload begins at sizeof(MLuaGCHeader); if the (possibly empty)
+ * MLUA_ALIGNAS fallback did not pad the struct to the promised alignment,
+ * payload fields would silently misalign. */
+MLUA_STATIC_ASSERT(sizeof(MLuaGCHeader) % MLUA_GC_HEADER_ALIGN == 0,
+                   "GC header size must be a multiple of its alignment");
+#if MLUA_PTR_SIZE != 8
+/* Alignment tagging stores 3 tag bits in the pointer's low bits, so heap
+ * object addresses must stay 8-aligned regardless of the header packing. */
+MLUA_STATIC_ASSERT(MLUA_ALIGNMENT >= 8,
+                   "the tagging path needs 8-aligned object addresses");
+#endif
 
 /* Get object type from header */
 #define MLUA_OBJTYPE(h) ((h)->Flags & GCFLAG_TYPE_MASK)
