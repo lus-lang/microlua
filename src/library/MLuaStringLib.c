@@ -31,6 +31,7 @@ static const char *GetStrArg(MLuaState *L, int idx, Size *len) {
 static int StringByte(MLuaState *L) {
   Size len;
   const char *s = GetStrArg(L, 1, &len);
+  Bool ascii = MLuaStringIsAscii(MLuaGetStack(L, 1));
   int top = MLuaGetTop(L);
   IPtr i = 1;
   IPtr j;
@@ -54,8 +55,9 @@ static int StringByte(MLuaState *L) {
     j = i;
   }
 
-  /* Unicode-aware: positions are codepoint indices, results are CODEPOINTS */
-  total = (IPtr)MLuaUTF8Len(s, len);
+  /* Unicode-aware: positions are codepoint indices, results are CODEPOINTS.
+   * On an all-ASCII string codepoints ARE bytes, so skip the decoding. */
+  total = ascii ? (IPtr)len : (IPtr)MLuaUTF8Len(s, len);
   if (i < 0)
     i = total + i + 1;
   if (j < 0)
@@ -66,6 +68,16 @@ static int StringByte(MLuaState *L) {
     j = total;
   if (i > j)
     return 0;
+
+  if (ascii) {
+    count = 0;
+    while (i <= j) {
+      MLuaPush(L, MakeInt((I32)(U8)s[i - 1]));
+      count++;
+      i++;
+    }
+    return (int)count;
+  }
 
   p = s + MLuaUTF8Offset(s, len, (Size)(i - 1));
   end = s + len;
@@ -508,7 +520,12 @@ static int StringLen(MLuaState *L) {
   Size len;
   const char *s = GetStrArg(L, 1, &len);
 
-  /* Unicode-aware: the length of a string is its CODEPOINT count */
+  /* Unicode-aware: the length of a string is its CODEPOINT count
+   * (== byte count when the string is all ASCII) */
+  if (MLuaStringIsAscii(MLuaGetStack(L, 1))) {
+    MLuaPush(L, MakeInt((I32)len));
+    return 1;
+  }
   MLuaPush(L, MakeInt(s ? (I32)MLuaUTF8Len(s, len) : 0));
   return 1;
 }
@@ -934,6 +951,7 @@ static int StringReverse(MLuaState *L) {
 static int StringSub(MLuaState *L) {
   Size len;
   const char *s = GetStrArg(L, 1, &len);
+  Bool ascii = MLuaStringIsAscii(MLuaGetStack(L, 1));
   IPtr i = 1;
   IPtr j = -1;
   IPtr total;
@@ -954,8 +972,9 @@ static int StringSub(MLuaState *L) {
     return 1;
   }
 
-  /* Unicode-aware: i and j are CODEPOINT indices */
-  total = (IPtr)MLuaUTF8Len(s, len);
+  /* Unicode-aware: i and j are CODEPOINT indices (== byte indices when
+   * the string is all ASCII, skipping the per-call decode) */
+  total = ascii ? (IPtr)len : (IPtr)MLuaUTF8Len(s, len);
 
   /* Handle negative indices */
   if (i < 0)
@@ -972,8 +991,13 @@ static int StringSub(MLuaState *L) {
   if (i > j) {
     MLuaPush(L, MLuaStringNew(L, "", 0));
   } else {
-    byteStart = MLuaUTF8Offset(s, len, (Size)(i - 1));
-    byteEnd = MLuaUTF8Offset(s, len, (Size)j);
+    if (ascii) {
+      byteStart = (Size)(i - 1);
+      byteEnd = (Size)j;
+    } else {
+      byteStart = MLuaUTF8Offset(s, len, (Size)(i - 1));
+      byteEnd = MLuaUTF8Offset(s, len, (Size)j);
+    }
     MLuaPush(L, MLuaStringNew(L, s + byteStart, byteEnd - byteStart));
   }
   return 1;

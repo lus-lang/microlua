@@ -25,6 +25,23 @@ U32 MLuaStringHash(const char *str, Size len) {
   return hash;
 }
 
+/* Hash and detect pure ASCII in the same pass over the bytes. */
+static U32 StringHashAscii(const char *str, Size len, Bool *allAscii) {
+  U32 hash = FNV_OFFSET_BASIS;
+  U8 acc = 0;
+  Size i;
+
+  for (i = 0; i < len; i++) {
+    U8 c = (U8)str[i];
+    hash ^= c;
+    hash *= FNV_PRIME;
+    acc |= c;
+  }
+
+  *allAscii = (acc & 0x80U) == 0;
+  return hash;
+}
+
 /* ========================================================================== */
 /* String Table (per-state)                                                   */
 /* ========================================================================== */
@@ -87,7 +104,7 @@ static MLuaValue *StringTableFind(MLuaState *L, const char *str, Size len,
     gch = (MLuaGCHeader *)GetPtr(v);
     sh = MLUA_STRHEADER(gch);
 
-    if (sh->Hash == hash && (Size)sh->Length == len) {
+    if (sh->Hash == hash && MLuaStrHeaderLen(sh) == len) {
       existingStr = MLUA_STRDATA(sh);
       if (MemCmp(existingStr, str, len) == 0) {
         /* Found it! */
@@ -127,7 +144,7 @@ static Bool StringTableResize(MLuaState *L) {
       MLuaGCHeader *gch = (MLuaGCHeader *)GetPtr(v);
       MLuaStringHeader *sh = MLUA_STRHEADER(gch);
       MLuaValue *slot =
-          StringTableFind(L, MLUA_STRDATA(sh), (Size)sh->Length, sh->Hash);
+          StringTableFind(L, MLUA_STRDATA(sh), MLuaStrHeaderLen(sh), sh->Hash);
       if (slot && IsNil(*slot)) {
         *slot = v;
         L->StringTableCount++;
@@ -139,11 +156,18 @@ static Bool StringTableResize(MLuaState *L) {
   return TRUE;
 }
 
-static Bool StringTableInsert(MLuaState *L, MLuaValue strVal) {
+/*
+ * Insert strVal into the intern table. `hint` may carry the empty slot a
+ * preceding StringTableFind miss returned, saving the re-probe; it is
+ * discarded when a resize moves the table. (Allocations between the find
+ * and the insert are safe: they never collect, so the backing array cannot
+ * have moved.)
+ */
+static Bool StringTableInsert(MLuaState *L, MLuaValue strVal,
+                              MLuaValue *hint) {
   Size threshold;
   MLuaGCHeader *gch;
   MLuaStringHeader *sh;
-  MLuaValue *slot;
 
   /* Check if resize needed */
   threshold = (L->StringTableCap * MLUA_STRING_TABLE_LOAD_FACTOR) / 100;
@@ -151,14 +175,18 @@ static Bool StringTableInsert(MLuaState *L, MLuaValue strVal) {
     if (!StringTableResize(L)) {
       return FALSE;
     }
+    hint = NULL;
   }
 
-  gch = (MLuaGCHeader *)GetPtr(strVal);
-  sh = MLUA_STRHEADER(gch);
+  if (!hint) {
+    gch = (MLuaGCHeader *)GetPtr(strVal);
+    sh = MLUA_STRHEADER(gch);
+    hint =
+        StringTableFind(L, MLUA_STRDATA(sh), MLuaStrHeaderLen(sh), sh->Hash);
+  }
 
-  slot = StringTableFind(L, MLUA_STRDATA(sh), sh->Length, sh->Hash);
-  if (slot && IsNil(*slot)) {
-    *slot = strVal;
+  if (hint && IsNil(*hint)) {
+    *hint = strVal;
     L->StringTableCount++;
     return TRUE;
   }
@@ -212,7 +240,7 @@ Bool MLuaStringTableShrink(MLuaState *L) {
       MLuaGCHeader *gch = (MLuaGCHeader *)GetPtr(v);
       MLuaStringHeader *sh = MLUA_STRHEADER(gch);
       MLuaValue *slot =
-          StringTableFind(L, MLUA_STRDATA(sh), (Size)sh->Length, sh->Hash);
+          StringTableFind(L, MLUA_STRDATA(sh), MLuaStrHeaderLen(sh), sh->Hash);
       if (slot && IsNil(*slot)) {
         *slot = v;
         L->StringTableCount++;
@@ -237,6 +265,7 @@ MLuaValue MLuaStringNewShort(const char *str, Size len) {
 
 MLuaValue MLuaStringNew(MLuaState *L, const char *str, Size len) {
   U32 hash;
+  Bool ascii;
   MLuaValue *existing;
   MLuaGCHeader *gch;
   MLuaStringHeader *sh;
@@ -256,7 +285,7 @@ MLuaValue MLuaStringNew(MLuaState *L, const char *str, Size len) {
     return MLuaStringNewShort(str, len);
   }
 
-  if (len > (Size)0xFFFFFFFFU) {
+  if (len > (Size)MLUA_STR_LEN_MASK) {
     return MLUA_NIL;
   }
 
@@ -267,8 +296,8 @@ MLuaValue MLuaStringNew(MLuaState *L, const char *str, Size len) {
     }
   }
 
-  /* Compute hash */
-  hash = MLuaStringHash(str, len);
+  /* Compute hash (and the ASCII flag, in the same pass) */
+  hash = StringHashAscii(str, len, &ascii);
 
   /* Check if string already exists */
   existing = StringTableFind(L, str, len, hash);
@@ -290,7 +319,7 @@ MLuaValue MLuaStringNew(MLuaState *L, const char *str, Size len) {
 
   sh = MLUA_STRHEADER(gch);
   sh->Hash = hash;
-  sh->Length = (U32)len;
+  sh->Length = (U32)len | (ascii ? MLUA_STR_ASCII_BIT : 0);
 
   data = (char *)MLUA_STRDATA(sh);
   MemCpy(data, str, len);
@@ -298,8 +327,8 @@ MLuaValue MLuaStringNew(MLuaState *L, const char *str, Size len) {
 
   result = MakePtr(gch);
 
-  /* Insert into string table */
-  StringTableInsert(L, result);
+  /* Insert into string table, reusing the probe from the dedup miss */
+  StringTableInsert(L, result, existing);
 
   return result;
 }
@@ -336,7 +365,36 @@ Size MLuaStringLen(MLuaValue v) {
 
   gch = (MLuaGCHeader *)GetPtr(v);
   sh = MLUA_STRHEADER(gch);
-  return sh->Length;
+  return MLuaStrHeaderLen(sh);
+}
+
+Bool MLuaStringIsAscii(MLuaValue v) {
+  if (IsShortStr(v)) {
+    Size len = MLuaShortStrLen(v);
+    U8 acc = 0;
+    if (len > 0) {
+      acc |= (U8)GetShortStrChar0(v);
+    }
+    if (len > 1) {
+      acc |= (U8)GetShortStrChar1(v);
+    }
+    if (len > 2) {
+      acc |= (U8)GetShortStrChar2(v);
+    }
+    if (len > 3) {
+      acc |= (U8)GetShortStrChar3(v);
+    }
+    if (len > 4) {
+      acc |= (U8)GetShortStrChar4(v);
+    }
+    return (acc & 0x80U) == 0;
+  }
+
+  if (!IsString(v)) {
+    return FALSE;
+  }
+
+  return MLuaStrHeaderAscii(MLUA_STRHEADER((MLuaGCHeader *)GetPtr(v)));
 }
 
 const char *MLuaStringData(MLuaValue v) {
@@ -479,6 +537,10 @@ MLuaValue MLuaStringConcatMany(MLuaState *L, const MLuaValue *vals, int count) {
     return MLuaStringNewShort(tmp, totalLen);
   }
 
+  if (totalLen > (Size)MLUA_STR_LEN_MASK) {
+    return MLUA_NIL;
+  }
+
   if (L->StringTableCap == 0) {
     if (!MLuaStringTableInit(L)) {
       return MLUA_NIL;
@@ -523,18 +585,28 @@ MLuaValue MLuaStringConcatMany(MLuaState *L, const MLuaValue *vals, int count) {
     Size firstLen = MLuaStringLen(vals[0]);
     Size k;
     U32 hash;
+    U8 acc = 0;
+    Bool ascii;
     if (IsShortStr(vals[0])) {
-      hash = MLuaStringHash(data, firstLen); /* <= 3 bytes */
+      hash = StringHashAscii(data, firstLen, &ascii); /* a few bytes */
     } else {
       hash = MLUA_STRHEADER((MLuaGCHeader *)GetPtr(vals[0]))->Hash;
+      ascii = MLuaStrHeaderAscii(MLUA_STRHEADER((MLuaGCHeader *)GetPtr(vals[0])));
     }
     for (k = firstLen; k < totalLen; k++) {
-      hash ^= (U8)data[k];
+      U8 c = (U8)data[k];
+      hash ^= c;
       hash *= FNV_PRIME;
+      acc |= c;
     }
     sh->Hash = hash;
+    /* ASCII iff the first operand was and the folded bytes stayed below
+     * 0x80 -- same incremental structure as the hash. */
+    if (ascii && (acc & 0x80U) != 0) {
+      ascii = FALSE;
+    }
+    sh->Length = (U32)totalLen | (ascii ? MLUA_STR_ASCII_BIT : 0);
   }
-  sh->Length = (U32)totalLen;
   result = MakePtr(gch);
 
   /*
@@ -547,6 +619,6 @@ MLuaValue MLuaStringConcatMany(MLuaState *L, const MLuaValue *vals, int count) {
   if (slot && !IsNil(*slot)) {
     return *slot;
   }
-  StringTableInsert(L, result);
+  StringTableInsert(L, result, slot);
   return result;
 }

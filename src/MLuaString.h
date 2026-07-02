@@ -23,9 +23,25 @@
 
 typedef struct {
   U32 Hash;   /* Precomputed hash value */
-  U32 Length; /* String length (not including null terminator) */
-              /* Followed by char data[Length + 1] */
+  U32 Length; /* Bit 31: all-ASCII flag; bits 0-30: byte length (not
+               * including null terminator). Followed by
+               * char data[length + 1]. */
 } MLuaStringHeader;
+
+/*
+ * Bit 31 of Length caches "every byte < 0x80". Codepoint-indexed operations
+ * (string.byte/sub positions) collapse to direct byte offsets on ASCII
+ * strings, which otherwise cost a UTF-8 decode of every preceding byte per
+ * call. The flag is computed inside loops that already touch every byte
+ * (hashing, concat folding), so caching it is free; it is conservative --
+ * unset only ever means "take the decoding path". String lengths are
+ * capped at 2^31-1 by MLuaStringNew.
+ */
+#define MLUA_STR_LEN_MASK 0x7FFFFFFFU
+#define MLUA_STR_ASCII_BIT 0x80000000U
+
+#define MLuaStrHeaderLen(sh) ((Size)((sh)->Length & MLUA_STR_LEN_MASK))
+#define MLuaStrHeaderAscii(sh) (((sh)->Length & MLUA_STR_ASCII_BIT) != 0)
 
 /* Get string data pointer from header */
 #define MLUA_STRDATA(strh)                                                     \
@@ -86,6 +102,14 @@ Size MLuaStringLen(MLuaValue v);
  * @return    Pointer to null-terminated C string
  */
 const char *MLuaStringData(MLuaValue v);
+
+/*
+ * TRUE when every byte of the string is < 0x80 (so codepoint positions
+ * equal byte positions). O(1) for long strings (cached flag); short
+ * strings check their few inline bytes. Conservative: FALSE only routes
+ * callers to the decoding path.
+ */
+Bool MLuaStringIsAscii(MLuaValue v);
 
 /*
  * Compare two string values for equality.

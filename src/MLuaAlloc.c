@@ -376,7 +376,7 @@ void MLuaGetMemoryStats(MLuaState *L, MLuaMemoryStats *out) {
     switch (objType) {
     case OBJTYPE_STRING: {
       MLuaStringHeader *sh = MLUA_STRHEADER(obj);
-      out->StringPayloadBytes += sh->Length + 1;
+      out->StringPayloadBytes += MLuaStrHeaderLen(sh) + 1;
       break;
     }
     case OBJTYPE_TABLE: {
