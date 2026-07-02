@@ -187,9 +187,18 @@ size into `bench/RESULTS.md`. It auto-detects a local `lua5.5`/`lua` (verified `
 - `return f(g())` / `return f(...)` (CALLM-form tails) are NOT tail calls; only
   plain `OP_CALL` returns are flipped to `OP_TAILCALL`. Correctness is identical,
   only frame reuse differs, and the flip-time check stays trivially safe.
+- Parser-level caching of repeated global reads (`string.byte` in a loop):
+  `_G` is mutable and a single-pass parser cannot prove safety. The user-side
+  idiom is `local byte = string.byte`.
+- Skipping the intern-table dedup for concat results: breaks the
+  pointer-equality-is-value-equality string invariant. The concat path already
+  hashes incrementally and reuses the dedup probe's insert slot.
 
-## Status (2026-06-30, release-candidate hardening)
+## Status (2026-07-02, performance pass landed)
 
 Debug and freestanding release suites are green locally, including internal C
 tests, interpreter suites, smoke tests, CLI bytecode output, security
-regressions, and the libc-free guard.
+regressions, and the libc-free guard. Bytecode is at v4 (fused
+GETTABLE_LL/SETTABLE_LL/SETTABLE_POP/GETGLOBAL_K); older .mlu chunks must be
+recompiled. The TI-84 CE benchmarks now beat TI-BASIC on every workload
+(platform/ti84ce/README.md has the table).
