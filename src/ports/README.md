@@ -41,7 +41,7 @@ directly. A port header is a plain C header of `#define`s.
 | `MLUA_INLINE_INT_MAX` / `MLUA_INLINE_INT_MIN` | I32 (NaN-box) / ±2²⁸ (tagging) | Largest value stored inline before spilling to an `OBJTYPE_INT` box. |
 | `MLUA_MAXINTEGER` / `MLUA_MININTEGER` | I32 range | `math.maxinteger` / `math.mininteger`. |
 | `MLUA_PI` | `3.14159265358979323846` | `math.pi`. |
-| `MathSin`, `MathCos`, `MathPow`, … | `__builtin_*` (double) | Math backend. Override to the `f`-suffixed builtins (`__builtin_sinf`, …) for a single-precision target. |
+| `MathSin`, `MathCos`, `MathPow`, … | `__builtin_*`, following `MLUA_FLOAT_BITS` | Math backend. Binary32 runtimes default to the `f`-suffixed builtins (`__builtin_sinf`, …); each hook can still be overridden individually. |
 
 ## Worked example — 24-bit `int` / 32-bit `double` / 32-bit pointer
 
@@ -62,10 +62,8 @@ handle the odd `int`, and the tagging path handles the 32-bit pointer:
 #define MLUA_DEFAULT_ARGS_SIZE 32
 #define MLUA_DEFAULT_FRAMES_SIZE 32
 
-/* Single-precision math backend. */
-#define MathSin(x) __builtin_sinf(x)
-#define MathCos(x) __builtin_cosf(x)
-/* ...remaining Math* as needed... */
+/* Math backend: nothing to do - MLUA_FLOAT_BITS == 32 makes the defaults
+ * resolve to the f-suffixed builtins (__builtin_sinf, ...). */
 
 #endif
 ```

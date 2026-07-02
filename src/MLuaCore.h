@@ -170,8 +170,90 @@ extern void MLuaAssertFail(const char *expr, const char *file, int line);
 /*
  * We use __builtin_* intrinsics which are available in GCC and Clang.
  * These compile to native FPU instructions and don't require libc.
+ *
+ * The defaults follow MLUA_FLOAT_BITS: a binary32 runtime gets the
+ * f-suffixed builtins so out-parameter types (modf, frexp) stay
+ * MLUA_FLOAT and no double-precision code is pulled in. A port can
+ * still override any hook individually.
  */
 #if defined(__GNUC__) || defined(__clang__)
+#if MLUA_FLOAT_BITS == 32
+#ifndef MathSin
+#define MathSin(x) __builtin_sinf(x)
+#endif
+#ifndef MathCos
+#define MathCos(x) __builtin_cosf(x)
+#endif
+#ifndef MathTan
+#define MathTan(x) __builtin_tanf(x)
+#endif
+#ifndef MathAsin
+#define MathAsin(x) __builtin_asinf(x)
+#endif
+#ifndef MathAcos
+#define MathAcos(x) __builtin_acosf(x)
+#endif
+#ifndef MathAtan
+#define MathAtan(x) __builtin_atanf(x)
+#endif
+#ifndef MathAtan2
+#define MathAtan2(y, x) __builtin_atan2f((y), (x))
+#endif
+#ifndef MathCosh
+#define MathCosh(x) __builtin_coshf(x)
+#endif
+#ifndef MathSinh
+#define MathSinh(x) __builtin_sinhf(x)
+#endif
+#ifndef MathTanh
+#define MathTanh(x) __builtin_tanhf(x)
+#endif
+#ifndef MathExp
+#define MathExp(x) __builtin_expf(x)
+#endif
+#ifndef MathLog
+#define MathLog(x) __builtin_logf(x)
+#endif
+#ifndef MathLog10
+#define MathLog10(x) __builtin_log10f(x)
+#endif
+#ifndef MathPow
+#define MathPow(x, y) __builtin_powf((x), (y))
+#endif
+#ifndef MathSqrt
+#define MathSqrt(x) __builtin_sqrtf(x)
+#endif
+#ifndef MathFloor
+#define MathFloor(x) __builtin_floorf(x)
+#endif
+#ifndef MathCeil
+#define MathCeil(x) __builtin_ceilf(x)
+#endif
+#ifndef MathFabs
+#define MathFabs(x) __builtin_fabsf(x)
+#endif
+#ifndef MathFmod
+#define MathFmod(x, y) __builtin_fmodf((x), (y))
+#endif
+#ifndef MathFrexp
+#define MathFrexp(x, exp) __builtin_frexpf((x), (exp))
+#endif
+#ifndef MathLdexp
+#define MathLdexp(x, exp) __builtin_ldexpf((x), (exp))
+#endif
+#ifndef MathModf
+#define MathModf(x, iptr) __builtin_modff((x), (iptr))
+#endif
+#ifndef MathIsNan
+#define MathIsNan(x) __builtin_isnan(x)
+#endif
+#ifndef MathIsInf
+#define MathIsInf(x) __builtin_isinf(x)
+#endif
+#ifndef MathHuge
+#define MathHuge __builtin_huge_valf()
+#endif
+#else /* MLUA_FLOAT_BITS == 64 */
 #ifndef MathSin
 #define MathSin(x) __builtin_sin(x)
 #endif
@@ -247,6 +329,7 @@ extern void MLuaAssertFail(const char *expr, const char *file, int line);
 #ifndef MathHuge
 #define MathHuge __builtin_huge_val()
 #endif
+#endif /* MLUA_FLOAT_BITS */
 #else
 /* Fallback for other compilers - these would need manual implementation */
 #ifndef MathSin
