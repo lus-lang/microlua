@@ -38,9 +38,11 @@ exact constrained-heap high-water from a high-limit `--dump` run.
 - Provides most of Lua within a tiny footprint.
 - The core static library has no dependence on the C standard library.
 - The core can run without dynamic memory allocation: pass your own pre-allocated heap to the interpreter[^1].
-- Interpreter is implemented as a stack machine, with instructions encoded as single or double bytes.
+- Interpreter is implemented as a stack machine, with every instruction encoded
+  as one or two bytes. Bytecode format v4 adds fused opcodes for common global
+  and table-indexing patterns.
 - Single-pass Pratt parsing and code generation with minimal resource cost. The parser/compiler can also be compiled out for bytecode-only embedded targets.
-- Port configuration supports 64-bit NaN-boxing, 32-bit alignment tagging with boxed full-width integers, compiler-derived fixed-width C types, and optional single-precision heap floats for targets whose `double` is not binary64.
+- Port configuration supports 64-bit NaN-boxing, 32-bit alignment tagging with boxed full-width integers, compiler-derived fixed-width C types, optional single-precision heap floats for targets whose `double` is not binary64, optional dump/pack engines, computed-goto dispatch, and opcode profiling.
 - Garbage collection that reclaims and defragments the heap to conserve memory.
 - Holes in table arrays are runtime errors to ensure heap compactness.
 - Strings and scripts are encoded as UTF-8.
@@ -49,7 +51,7 @@ exact constrained-heap high-water from a high-limit `--dump` run.
 - `math`, `table`, `string`, and `coroutine` libraries are available, with the following supported features:
   - Everything from Lua 5.1 **except** `coroutine.wrap`, `string.gsub`, and `string.gmatch`.
   - **Lua 5.2**: `table.pack` and `table.unpack`.
-  - **Lua 5.3**: `string.pack`, `string.packsize`, `string.unpack`, `math.maxinteger`, `math.mininteger`, `math.tointeger`, `math.type`, and `math.ult`. Numeric literals follow the 5.3 integer/float distinction.
+  - **Lua 5.3**: `string.pack`, `string.packsize`, `string.unpack` (when the default pack engine is enabled), `math.maxinteger`, `math.mininteger`, `math.tointeger`, `math.type`, and `math.ult`. Numeric literals follow the 5.3 integer/float distinction.
   - **Lua 5.4**: `coroutine.isyieldable` and `coroutine.close`.
 
 ### Limitations
@@ -88,7 +90,7 @@ ninja -C build-bytecode
 
 When `-Dcompiler=false`, `libmicrolua.a` omits the lexer and parser and exposes
 `MLuaLoadBytecode`/`MLuaDoBytecode` for embedded callers.
-MicroLua bytecode has a versioned header, records endianness, serializes
+MicroLua bytecode v4 has a versioned header, records endianness, serializes
 execution-critical fields with fixed widths, and stores numeric constants as
 canonical IEEE-754 binary64 values. A target may use a narrower native
 `MLUA_FLOAT`, but bytecode remains tied to the MicroLua bytecode version and
@@ -97,7 +99,11 @@ supported numeric formats.
 Port-specific settings are centralized in `src/MLuaConfig.h`. A board port can
 override pointer size, heap alignment, default stack/frame sizes, GC threshold,
 fixed-width type source, native float subtype/width, math hooks, and compiler
-support by providing one header:
+support by providing one header. Size-sensitive ports can also disable
+`string.dump` (`MLUA_ENABLE_DUMP=0`) or `string.pack`/`packsize`/`unpack`
+(`MLUA_ENABLE_PACK=0`), enable GNU-C computed-goto dispatch
+(`MLUA_VM_COMPUTED_GOTO=1`), or turn on opcode profiling
+(`MLUA_PROFILE_OPS=1`) for diagnostics:
 
 ```sh
 meson setup build-board -Dport_header=path/to/my_board_mlua.h
@@ -107,10 +113,30 @@ Built-in presets are available with `-Dport=generic64`, `generic32`,
 `cortex-m`, `riscv32`, or `ti84ce`. See `src/ports/README.md` for the full
 port-knob reference and verification matrix.
 
+## Special ports
+
+Special ports are complete platform integrations that go beyond a Meson port
+preset. They may include board-specific build systems, host bindings, packaging
+tools, install notes, benchmarks, or emulator test flows.
+
+### TI-84 Plus CE
+
 A complete board port lives in `platform/ti84ce/`: MicroLua on the TI-84
 Plus CE (eZ80 — 24-bit `int` and pointers, binary32 `double`), built with
-the CE C toolchain as two calculator programs (script runner + on-calc
-REPL) with graphics/keypad/timer bindings.
+the CE C toolchain as two calculator programs with graphics/keypad/timer
+bindings.
+
+| Program | Directory | Contents |
+|---|---|---|
+| `MLUA.8xp` (~57 KB) | `platform/ti84ce/repl/` | Full build: runs source or bytecode appvars and includes an on-calc REPL |
+| `MLUAR.8xp` (~44 KB) | `platform/ti84ce/runner/` | Bytecode-only runner without lexer/parser/compiler |
+
+The CE preset disables `string.dump` and `string.pack` (`MLUA_ENABLE_DUMP=0`,
+`MLUA_ENABLE_PACK=0`) and enables computed-goto dispatch because the full REPL
+is close to the calculator's practical code-size ceiling. Current CEmu
+benchmarks on OS 5.7 show MicroLua beating matched TI-BASIC workloads from
+1.01x on list-heavy code to 8.1x on scalar integer loops; see
+`platform/ti84ce/README.md` for the full table and autotester workflow.
 
 ## License
 
