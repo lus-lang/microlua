@@ -10,6 +10,8 @@
 #include "MLuaFloatBits.h" /* boundary conversion; not needed for binary64 */
 #endif
 
+#if MLUA_ENABLE_DUMP
+
 #define BC_FORMAT_OFFICIAL 0
 #define BC_FLAGS_NONE 0
 #define BC_INT_SIZE 4
@@ -217,3 +219,5 @@ Size MLuaDumpFunction(MLuaState *L, MLuaValue func, char *buf, Size cap) {
   return MLuaDumpFunctionEndian(L, func, buf, cap,
                                MLUA_BYTECODE_ENDIAN_LITTLE);
 }
+
+#endif /* MLUA_ENABLE_DUMP */

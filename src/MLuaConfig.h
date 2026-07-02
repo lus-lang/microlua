@@ -14,6 +14,13 @@
 #define MLUA_ENABLE_COMPILER 1
 #endif
 
+/* Bytecode serialization (MLuaDumpFunction, string.dump). Ports with no way
+ * to store or transmit dumped chunks can set this to 0 to drop the
+ * serializer; deserialization (MLuaUndump) is unaffected. */
+#ifndef MLUA_ENABLE_DUMP
+#define MLUA_ENABLE_DUMP 1
+#endif
+
 #ifndef MLUA_PTR_SIZE
 #if defined(__LP64__) || defined(_WIN64)
 #define MLUA_PTR_SIZE 8

@@ -14,6 +14,7 @@
 #define MLUA_BYTECODE_ENDIAN_BIG 1
 #define MLUA_BYTECODE_FLOAT_IEEE754 1
 
+#if MLUA_ENABLE_DUMP
 /*
  * Serialize a Lua closure in MicroLua's bytecode format.
  *
@@ -29,5 +30,6 @@ Size MLuaDumpFunction(MLuaState *L, MLuaValue func, char *buf, Size cap);
  */
 Size MLuaDumpFunctionEndian(MLuaState *L, MLuaValue func, char *buf, Size cap,
                             int endian);
+#endif /* MLUA_ENABLE_DUMP */
 
 #endif /* MLUA_DUMP_H */

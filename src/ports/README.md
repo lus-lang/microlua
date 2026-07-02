@@ -19,6 +19,7 @@ directly. A port header is a plain C header of `#define`s.
 | `MLUA_FLOAT` | `double` | The float subtype (tagging path's heap number and conversions). Set to `float` for a single-precision runtime. |
 | `MLUA_FLOAT_BITS` | `64` | Bit width of `MLUA_FLOAT`. `< 64` enables binary64↔`MLUA_FLOAT` conversion at the bytecode boundary (numbers are always binary64 on disk). Only `32` is implemented. |
 | `MLUA_ENABLE_COMPILER` | `1` | `0` drops the lexer/parser; the runtime then loads bytecode only. Wired from Meson `-Dcompiler`. |
+| `MLUA_ENABLE_DUMP` | `1` | `0` drops the bytecode serializer (`MLuaDumpFunction`, `string.dump`) for ports with no way to store or transmit dumped chunks. Loading bytecode (`MLuaUndump`) is unaffected. |
 
 ## Arenas and GC (default constrained state)
 

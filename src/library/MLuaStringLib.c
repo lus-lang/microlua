@@ -113,6 +113,7 @@ static int StringChar(MLuaState *L) {
 /* string.dump                                                                */
 /* ========================================================================== */
 
+#if MLUA_ENABLE_DUMP
 static int StringDump(MLuaState *L) {
   MLuaValue func = MLuaGetStack(L, 1);
   Size size;
@@ -136,6 +137,7 @@ static int StringDump(MLuaState *L) {
   MLuaPush(L, MLuaStringNew(L, buf, size));
   return 1;
 }
+#endif /* MLUA_ENABLE_DUMP */
 
 /* ========================================================================== */
 /* string.find (with Lua pattern matching)                                    */
@@ -1163,7 +1165,10 @@ static int StringUpper(MLuaState *L) {
 
 static const MLuaLibEntry StringLibEntries[] = {
     {"byte", StringByte},     {"char", StringChar},
-    {"dump", StringDump},     {"find", StringFind},
+#if MLUA_ENABLE_DUMP
+    {"dump", StringDump},
+#endif
+    {"find", StringFind},
     {"format", StringFormat}, {"len", StringLen},
     {"lower", StringLower},   {"match", StringMatch},
     {"pack", StringPack},     {"packsize", StringPacksize},
