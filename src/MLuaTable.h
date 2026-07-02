@@ -32,7 +32,9 @@ typedef struct {
 #define MLUA_TABLE_INLINE_HASH_CAP 1
 #define MLUA_TABLE_NODE_COUNT_MASK 0x0FFFFFFFU
 #define MLUA_TABLE_ARRAY_KIND_SHIFT 28
-#define MLUA_TABLE_ARRAY_KIND_MASK (3U << MLUA_TABLE_ARRAY_KIND_SHIFT)
+/* (U32)3, not 3U: on targets whose unsigned int is narrower than 32 bits
+ * (e.g. 24-bit int), shifting the plain literal by 28 is undefined. */
+#define MLUA_TABLE_ARRAY_KIND_MASK ((U32)3 << MLUA_TABLE_ARRAY_KIND_SHIFT)
 #define MLUA_TABLE_ARRAY_INLINE 0x40000000U
 #define MLUA_TABLE_HASH_INLINE 0x80000000U
 

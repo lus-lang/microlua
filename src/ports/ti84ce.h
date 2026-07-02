@@ -63,6 +63,13 @@
  * the switch's bounds check + jump on every instruction. */
 #define MLUA_VM_COMPUTED_GOTO 1
 
+/* MLUA_TABLE_NUM_ARRAYS is NOT set here: the typed-array code measures
+ * ~2.8 KB of eZ80 image, which fits the runner target (its makefile opts
+ * in) but would leave the full repl build under 1.3 KB of launch headroom.
+ * A heap of a few tens of KB cannot afford a 16-byte box per stored float,
+ * so the runner - where large precompiled workloads actually run - takes
+ * the trade; the repl keeps the image bytes. */
+
 /* Math backend: the MLuaCore.h defaults follow MLUA_FLOAT_BITS, so this
  * port automatically gets the f-suffixed builtins (sinf, powf, ...). */
 

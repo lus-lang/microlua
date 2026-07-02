@@ -20,9 +20,12 @@ LTO = YES
 
 MLUA_SRC = ../../../src
 
+# Typed float arrays (~2.8 KB of image) fit here but not in the repl build;
+# see the note in ports/ti84ce.h.
 CFLAGS = -Wall -Wextra -Oz \
 	-DMLUA_PORT_HEADER=\"ports/ti84ce.h\" \
 	-DMLUA_ENABLE_COMPILER=0 \
+	-DMLUA_TABLE_NUM_ARRAYS=1 \
 	-I$(MLUA_SRC) -I$(MLUA_SRC)/library -I../common
 CXXFLAGS = $(CFLAGS)
 

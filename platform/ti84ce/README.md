@@ -5,7 +5,7 @@ Two programs built with the [CE C/C++ Toolchain](https://github.com/CE-Programmi
 | Program | Directory | Contents |
 |---|---|---|
 | `MLUA.8xp` (~57 KB) | `repl/` | Full build: runs Lua **source or bytecode** appvars, on-calc **REPL** |
-| `MLUAR.8xp` (~44 KB) | `runner/` | Bytecode-only runner (no compiler); smallest footprint |
+| `MLUAR.8xp` (~44 KB) | `runner/` | Bytecode-only runner (no compiler); smallest footprint. Ships **typed float arrays** (`MLUA_TABLE_NUM_ARRAYS`): a table of floats retains ~4 bytes/element instead of ~20, so float-heavy workloads fit the 48 KB heap. The repl build skips this (~2.8 KB of image it can't spare). |
 
 Both include the `gfx` / `key` / `timer` calculator bindings and ship as a
 single compressed `.8xp` (zx0; the decompressed image is ~110-139 KB of
