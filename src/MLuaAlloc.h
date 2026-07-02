@@ -235,6 +235,8 @@ struct MLuaState {
   Size GCThreshold;            /* Trigger GC when HeapTop exceeds this */
   Size GCGrayQueue;            /* Offset to head of gray object queue */
   struct MLuaGCRef *GCRefHead; /* Head of C-side GCRef list */
+  U32 GCCycleCount;            /* Completed collections; lets callers detect
+                                  that a GC ran across a call boundary */
 
   /* Expression/Operand Stack */
   MLuaValue *EvalStack; /* Evaluation stack base */

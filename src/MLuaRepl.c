@@ -565,6 +565,7 @@ int main(int argc, char **argv) {
            (unsigned long long)L->ArgsCount);
     printf("Strings:      %llu\n", (unsigned long long)L->StringTableCount);
     printf("Light Funcs:  %llu\n", (unsigned long long)L->LightFuncCount);
+    printf("GC Cycles:    %lu\n", (unsigned long)L->GCCycleCount);
   }
 
 #if MLUA_PROFILE_OPS

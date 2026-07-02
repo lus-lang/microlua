@@ -43,9 +43,16 @@ Size MLuaNextGCThreshold(MLuaState *L, Size used) {
     threshold = ceiling;
   }
   if (threshold <= used) {
-    /* Live data already sits above the ceiling: collect again after a
-     * small batch of allocations rather than on every instruction. */
-    threshold = used + 256;
+    /* Live data already sits above the ceiling: the reserve cannot be
+     * kept. Hand out half of whatever room remains before the next
+     * collection so consecutive collections amortize geometrically; a
+     * fixed small batch here means a full mark-compact every few
+     * allocations for as long as the heap stays this full. */
+    Size batch = (L->HeapSize - used) / 2;
+    if (batch < 256) {
+      batch = 256;
+    }
+    threshold = used + batch;
   }
   return threshold;
 }

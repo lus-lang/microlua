@@ -803,6 +803,8 @@ void MLuaGCCollect(MLuaState *L) {
     return;
   }
 
+  L->GCCycleCount++;
+
   L->GCPhase = GC_PHASE_MARK;
 
 GC_TRACE("[gc] mark (top=%lu)\n", (unsigned long)L->HeapTop);
