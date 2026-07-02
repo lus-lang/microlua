@@ -24,6 +24,19 @@ static const char *GetStrArg(MLuaState *L, int idx, Size *len) {
   return MLuaStringData(v);
 }
 
+/*
+ * Push a built string result, or fail the C call when its creation failed
+ * (MLuaStringNew sets ErrorMsg and returns nil on allocation failure; a
+ * bare push of that nil would report success with a wrong value).
+ */
+static int PushBuiltString(MLuaState *L, MLuaValue v) {
+  if (IsNil(v)) {
+    return -1;
+  }
+  MLuaPush(L, v);
+  return 1;
+}
+
 /* ========================================================================== */
 /* string.byte                                                                */
 /* ========================================================================== */
@@ -117,8 +130,7 @@ static int StringChar(MLuaState *L) {
     pos += MLuaUTF8Encode(cp, buf + pos);
   }
 
-  MLuaPush(L, MLuaStringNew(L, buf, pos));
-  return 1;
+  return PushBuiltString(L, MLuaStringNew(L, buf, pos));
 }
 
 /* ========================================================================== */
@@ -146,8 +158,7 @@ static int StringDump(MLuaState *L) {
   }
 
   MLuaDumpFunction(L, func, buf, size);
-  MLuaPush(L, MLuaStringNew(L, buf, size));
-  return 1;
+  return PushBuiltString(L, MLuaStringNew(L, buf, size));
 }
 #endif /* MLUA_ENABLE_DUMP */
 
@@ -447,8 +458,12 @@ static int StringFind(MLuaState *L) {
       MLuaPush(L, MakeInt((I32)(init + (end - (s + init - 1)) - 1)));
       /* Push captures */
       for (i = 0; i < (Size)ms.NumCaptures; i++) {
-        MLuaPush(L, MLuaStringNew(L, ms.CapStarts[i],
-                                  (Size)(ms.CapEnds[i] - ms.CapStarts[i])));
+        MLuaValue cap = MLuaStringNew(L, ms.CapStarts[i],
+                                      (Size)(ms.CapEnds[i] - ms.CapStarts[i]));
+        if (IsNil(cap)) {
+          return -1;
+        }
+        MLuaPush(L, cap);
       }
       return 2 + ms.NumCaptures;
     }
@@ -473,8 +488,12 @@ static int StringFind(MLuaState *L) {
       MLuaPush(L, MakeInt((I32)(i + 1 + (end - (s + i)) - 1)));
       /* Push captures */
       for (j = 0; j < (Size)ms.NumCaptures; j++) {
-        MLuaPush(L, MLuaStringNew(L, ms.CapStarts[j],
-                                  (Size)(ms.CapEnds[j] - ms.CapStarts[j])));
+        MLuaValue cap = MLuaStringNew(L, ms.CapStarts[j],
+                                      (Size)(ms.CapEnds[j] - ms.CapStarts[j]));
+        if (IsNil(cap)) {
+          return -1;
+        }
+        MLuaPush(L, cap);
       }
       return 2 + ms.NumCaptures;
     }
@@ -508,8 +527,7 @@ static int StringFormat(MLuaState *L) {
   }
 
   Size len = MLuaFormat(L, fmt, fmtlen, args, nargs, buf, sizeof(buf));
-  MLuaPush(L, MLuaStringNew(L, buf, len));
-  return 1;
+  return PushBuiltString(L, MLuaStringNew(L, buf, len));
 }
 
 /* ========================================================================== */
@@ -563,8 +581,7 @@ static int StringLower(MLuaState *L) {
     }
   }
 
-  MLuaPush(L, MLuaStringNew(L, buf, len));
-  return 1;
+  return PushBuiltString(L, MLuaStringNew(L, buf, len));
 }
 
 /* ========================================================================== */
@@ -618,8 +635,12 @@ static int StringMatch(MLuaState *L) {
       if (ms.NumCaptures > 0) {
         /* Return captures */
         for (i = 0; i < (Size)ms.NumCaptures; i++) {
-          MLuaPush(L, MLuaStringNew(L, ms.CapStarts[i],
-                                    (Size)(ms.CapEnds[i] - ms.CapStarts[i])));
+          MLuaValue cap = MLuaStringNew(L, ms.CapStarts[i],
+                                        (Size)(ms.CapEnds[i] - ms.CapStarts[i]));
+          if (IsNil(cap)) {
+            return -1;
+          }
+          MLuaPush(L, cap);
         }
         return ms.NumCaptures;
       } else {
@@ -649,14 +670,17 @@ static int StringMatch(MLuaState *L) {
         /* Return captures */
         Size j;
         for (j = 0; j < (Size)ms.NumCaptures; j++) {
-          MLuaPush(L, MLuaStringNew(L, ms.CapStarts[j],
-                                    (Size)(ms.CapEnds[j] - ms.CapStarts[j])));
+          MLuaValue cap = MLuaStringNew(L, ms.CapStarts[j],
+                                        (Size)(ms.CapEnds[j] - ms.CapStarts[j]));
+          if (IsNil(cap)) {
+            return -1;
+          }
+          MLuaPush(L, cap);
         }
         return ms.NumCaptures;
       } else {
         /* Return whole match */
-        MLuaPush(L, MLuaStringNew(L, s + i, (Size)(end - (s + i))));
-        return 1;
+        return PushBuiltString(L, MLuaStringNew(L, s + i, (Size)(end - (s + i))));
       }
     }
   }
@@ -786,8 +810,7 @@ static int StringPack(MLuaState *L) {
     }
   }
 
-  MLuaPush(L, MLuaStringNew(L, buf, pos));
-  return 1;
+  return PushBuiltString(L, MLuaStringNew(L, buf, pos));
 }
 
 /* ========================================================================== */
@@ -897,8 +920,7 @@ static int StringRep(MLuaState *L) {
     bufpos += len;
   }
 
-  MLuaPush(L, MLuaStringNew(L, buf, bufpos));
-  return 1;
+  return PushBuiltString(L, MLuaStringNew(L, buf, bufpos));
 }
 
 /* ========================================================================== */
@@ -940,8 +962,7 @@ static int StringReverse(MLuaState *L) {
     p += consumed;
   }
 
-  MLuaPush(L, MLuaStringNew(L, buf + out, len - out));
-  return 1;
+  return PushBuiltString(L, MLuaStringNew(L, buf + out, len - out));
 }
 
 /* ========================================================================== */
@@ -998,7 +1019,7 @@ static int StringSub(MLuaState *L) {
       byteStart = MLuaUTF8Offset(s, len, (Size)(i - 1));
       byteEnd = MLuaUTF8Offset(s, len, (Size)j);
     }
-    MLuaPush(L, MLuaStringNew(L, s + byteStart, byteEnd - byteStart));
+    return PushBuiltString(L, MLuaStringNew(L, s + byteStart, byteEnd - byteStart));
   }
   return 1;
 }
@@ -1114,7 +1135,11 @@ static int StringUnpack(MLuaState *L) {
         fi++;
       }
       if (n > 0 && n <= datalen - pos) {
-        MLuaPush(L, MLuaStringNew(L, data + pos, n));
+        MLuaValue str = MLuaStringNew(L, data + pos, n);
+        if (IsNil(str)) {
+          return -1;
+        }
+        MLuaPush(L, str);
         pos += n;
         count++;
       }
@@ -1124,7 +1149,11 @@ static int StringUnpack(MLuaState *L) {
       Size start = pos;
       while (pos < datalen && data[pos] != '\0')
         pos++;
-      MLuaPush(L, MLuaStringNew(L, data + start, pos - start));
+      MLuaValue str = MLuaStringNew(L, data + start, pos - start);
+      if (IsNil(str)) {
+        return -1;
+      }
+      MLuaPush(L, str);
       if (pos < datalen)
         pos++; /* Skip null */
       count++;
@@ -1179,8 +1208,7 @@ static int StringUpper(MLuaState *L) {
     }
   }
 
-  MLuaPush(L, MLuaStringNew(L, buf, len));
-  return 1;
+  return PushBuiltString(L, MLuaStringNew(L, buf, len));
 }
 
 /* ========================================================================== */

@@ -113,7 +113,10 @@ MLuaValue MLuaMakeIntSafe(MLuaState *L, I32 value) {
   {
     MLuaGCHeader *gch = MLuaAllocObject(L, OBJTYPE_INT, sizeof(I32));
     if (!gch) {
-      return MakeInt(0); /* Allocation failed: match the heap-number fallback. */
+      /* Nil sentinel + ErrorMsg so the VM raises instead of computing with
+       * a silently wrong value. */
+      L->ErrorMsg = "out of memory";
+      return MLUA_NIL;
     }
     MLUA_INTBOX(gch)->Value = value;
     return MakePtr(gch);
@@ -284,7 +287,8 @@ MLuaValue MLuaMakeNumber(MLuaState *L, double n) {
     MLuaGCHeader *gch = MLuaAllocObject(L, OBJTYPE_NUMBER, sizeof(MLUA_FLOAT));
     MLuaNumber *num;
     if (!gch) {
-      return MakeInt(0); /* Fallback */
+      L->ErrorMsg = "out of memory";
+      return MLUA_NIL;
     }
     num = MLUA_NUMBER(gch);
     num->Value = (MLUA_FLOAT)n;
@@ -301,7 +305,8 @@ MLuaValue MLuaMakeFloat(MLuaState *L, double n) {
   MLuaGCHeader *gch = MLuaAllocObject(L, OBJTYPE_NUMBER, sizeof(MLUA_FLOAT));
   MLuaNumber *num;
   if (!gch) {
-    return MakeInt(0);
+    L->ErrorMsg = "out of memory";
+    return MLUA_NIL;
   }
   num = MLUA_NUMBER(gch);
   num->Value = (MLUA_FLOAT)n;

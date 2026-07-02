@@ -515,6 +515,10 @@ MLuaValue MLuaConcat(MLuaState *L, int count) {
   /* Allocate buffer */
   buffer = (U8 *)MLuaAlloc(L, totalLen + 1);
   if (!buffer) {
+    /* The nil sentinel only raises when ErrorMsg is set; a bare nil would
+     * flow onward as a value (e.g. silently deleting the target of
+     * `t[#t+1] = a .. b`). */
+    L->ErrorMsg = "out of memory";
     return MLUA_NIL;
   }
 

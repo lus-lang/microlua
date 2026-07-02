@@ -72,6 +72,14 @@ Bool MLuaStringTableInit(MLuaState *L) {
   return TRUE;
 }
 
+/*
+ * Probe for `str`. Returns the slot holding it on a hit (callers detect a
+ * hit with IsPtr(*slot)), or the best insert slot on a miss: the first
+ * MLUA_FALSE tombstone passed during the probe if any, else the empty slot
+ * that ended it. Reusing tombstones keeps probe chains from growing under
+ * string churn (the GC tombstones dead entries in place; only a rebuild
+ * clears them).
+ */
 static MLuaValue *StringTableFind(MLuaState *L, const char *str, Size len,
                                   U32 hash) {
   Size index;
@@ -80,6 +88,7 @@ static MLuaValue *StringTableFind(MLuaState *L, const char *str, Size len,
   MLuaGCHeader *gch;
   MLuaStringHeader *sh;
   const char *existingStr;
+  MLuaValue *tombstone = NULL;
 
   if (L->StringTableCap == 0) {
     return NULL;
@@ -92,12 +101,16 @@ static MLuaValue *StringTableFind(MLuaState *L, const char *str, Size len,
     v = L->StringTable[slot];
 
     if (IsNil(v)) {
-      /* Empty slot - string not found, but could insert here */
-      return &L->StringTable[slot];
+      /* Empty slot - string not found; insert into a passed tombstone
+       * when one exists (shortens future probes of this chain) */
+      return tombstone ? tombstone : &L->StringTable[slot];
     }
 
     if (!IsPtr(v)) {
-      continue; /* Shouldn't happen, but skip */
+      if (!tombstone) {
+        tombstone = &L->StringTable[slot];
+      }
+      continue; /* Tombstoned entry: keep probing */
     }
 
     /* Check if this is the string we're looking for */
@@ -113,7 +126,9 @@ static MLuaValue *StringTableFind(MLuaState *L, const char *str, Size len,
     }
   }
 
-  return NULL; /* Table full? Shouldn't happen with proper resizing */
+  /* No empty slot left (entries + tombstones fill the table): a tombstone
+   * is still a valid insert position */
+  return tombstone;
 }
 
 static Bool StringTableResize(MLuaState *L) {
@@ -185,9 +200,14 @@ static Bool StringTableInsert(MLuaState *L, MLuaValue strVal,
         StringTableFind(L, MLUA_STRDATA(sh), MLuaStrHeaderLen(sh), sh->Hash);
   }
 
-  if (hint && IsNil(*hint)) {
+  if (hint && !IsPtr(*hint)) {
+    /* A reused tombstone already counts toward the load factor (the count
+     * tracks occupied slots and only rebuilds reset it), so only a
+     * genuinely empty slot increments it. */
+    if (IsNil(*hint)) {
+      L->StringTableCount++;
+    }
     *hint = strVal;
-    L->StringTableCount++;
     return TRUE;
   }
 
@@ -286,12 +306,14 @@ MLuaValue MLuaStringNew(MLuaState *L, const char *str, Size len) {
   }
 
   if (len > (Size)MLUA_STR_LEN_MASK) {
+    L->ErrorMsg = "string too long";
     return MLUA_NIL;
   }
 
   /* Initialize string table if needed */
   if (L->StringTableCap == 0) {
     if (!MLuaStringTableInit(L)) {
+      L->ErrorMsg = "out of memory";
       return MLUA_NIL;
     }
   }
@@ -299,21 +321,26 @@ MLuaValue MLuaStringNew(MLuaState *L, const char *str, Size len) {
   /* Compute hash (and the ASCII flag, in the same pass) */
   hash = StringHashAscii(str, len, &ascii);
 
-  /* Check if string already exists */
+  /* Check if string already exists (a miss returns an insert slot, which
+   * may hold nil or a tombstone -- only IsPtr means a hit) */
   existing = StringTableFind(L, str, len, hash);
-  if (existing && !IsNil(*existing)) {
+  if (existing && IsPtr(*existing)) {
     return *existing; /* Return existing interned string */
   }
 
   /* Allocate new string */
   headerSize = sizeof(MLuaStringHeader);
   if (len > (Size)-1 - headerSize - 1) {
+    L->ErrorMsg = "string too long";
     return MLUA_NIL;
   }
   totalDataSize = headerSize + len + 1; /* +1 for null terminator */
 
   gch = MLuaAllocObject(L, OBJTYPE_STRING, totalDataSize);
   if (!gch) {
+    /* Callers propagate the nil sentinel; without ErrorMsg it would pass
+     * VM_CHECK_NIL and flow onward as an ordinary nil value. */
+    L->ErrorMsg = "out of memory";
     return MLUA_NIL;
   }
 
@@ -494,6 +521,7 @@ MLuaValue MLuaStringConcat(MLuaState *L, MLuaValue a, MLuaValue b) {
   /* Allocate temporary buffer on heap for concatenation */
   buf = (char *)MLuaAlloc(L, totalLen + 1);
   if (!buf) {
+    L->ErrorMsg = "out of memory";
     return MLUA_NIL;
   }
 
@@ -538,11 +566,13 @@ MLuaValue MLuaStringConcatMany(MLuaState *L, const MLuaValue *vals, int count) {
   }
 
   if (totalLen > (Size)MLUA_STR_LEN_MASK) {
+    L->ErrorMsg = "string too long";
     return MLUA_NIL;
   }
 
   if (L->StringTableCap == 0) {
     if (!MLuaStringTableInit(L)) {
+      L->ErrorMsg = "out of memory";
       return MLUA_NIL;
     }
   }
@@ -558,6 +588,7 @@ MLuaValue MLuaStringConcatMany(MLuaState *L, const MLuaValue *vals, int count) {
   gch = MLuaAllocObject(L, OBJTYPE_STRING,
                         sizeof(MLuaStringHeader) + totalLen + 1);
   if (!gch) {
+    L->ErrorMsg = "out of memory";
     return MLUA_NIL;
   }
   sh = MLUA_STRHEADER(gch);
@@ -616,7 +647,7 @@ MLuaValue MLuaStringConcatMany(MLuaState *L, const MLuaValue *vals, int count) {
    * "equal contents => identical pointer" invariant.
    */
   slot = StringTableFind(L, data, totalLen, sh->Hash);
-  if (slot && !IsNil(*slot)) {
+  if (slot && IsPtr(*slot)) {
     return *slot;
   }
   StringTableInsert(L, result, slot);

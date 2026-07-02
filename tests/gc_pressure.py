@@ -65,6 +65,29 @@ def main():
         "done\t20\t2002\t26893",
     )
 
+    # A workload whose live set genuinely exceeds the heap must fail with a
+    # raised "out of memory" error. Regression guarded: allocation failures
+    # inside string creation / concat returned a bare nil sentinel without
+    # ErrorMsg, which sailed past VM_CHECK_NIL as an ordinary value --
+    # t[#t+1] = <failed concat> became a silent no-op delete and the script
+    # printed success with elements missing.
+    oom_overcommit = (
+        "local keep = {} "
+        "for i = 1, 25 do keep[i] = string.rep('x', 2000) .. i end "
+        "print('done', #keep)"
+    )
+    result = run_lua(mlua, oom_overcommit, 65536)
+    if result.returncode == 0:
+        sys.stderr.write(
+            f"oom_overcommit: expected an error exit, got success with "
+            f"stdout {result.stdout!r}\n")
+        failed += 1
+    elif "out of memory" not in result.stderr:
+        sys.stderr.write(
+            f"oom_overcommit: expected 'out of memory' in stderr, got "
+            f"{result.stderr!r}\n")
+        failed += 1
+
     return 1 if failed else 0
 
 

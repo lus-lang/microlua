@@ -125,7 +125,13 @@ static int TableConcat(MLuaState *L) {
     }
   }
 
-  MLuaPush(L, MLuaStringNew(L, buf, bufpos));
+  {
+    MLuaValue res = MLuaStringNew(L, buf, bufpos);
+    if (IsNil(res)) {
+      return -1; /* ErrorMsg set by the failed creation */
+    }
+    MLuaPush(L, res);
+  }
   return 1;
 }
 
