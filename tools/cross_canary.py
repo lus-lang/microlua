@@ -81,7 +81,10 @@ def main():
 
     files, src, lib = core_sources(srcroot)
     inc = ["-I" + src, "-I" + lib]
-    base = [*extra, "-c", "-std=c99", "-ffreestanding",
+    # -S, not -c: it still runs full codegen (which is what catches width and
+    # representation bugs), and some backends (eZ80) cannot emit object files
+    # directly — their toolchains assemble the compiler's asm separately.
+    base = [*extra, "-S", "-std=c99", "-ffreestanding",
             "-DMLUA_ENABLE_COMPILER=1", *inc, "-o", os.devnull]
     for f in files:
         r = subprocess.run([cc, *base, f], capture_output=True, text=True)
