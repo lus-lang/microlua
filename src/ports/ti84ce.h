@@ -30,6 +30,10 @@
 /* The OS grants ~4 KB of C stack; bound parser recursion well inside it. */
 #define MLUA_PARSE_MAX_DEPTH 32
 
+/* ~12 trace lines fit the 10-line home screen; the frame cap is 48, so deep
+ * traces truncate rather than reserving 2 KB of scarce BSS. */
+#define MLUA_STACKTRACE_BUF_SIZE 512
+
 /* No way to store or send a dumped chunk from the calculator, and the full
  * build only barely fits user RAM - drop the bytecode serializer. */
 #define MLUA_ENABLE_DUMP 0

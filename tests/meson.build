@@ -72,6 +72,11 @@ if compiler_enabled
         suite: ['cli', 'gc'],
         timeout: 60,
     )
+
+    test('stack_trace', python_prog,
+        args: [files('stack_trace.py'), mlua_exe],
+        suite: 'cli',
+    )
 endif
 
 # Guard: the freestanding core must stay libc-free (see CLAUDE.md). The source

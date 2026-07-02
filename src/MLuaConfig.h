@@ -103,6 +103,14 @@
 #define MLUA_DEFAULT_GC_THRESHOLD_PERCENT 75
 #endif
 
+/* Static buffer for the stack trace built on runtime errors. The builder
+ * clamps every write to the buffer and NUL-terminates, so a smaller buffer
+ * just truncates deep traces (one frame line runs ~20-40 bytes). Permanent
+ * BSS, so RAM-tight ports may want far less than the default. */
+#ifndef MLUA_STACKTRACE_BUF_SIZE
+#define MLUA_STACKTRACE_BUF_SIZE 2048
+#endif
+
 #ifndef MLUA_ALIGNAS
 #if defined(__GNUC__) || defined(__clang__)
 #define MLUA_ALIGNAS(n) __attribute__((aligned(n)))

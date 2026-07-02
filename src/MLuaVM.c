@@ -193,8 +193,8 @@ void MLuaSetGlobal(MLuaState *L, const char *name, MLuaValue value) {
 
 #include <stdarg.h>
 
-/* Static buffer for stacktrace */
-static char StackTraceBuffer[2048];
+/* Static buffer for stacktrace (size is a port knob; writes are clamped) */
+static char StackTraceBuffer[MLUA_STACKTRACE_BUF_SIZE];
 
 /*
  * Append formatted pieces to the stack-trace buffer without libc.

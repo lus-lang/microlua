@@ -58,7 +58,12 @@ typedef struct {
  * It's stored as part of the runtime state.
  */
 
+/* Initial intern-table capacity (slots hold one MLuaValue each). Also the
+ * floor the post-GC shrink pass rehashes down to, so lowering it shrinks the
+ * table's resting size too. Must be a power of two. Port-overridable. */
+#ifndef MLUA_STRING_TABLE_INITIAL_SIZE
 #define MLUA_STRING_TABLE_INITIAL_SIZE 64
+#endif
 #define MLUA_STRING_TABLE_LOAD_FACTOR 70 /* Resize at 70% load */
 
 /* ========================================================================== */
