@@ -1,0 +1,67 @@
+Mandelbrot benchmark: identical computation to examples/mandel.lua, for a
+MicroLua vs TI-BASIC performance comparison.
+
+Phase 1 (timed): compute escape iterations for a 32x24 grid over
+re [-2.25, 0.75], im [-1.125, 1.125], max 24 iterations, into list L1
+(one entry per cell; the CE OS caps matrices at 400 elements, so a matrix
+cannot hold the grid - lists go up to 999).
+Phase 2 (timed): draw one pixel per inside-the-set cell from the list.
+Displays the inside count (binary64 reference: 202; TI's 14-digit BCD may
+differ by a cell or two at the boundary) and both elapsed times in seconds
+(startTmr resolution is 1 s). Pause after the draw keeps the fractal on
+screen; press enter for the numbers.
+
+Build with the TI-Toolkit tokenizer (note: '~' is the negation token,
+distinct from binary minus):
+    pip install tivars
+    python3 tools/make_basic.py examples/mandel.basic.txt MANDELB
+
+TI-BASIC pitfalls this program works around: X and Y are the system graphing
+variables and get clobbered when Pxl-On first displays the graph screen, so
+the loops use M/N; If bodies use full If/Then/End blocks; PlotsOff prevents a
+leftover stat plot from erroring against the resized L1.
+
+--- program source below this line ---
+FnOff
+PlotsOff
+AxesOff
+ClrDraw
+768->dim(L1)
+0->C
+startTmr->T
+For(M,1,24)
+For(N,1,32)
+~2.25+3(N-1)/32->A
+~1.125+2.25(M-1)/24->B
+0->U
+0->V
+0->I
+While I<24 and U^2+V^2<=4
+U^2-V^2+A->W
+2UV+B->V
+W->U
+I+1->I
+End
+I->L1(32(M-1)+N)
+If I=24
+Then
+C+1->C
+End
+End
+End
+checkTmr(T)->S
+startTmr->T
+For(M,1,24)
+For(N,1,32)
+If L1(32(M-1)+N)=24
+Then
+Pxl-On(M+69,N+115)
+End
+End
+End
+checkTmr(T)->D
+Pause
+DelVar L1
+Disp "INSIDE",C
+Disp "COMPUTE S",S
+Disp "DRAW S",D

@@ -1,0 +1,26 @@
+String benchmark: identical computation to bench_str.lua. Build a
+1000-char string by appending "AB" 500 times (TI-BASIC forbids empty
+strings, so it seeds with one "AB"), then scan it counting "A"s per
+character with sub(. Expected: LEN 1000, COUNT 500.
+
+Build: python3 tools/make_basic.py examples/bench_str.basic.txt BENCHSTR
+
+--- program source below this line ---
+startTmr->T
+"AB"->Str1
+For(K,2,500)
+Str1+"AB"->Str1
+End
+0->N
+For(K,1,1000)
+If sub(Str1,K,1)="A"
+Then
+N+1->N
+End
+End
+checkTmr(T)->T
+length(Str1)->L
+DelVar Str1
+Disp "LEN",L
+Disp "COUNT",N
+Disp "SECONDS",T

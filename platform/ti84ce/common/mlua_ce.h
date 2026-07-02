@@ -13,7 +13,7 @@
 /* One static buffer handed to MLuaNewConstrainedState. The OS grants a C
  * program ~60 KB of bss+heap; this leaves headroom for the frontend's own
  * statics and the toolchain runtime. */
-#define MLUA_CE_HEAP_SIZE (40 * 1024)
+#define MLUA_CE_HEAP_SIZE (48 * 1024)
 
 /* Longest script list the picker handles (each entry is an appvar name). */
 #define MLUA_CE_MAX_SCRIPTS 24

@@ -78,10 +78,38 @@ All light C functions (see `common/bindings_ce.c`):
 `examples/demo.lua` is a bouncing-ball gfx demo; `examples/smoke.lua` is the
 deterministic script used by the automated tests.
 
+## MicroLua vs TI-BASIC benchmarks
+
+`examples/mandel.*` and `examples/bench_*.{lua,basic.txt}` are matched
+pairs running identical computations with self-reported timings and
+integer-exact checksums (every run below produced the exact reference
+value). Measured in CEmu on OS 5.7; each language wins where its
+architecture says it should:
+
+| benchmark | workload | TI-BASIC | MicroLua | winner |
+|---|---|---|---|---|
+| `bench_int` | scalar integer loop, 20k iterations | 161 s | 20.9 s | **MicroLua 7.7x** |
+| `mandel` | 32x24 Mandelbrot floats, compute | 121 s | 72.0 s | **MicroLua 1.7x** |
+| `mandel` | draw phase (one pixel/cell) | 5 s | 3.7 s | **MicroLua 1.35x** |
+| `bench_list` | 60 element-wise passes over 500-element lists | 20 s | 35.5 s | **TI-BASIC 1.8x** |
+| `bench_str` | build 1000-char string by 500 appends + scan | 11 s | 103.6 s | **TI-BASIC 9.4x** |
+
+Why: MicroLua's inline 32-bit integers and compiled bytecode beat BASIC's
+BCD floats and token re-interpretation on scalar code; BASIC's `L1L2+L1` is
+one dispatch into vectorized OS assembly where Lua pays VM dispatch per
+element; and MicroLua's string interning re-hashes every intermediate
+concat (build strings in pieces where it matters) while BASIC just grows a
+byte buffer.
+
+Rebuild the BASIC side from source with `tools/make_basic.py` (needs
+`pip install tivars`); it normalizes ASCII digraphs to TI tokens and
+verifies the tokenization. The Lua side runs from source appvars via MLUA.
+
 ## Memory budget
 
-- Lua heap: one static 40 KB buffer (`MLUA_CE_HEAP_SIZE`) in the 60 KB
-  bss+heap region; a fresh state is created per script run.
+- Lua heap: one static 48 KB buffer (`MLUA_CE_HEAP_SIZE`) in the 60 KB
+  bss+heap region; a fresh state is created per script run. Tables are the
+  hungriest residents (~24 bytes retained per integer element).
 - Program image: decompressed into user RAM at launch; the full build is
   close to the practical ceiling (~140 KB with the VAT and OS overhead), so
   core additions to the `repl/` target should watch `objdump -h` sizes.

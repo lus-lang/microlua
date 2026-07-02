@@ -1,0 +1,18 @@
+Integer benchmark: identical computation to bench_int.lua. Tight scalar
+loop, integers only (LCG-style mixing; mod via int( since values < 2^24
+keep every step exact). Expected SUM: 40959312.
+
+Build: python3 tools/make_basic.py examples/bench_int.basic.txt BENCHINT
+
+--- program source below this line ---
+0->S
+1->Q
+startTmr->T
+For(K,1,20000)
+37Q+11->Q
+Q-4096int(Q/4096)->Q
+S+Q->S
+End
+checkTmr(T)->T
+Disp "SUM",S
+Disp "SECONDS",T
