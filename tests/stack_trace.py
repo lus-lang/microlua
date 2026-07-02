@@ -14,7 +14,8 @@ import re
 import subprocess
 import sys
 
-TRACE_LINE = re.compile(r"^\t.+:\d+: in (function|main chunk)$")
+# Line numbers print as digits, or `?` in MLUA_ENABLE_LINEINFO=0 builds.
+TRACE_LINE = re.compile(r"^\t.+:(\d+|\?): in (function|main chunk)$")
 
 
 def main():

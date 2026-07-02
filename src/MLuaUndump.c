@@ -257,7 +257,12 @@ static MLuaProto *ReadProto(BCReader *r) {
     Fail(r, "invalid bytecode source name");
     return NULL;
   }
-  p->LineDefined = (Size)ReadU32(r);
+  {
+    U32 lineDefined = ReadU32(r);
+    p->LineDefined = (MLUA_LINE_T)(lineDefined > (U32)MLUA_LINE_MAX
+                                       ? (U32)MLUA_LINE_MAX
+                                       : lineDefined);
+  }
 
   p->NumParams = ReadU8(r);
   p->NumLocals = ReadU8(r);
@@ -325,20 +330,44 @@ static MLuaProto *ReadProto(BCReader *r) {
   }
 
   count = ReadU32(r);
-  p->LineMapSize = (Size)count;
-  p->LineMapCap = p->LineMapSize;
-  if (!AllocArray(r, (void **)&p->LineMap, count, sizeof(p->LineMap[0]),
-                  "bytecode line map too large")) {
-    return NULL;
-  }
-  for (i = 0; i < count; i++) {
-    p->LineMap[i].PC = (Size)ReadU32(r);
-    p->LineMap[i].Line = (Size)ReadU32(r);
-    if (i > 0 && p->LineMap[i].PC < p->LineMap[i - 1].PC) {
-      Fail(r, "bytecode line map out of order");
+#if MLUA_ENABLE_LINEINFO
+  {
+    /* Keep the largest prefix whose PCs/lines fit MLUA_LINE_T; the rest of
+     * the section is consumed but dropped, mirroring emit-side saturation. */
+    U32 prevPC = 0;
+    Size kept = 0;
+    Bool keepMore = TRUE;
+    if (!AllocArray(r, (void **)&p->LineMap, count, sizeof(p->LineMap[0]),
+                    "bytecode line map too large")) {
       return NULL;
     }
+    p->LineMapCap = (Size)count;
+    for (i = 0; i < count; i++) {
+      U32 pcVal = ReadU32(r);
+      U32 lineVal = ReadU32(r);
+      if (i > 0 && pcVal < prevPC) {
+        Fail(r, "bytecode line map out of order");
+        return NULL;
+      }
+      prevPC = pcVal;
+      if (pcVal > (U32)MLUA_LINE_MAX || lineVal > (U32)MLUA_LINE_MAX) {
+        keepMore = FALSE;
+      }
+      if (keepMore) {
+        p->LineMap[kept].PC = (MLUA_LINE_T)pcVal;
+        p->LineMap[kept].Line = (MLUA_LINE_T)lineVal;
+        kept++;
+      }
+    }
+    p->LineMapSize = kept;
   }
+#else
+  /* Line info disabled: consume the section without storing it. */
+  for (i = 0; i < count; i++) {
+    (void)ReadU32(r);
+    (void)ReadU32(r);
+  }
+#endif
 
   if (!ValidateCode(r, p)) {
     return NULL;

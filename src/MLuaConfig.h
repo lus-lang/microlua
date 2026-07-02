@@ -111,6 +111,26 @@
 #define MLUA_STACKTRACE_BUF_SIZE 2048
 #endif
 
+/* Line-number debug info.
+ *
+ * MLUA_ENABLE_LINEINFO 0 drops the per-function PC->line map entirely:
+ * protos lose the map fields, the parser stops recording lines, and the
+ * loader skips the (still present) line-map section of bytecode chunks.
+ * Runtime errors then report no line number and stack traces print `?`.
+ *
+ * MLUA_LINE_T narrows the in-RAM line-map entry fields (each entry is one
+ * PC plus one line of this type). The serialized format is fixed-width U32
+ * either way; emit and load saturate at MLUA_LINE_MAX, so functions whose
+ * code or line numbers outgrow a narrow type keep the map prefix and report
+ * the last recorded line beyond it. */
+#ifndef MLUA_ENABLE_LINEINFO
+#define MLUA_ENABLE_LINEINFO 1
+#endif
+#ifndef MLUA_LINE_T
+#define MLUA_LINE_T Size
+#endif
+#define MLUA_LINE_MAX ((Size)(MLUA_LINE_T)-1)
+
 #ifndef MLUA_ALIGNAS
 #if defined(__GNUC__) || defined(__clang__)
 #define MLUA_ALIGNAS(n) __attribute__((aligned(n)))

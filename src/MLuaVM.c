@@ -209,7 +209,15 @@ static char *TraceAppend(char *p, char *end, const char *s, Size len) {
 static char *TraceAppendLine(char *p, char *end, const char *src, Size srcLen,
                              Size line, const char *label) {
   char numBuf[24];
-  Size numLen = MLuaIntToStr((I64)line, numBuf);
+  Size numLen;
+
+  /* Line 0 means "unknown" (e.g. line info disabled by the port). */
+  if (line == 0) {
+    numBuf[0] = '?';
+    numLen = 1;
+  } else {
+    numLen = MLuaIntToStr((I64)line, numBuf);
+  }
 
   p = TraceAppend(p, end, "\t", 1);
   p = TraceAppend(p, end, src, srcLen);

@@ -412,7 +412,9 @@ void MLuaGetMemoryStats(MLuaState *L, MLuaMemoryStats *out) {
       out->ProtoConstantsBytes += proto->ConstantsCap * sizeof(MLuaValue);
       out->ProtoProtosBytes += proto->ProtosSize * sizeof(MLuaProto *);
       out->ProtoUpvaluesBytes += proto->UpvaluesSize * sizeof(MLuaUpvalDesc);
+#if MLUA_ENABLE_LINEINFO
       out->ProtoLineMapBytes += proto->LineMapCap * sizeof(proto->LineMap[0]);
+#endif
       break;
     }
     default:

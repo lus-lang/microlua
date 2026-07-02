@@ -136,11 +136,17 @@ static Size DumpProto(MLuaState *L, MLuaProto *proto, char *buf, Size pos,
     pos = DumpProto(L, proto->Protos[i], buf, pos, cap, endian);
   }
 
+  /* The line-map section is always present in the format; a build without
+   * line info dumps it empty. */
+#if MLUA_ENABLE_LINEINFO
   pos = DumpU32(buf, pos, cap, (U32)proto->LineMapSize, endian);
   for (i = 0; i < proto->LineMapSize; i++) {
     pos = DumpU32(buf, pos, cap, (U32)proto->LineMap[i].PC, endian);
     pos = DumpU32(buf, pos, cap, (U32)proto->LineMap[i].Line, endian);
   }
+#else
+  pos = DumpU32(buf, pos, cap, 0, endian);
+#endif
 
   return pos;
 }
@@ -149,7 +155,7 @@ static Bool ProtoFits(MLuaProto *proto) {
   Size i;
   if (!FitsU32(proto->LineDefined) || !FitsU32(proto->CodeSize) ||
       !FitsU32(proto->ConstantsSize) || !FitsU32(proto->UpvaluesSize) ||
-      !FitsU32(proto->ProtosSize) || !FitsU32(proto->LineMapSize)) {
+      !FitsU32(proto->ProtosSize)) {
     return FALSE;
   }
   if (IsAnyString(proto->Source) && !FitsU32(MLuaStringLen(proto->Source))) {
@@ -161,11 +167,16 @@ static Bool ProtoFits(MLuaProto *proto) {
       return FALSE;
     }
   }
+#if MLUA_ENABLE_LINEINFO
+  if (!FitsU32(proto->LineMapSize)) {
+    return FALSE;
+  }
   for (i = 0; i < proto->LineMapSize; i++) {
     if (!FitsU32(proto->LineMap[i].PC) || !FitsU32(proto->LineMap[i].Line)) {
       return FALSE;
     }
   }
+#endif
   for (i = 0; i < proto->ProtosSize; i++) {
     if (!ProtoFits(proto->Protos[i])) {
       return FALSE;

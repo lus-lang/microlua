@@ -184,20 +184,22 @@ struct MLuaProto {
   U8 MaxStackSize; /* Maximum stack depth needed */
 
   /* Debug info (optional, can be stripped) */
-  MLuaValue Source; /* Source file name */
-  Size LineDefined; /* Line where function starts */
+  MLuaValue Source;        /* Source file name */
+  MLUA_LINE_T LineDefined; /* Line where function starts */
 
+#if MLUA_ENABLE_LINEINFO
   /*
    * Line map: Array of (PC, Line) pairs for accurate line lookup.
    * Each entry marks "from PC onwards, we're at Line".
-   * Sorted by PC for binary search.
+   * Sorted by PC.
    */
   struct {
-    Size PC;
-    Size Line;
+    MLUA_LINE_T PC;
+    MLUA_LINE_T Line;
   } *LineMap;
   Size LineMapSize; /* Number of entries */
   Size LineMapCap;  /* Allocated capacity */
+#endif
 };
 
 /* Get prototype pointer from GC object data */

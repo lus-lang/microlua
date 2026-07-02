@@ -385,11 +385,11 @@ const char *MLuaOpName(MLuaOpCode op) {
 /* Track current line and add to LineMap */
 void MLuaEmitLine(MLuaFuncState *fs, Size line) {
   MLuaProto *p = fs->Proto;
-  Size currentPC = p->CodeSize; /* PC where next bytecode will be emitted */
 
   /* Set LineDefined on first call (function's starting line) */
   if (p->LineDefined == 0 && line > 0) {
-    p->LineDefined = line;
+    p->LineDefined =
+        (MLUA_LINE_T)(line > MLUA_LINE_MAX ? MLUA_LINE_MAX : line);
   }
 
   /* Skip if same line as last entry */
@@ -398,29 +398,42 @@ void MLuaEmitLine(MLuaFuncState *fs, Size line) {
   }
   fs->LastLine = line;
 
-  /* Grow LineMap if needed */
-  if (p->LineMapSize >= p->LineMapCap) {
-    Size newCap = (p->LineMapCap == 0) ? 8 : p->LineMapCap * 2;
-    Size newBytes = newCap * sizeof(p->LineMap[0]);
-    void *newMap = MLuaAlloc(fs->L, newBytes);
-    if (!newMap) {
-      return; /* Allocation failed, skip line info */
-    }
-    if (p->LineMap) {
-      MemCpy(newMap, p->LineMap, p->LineMapSize * sizeof(p->LineMap[0]));
-    }
-    p->LineMap = newMap;
-    p->LineMapCap = newCap;
-  }
+#if MLUA_ENABLE_LINEINFO
+  {
+    Size currentPC = p->CodeSize; /* PC where next bytecode is emitted */
 
-  /* Add entry */
-  p->LineMap[p->LineMapSize].PC = currentPC;
-  p->LineMap[p->LineMapSize].Line = line;
-  p->LineMapSize++;
+    /* Saturate: once the PC or line outgrows MLUA_LINE_T the map keeps its
+     * prefix and MLuaGetLine reports the last recorded line from there. */
+    if (currentPC > MLUA_LINE_MAX || line > MLUA_LINE_MAX) {
+      return;
+    }
+
+    /* Grow LineMap if needed */
+    if (p->LineMapSize >= p->LineMapCap) {
+      Size newCap = (p->LineMapCap == 0) ? 8 : p->LineMapCap * 2;
+      Size newBytes = newCap * sizeof(p->LineMap[0]);
+      void *newMap = MLuaAlloc(fs->L, newBytes);
+      if (!newMap) {
+        return; /* Allocation failed, skip line info */
+      }
+      if (p->LineMap) {
+        MemCpy(newMap, p->LineMap, p->LineMapSize * sizeof(p->LineMap[0]));
+      }
+      p->LineMap = newMap;
+      p->LineMapCap = newCap;
+    }
+
+    /* Add entry */
+    p->LineMap[p->LineMapSize].PC = (MLUA_LINE_T)currentPC;
+    p->LineMap[p->LineMapSize].Line = (MLUA_LINE_T)line;
+    p->LineMapSize++;
+  }
+#endif
 }
 
 /* Get line number for a given PC offset using LineMap */
 Size MLuaGetLine(MLuaProto *p, Size pc) {
+#if MLUA_ENABLE_LINEINFO
   Size line = p->LineDefined;
   Size i;
 
@@ -428,7 +441,7 @@ Size MLuaGetLine(MLuaProto *p, Size pc) {
   if (p->LineMap && p->LineMapSize > 0) {
     /* Linear search for last entry with PC <= queried pc */
     for (i = 0; i < p->LineMapSize; i++) {
-      if (p->LineMap[i].PC <= pc) {
+      if ((Size)p->LineMap[i].PC <= pc) {
         line = p->LineMap[i].Line;
       } else {
         break; /* Entries are sorted by PC, so we can stop */
@@ -437,4 +450,10 @@ Size MLuaGetLine(MLuaProto *p, Size pc) {
   }
 
   return line;
+#else
+  /* No line info in this build: 0 means "unknown" (traces print `?`). */
+  UNUSED(p);
+  UNUSED(pc);
+  return 0;
+#endif
 }

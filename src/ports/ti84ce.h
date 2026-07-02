@@ -34,6 +34,10 @@
  * traces truncate rather than reserving 2 KB of scarce BSS. */
 #define MLUA_STACKTRACE_BUF_SIZE 512
 
+/* Halve the per-function line-map RAM: calculator sources are short, and
+ * functions whose bytecode outgrows 64 KB could not fit RAM here anyway. */
+#define MLUA_LINE_T U16
+
 /* No way to store or send a dumped chunk from the calculator, and the full
  * build only barely fits user RAM - drop the bytecode serializer. */
 #define MLUA_ENABLE_DUMP 0
