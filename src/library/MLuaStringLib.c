@@ -1046,8 +1046,10 @@ static int StringUnpack(MLuaState *L) {
     case 'I': { /* 4-byte int */
       if (pos + 3 >= datalen)
         break;
-      U32 val = (U32)((U8)data[pos] | ((U8)data[pos + 1] << 8) |
-                      ((U8)data[pos + 2] << 16) | ((U8)data[pos + 3] << 24));
+      /* Shift in U32: (U8)x << 24 would promote to int, which may be
+       * narrower than 32 bits on some targets. */
+      U32 val = (U32)(U8)data[pos] | ((U32)(U8)data[pos + 1] << 8) |
+                ((U32)(U8)data[pos + 2] << 16) | ((U32)(U8)data[pos + 3] << 24);
       pos += 4;
       MLuaPush(L, MLuaMakeInt(L, (I32)val));
       count++;

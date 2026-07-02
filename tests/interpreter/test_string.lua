@@ -76,6 +76,20 @@ test.describe("string.pack/unpack", function()
         local size = string.packsize("bHI")
         test.expect(size).toBe(7) -- 1 + 2 + 4
     end)
+
+    test.it("round-trips 4-byte values with high bytes set", function()
+        -- Bytes >= 0x80 in the upper positions exercise the <<16/<<24
+        -- reassembly paths, which must not depend on the width of int.
+        local function rt(fmt, v)
+            local value = string.unpack(fmt, string.pack(fmt, v))
+            return value
+        end
+        test.expect(rt("I", 0x12345678)).toBe(305419896)
+        test.expect(rt("I", 8388608)).toBe(8388608)     -- 00 00 80 00
+        test.expect(rt("I", -2147483648)).toBe(-2147483648) -- 00 00 00 80
+        test.expect(rt("I", 2147483647)).toBe(2147483647)   -- FF FF FF 7F
+        test.expect(rt("i", -1)).toBe(-1)               -- FF FF FF FF
+    end)
 end)
 
 test.describe("string.sub", function()
