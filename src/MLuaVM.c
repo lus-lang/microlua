@@ -772,7 +772,9 @@ static void ReloadFrame(MLuaState *L, const U8 **pc, MLuaProto **proto,
  * MLuaTableGetSafe/MLuaTableSetSafe, whose entry points carry the same
  * fast path for every other caller.
  */
-static Bool TryArrayGetFast(MLuaValue tbl, MLuaValue key, MLuaValue *out) {
+static Bool TryArrayGetFast(MLuaState *L, MLuaValue tbl, MLuaValue key,
+                            MLuaValue *out) {
+  UNUSED(L);
   if (IsTable(tbl) && IsInlineInt(key)) {
     I32 i = GetInt(key);
     MLuaTableHeader *th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl));
@@ -1081,7 +1083,7 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       MLuaValue tbl = LOCAL_GET(slots >> 4);
       MLuaValue key = LOCAL_GET(slots & 0x0F);
       MLuaValue result;
-      if (TryArrayGetFast(tbl, key, &result)) {
+      if (TryArrayGetFast(L, tbl, key, &result)) {
         STACK_PUSH(result);
         VM_BREAK;
       }

@@ -30,9 +30,23 @@ typedef struct {
 
 #define MLUA_TABLE_INLINE_ARRAY_CAP 3
 #define MLUA_TABLE_INLINE_HASH_CAP 1
-#define MLUA_TABLE_NODE_COUNT_MASK 0x3FFFFFFFU
+#define MLUA_TABLE_NODE_COUNT_MASK 0x0FFFFFFFU
+#define MLUA_TABLE_ARRAY_KIND_SHIFT 28
+#define MLUA_TABLE_ARRAY_KIND_MASK (3U << MLUA_TABLE_ARRAY_KIND_SHIFT)
 #define MLUA_TABLE_ARRAY_INLINE 0x40000000U
 #define MLUA_TABLE_HASH_INLINE 0x80000000U
+
+/*
+ * Array-part representation kind (NodeState bits 28-29).
+ * ANY: generic MLuaValue slots; a fresh table that may still promote.
+ * NUM: raw MLUA_FLOAT elements (32-bit tagging path only, behind
+ *      MLUA_TABLE_NUM_ARRAYS); ArrayLen stays 0 so every generic fast path
+ *      falls through to the kind-aware slow path by construction.
+ * LOCKED: generic slots after a demotion; never promotes again.
+ */
+#define MLUA_TABLE_ARRAY_ANY 0U
+#define MLUA_TABLE_ARRAY_NUM 1U
+#define MLUA_TABLE_ARRAY_LOCKED 2U
 
 /* Table header (follows GC header) */
 typedef struct {
@@ -55,6 +69,16 @@ typedef struct {
 
 static inline Bool MLuaTableArrayIsInline(const MLuaTableHeader *th) {
   return (th->NodeState & MLUA_TABLE_ARRAY_INLINE) != 0;
+}
+
+static inline U32 MLuaTableArrayKind(const MLuaTableHeader *th) {
+  return (th->NodeState & MLUA_TABLE_ARRAY_KIND_MASK) >>
+         MLUA_TABLE_ARRAY_KIND_SHIFT;
+}
+
+static inline void MLuaTableSetArrayKind(MLuaTableHeader *th, U32 kind) {
+  th->NodeState = (th->NodeState & ~MLUA_TABLE_ARRAY_KIND_MASK) |
+                  (kind << MLUA_TABLE_ARRAY_KIND_SHIFT);
 }
 
 static inline Bool MLuaTableHashIsInline(const MLuaTableHeader *th) {
@@ -184,21 +208,27 @@ void MLuaTableSetForward(MLuaValue tbl, MLuaValue forward);
 MLuaValue MLuaTableGetForward(MLuaValue tbl);
 
 /*
- * Get raw value without following forward chain.
+ * Get raw value without following forward chain. Reading a typed (NUM)
+ * array element materializes a number value, which may allocate; on
+ * allocation failure returns MLUA_NIL with L->ErrorMsg set.
  */
-MLuaValue MLuaTableRawGet(MLuaValue tbl, MLuaValue key);
+MLuaValue MLuaTableRawGet(MLuaState *L, MLuaValue tbl, MLuaValue key);
 
 /*
  * Iterate over table (for pairs()).
  * Returns next key after 'key', or MLUA_NIL if done.
- * Sets *value to the value for the returned key.
+ * Sets *value to the value for the returned key. Typed (NUM) array
+ * elements materialize on read; on allocation failure returns MLUA_NIL
+ * with L->ErrorMsg set (callers must distinguish that from end-of-table).
  *
+ * @param L     Runtime state
  * @param tbl   Table value
  * @param key   Current key (MLUA_NIL to start)
  * @param value Pointer to receive value
  * @return      Next key or MLUA_NIL
  */
-MLuaValue MLuaTableNext(MLuaValue tbl, MLuaValue key, MLuaValue *value);
+MLuaValue MLuaTableNext(MLuaState *L, MLuaValue tbl, MLuaValue key,
+                        MLuaValue *value);
 
 /* ========================================================================== */
 /* Safe Table API (SPEC.ERRORS.md compliant)                                  */

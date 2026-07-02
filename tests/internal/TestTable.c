@@ -290,18 +290,18 @@ TEST(Iteration_Array) {
   ASSERT(MLuaTableAppend(L, tbl, MakeInt(20)));
 
   MLuaValue value;
-  MLuaValue key = MLuaTableNext(tbl, MLUA_NIL, &value);
+  MLuaValue key = MLuaTableNext(L, tbl, MLUA_NIL, &value);
 
   ASSERT(!IsNil(key));
   ASSERT_EQ(GetInt(key), 1);
   ASSERT_EQ(GetInt(value), 10);
 
-  key = MLuaTableNext(tbl, key, &value);
+  key = MLuaTableNext(L, tbl, key, &value);
   ASSERT(!IsNil(key));
   ASSERT_EQ(GetInt(key), 2);
   ASSERT_EQ(GetInt(value), 20);
 
-  key = MLuaTableNext(tbl, key, &value);
+  key = MLuaTableNext(L, tbl, key, &value);
   ASSERT(IsNil(key)); /* End of iteration */
 }
 

@@ -104,8 +104,12 @@ static int BaseNext(MLuaState *L) {
   MLuaValue nextVal;
   MLuaValue nextKey;
 
-  nextKey = MLuaTableNext(tbl, key, &nextVal);
+  L->ErrorMsg = NULL;
+  nextKey = MLuaTableNext(L, tbl, key, &nextVal);
   if (IsNil(nextKey)) {
+    if (L->ErrorMsg) {
+      return -1; /* typed-element materialization failed (OOM) */
+    }
     MLuaPush(L, MLUA_NIL);
     return 1;
   }

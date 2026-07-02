@@ -279,7 +279,9 @@ static Bool HashGrow(MLuaState *L, MLuaTableHeader *th) {
     oldNodes = inlineCopy;
   }
 
-  if (oldCap > ((Size)-1 / 2)) {
+  /* The node count lives in NodeState's low bits; capacity (and therefore
+   * count) must stay within that mask. */
+  if (oldCap > ((Size)MLUA_TABLE_NODE_COUNT_MASK / 2)) {
     return FALSE;
   }
   newCap = (oldCap == 0) ? MLUA_TABLE_INITIAL_HASH_SIZE : oldCap * 2;
@@ -422,12 +424,13 @@ static Bool HashSet(MLuaState *L, MLuaTableHeader *th, MLuaValue key,
 /* Public Table API                                                           */
 /* ========================================================================== */
 
-MLuaValue MLuaTableRawGet(MLuaValue tbl, MLuaValue key) {
+MLuaValue MLuaTableRawGet(MLuaState *L, MLuaValue tbl, MLuaValue key) {
   MLuaGCHeader *gch;
   MLuaTableHeader *th;
   Size index;
   MLuaTableNode *node;
 
+  UNUSED(L);
   if (!IsTable(tbl)) {
     return MLUA_NIL;
   }
@@ -457,10 +460,8 @@ MLuaValue MLuaTableGet(MLuaState *L, MLuaValue tbl, MLuaValue key) {
   int depth = 0;
   const int MAX_DEPTH = 100; /* Prevent infinite loops */
 
-  UNUSED(L);
-
   while (!IsNil(current) && depth < MAX_DEPTH) {
-    MLuaValue v = MLuaTableRawGet(current, key);
+    MLuaValue v = MLuaTableRawGet(L, current, key);
     if (!IsNil(v)) {
       return v;
     }
@@ -564,7 +565,8 @@ MLuaValue MLuaTableGetForward(MLuaValue tbl) {
   return th->Forward;
 }
 
-MLuaValue MLuaTableNext(MLuaValue tbl, MLuaValue key, MLuaValue *value) {
+MLuaValue MLuaTableNext(MLuaState *L, MLuaValue tbl, MLuaValue key,
+                        MLuaValue *value) {
   MLuaGCHeader *gch;
   MLuaTableHeader *th;
   Size i;
@@ -572,6 +574,7 @@ MLuaValue MLuaTableNext(MLuaValue tbl, MLuaValue key, MLuaValue *value) {
   MLuaValue *array;
   MLuaTableNode *nodes;
 
+  UNUSED(L);
   if (!IsTable(tbl)) {
     return MLUA_NIL;
   }
