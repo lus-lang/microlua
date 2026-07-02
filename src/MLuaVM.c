@@ -893,6 +893,24 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       MLuaValue key = STACK_POP();
       MLuaValue tbl = STACK_POP();
       MLuaValue result;
+      /*
+       * Fast path: inline-int key hitting a live array slot -- the hot
+       * shape of every indexed loop. Preconditions mirror the safe chain
+       * exactly: a nil slot must fall through (MLuaTableRawGet consults
+       * the hash part and then the Forward chain for it), and boxed-int
+       * keys (32-bit) take the generic route.
+       */
+      if (IsTable(tbl) && IsInlineInt(key)) {
+        I32 i = GetInt(key);
+        MLuaTableHeader *th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl));
+        if (i >= 1 && (U32)i <= th->ArrayLen) {
+          MLuaValue v = MLuaTableArrayData(th)[i - 1];
+          if (!IsNil(v)) {
+            STACK_PUSH(v);
+            break;
+          }
+        }
+      }
       VM_TRY(MLuaTableGetSafe(L, tbl, key, &result));
       STACK_PUSH(result);
       break;
@@ -902,6 +920,19 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       MLuaValue val = STACK_POP();
       MLuaValue key = STACK_POP();
       MLuaValue tbl = STACK_TOP();
+      /*
+       * Fast path: non-nil store to an existing array slot. Appends
+       * (i == len+1), nil stores (length bookkeeping), growth, and hole
+       * errors all take the safe route.
+       */
+      if (IsTable(tbl) && IsInlineInt(key) && !IsNil(val)) {
+        I32 i = GetInt(key);
+        MLuaTableHeader *th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl));
+        if (i >= 1 && (U32)i <= th->ArrayLen) {
+          MLuaTableArrayData(th)[i - 1] = val;
+          break;
+        }
+      }
       VM_TRY(MLuaTableSetSafe(L, tbl, key, val));
       break;
     }
@@ -922,6 +953,11 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
     case OP_EQ: {
       MLuaValue b = STACK_POP();
       MLuaValue a = STACK_POP();
+      /* Inline ints are canonical: bitwise equality is value equality */
+      if (IsInlineInt(a) && IsInlineInt(b)) {
+        STACK_PUSH(a == b ? MLUA_TRUE : MLUA_FALSE);
+        break;
+      }
       STACK_PUSH(MLuaCompare(L, OP_EQ, a, b) ? MLUA_TRUE : MLUA_FALSE);
       break;
     }
@@ -929,6 +965,10 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
     case OP_NEQ: {
       MLuaValue b = STACK_POP();
       MLuaValue a = STACK_POP();
+      if (IsInlineInt(a) && IsInlineInt(b)) {
+        STACK_PUSH(a != b ? MLUA_TRUE : MLUA_FALSE);
+        break;
+      }
       STACK_PUSH(MLuaCompare(L, OP_NEQ, a, b) ? MLUA_TRUE : MLUA_FALSE);
       break;
     }
@@ -936,6 +976,10 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
     case OP_LT: {
       MLuaValue b = STACK_POP();
       MLuaValue a = STACK_POP();
+      if (IsInlineInt(a) && IsInlineInt(b)) {
+        STACK_PUSH(GetInt(a) < GetInt(b) ? MLUA_TRUE : MLUA_FALSE);
+        break;
+      }
       STACK_PUSH(MLuaCompare(L, OP_LT, a, b) ? MLUA_TRUE : MLUA_FALSE);
       break;
     }
@@ -943,13 +987,44 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
     case OP_LE: {
       MLuaValue b = STACK_POP();
       MLuaValue a = STACK_POP();
+      if (IsInlineInt(a) && IsInlineInt(b)) {
+        STACK_PUSH(GetInt(a) <= GetInt(b) ? MLUA_TRUE : MLUA_FALSE);
+        break;
+      }
       STACK_PUSH(MLuaCompare(L, OP_LE, a, b) ? MLUA_TRUE : MLUA_FALSE);
       break;
     }
 
     case OP_ADD:
     case OP_SUB:
-    case OP_MUL:
+    case OP_MUL: {
+      MLuaValue b = STACK_POP();
+      MLuaValue a = STACK_POP();
+      MLuaValue result;
+      /*
+       * Fast path: two inline ints whose result stays inline. The
+       * expressions match MLuaArith's integer path exactly; a result
+       * outside the inline range falls through so the generic path does
+       * the boxing (the range test folds to always-true on the 64-bit
+       * representation, where every I32 is inline).
+       */
+      if (IsInlineInt(a) && IsInlineInt(b)) {
+        I32 ia = GetInt(a);
+        I32 ib = GetInt(b);
+        I32 r = (op == OP_ADD)   ? ia + ib
+                : (op == OP_SUB) ? ia - ib
+                                 : ia * ib;
+        if (r >= MLUA_INLINE_INT_MIN && r <= MLUA_INLINE_INT_MAX) {
+          STACK_PUSH(MakeInt(r));
+          break;
+        }
+      }
+      result = MLuaArith(L, (MLuaOpCode)op, a, b);
+      VM_CHECK_NIL(result); /* Type error in arithmetic */
+      STACK_PUSH(result);
+      break;
+    }
+
     case OP_DIV:
     case OP_MOD:
     case OP_POW: {
@@ -1102,15 +1177,20 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       I32 step = MLuaGetIntVal(LOCAL_GET(base + 2));
       I32 bodyPC = GetInt(LOCAL_GET(base + 3)); /* Stored body target PC */
 
-      /* Increment index */
+      /* Increment index (one boxing per step; the same value feeds the
+       * local and, when the loop continues, the pushed index) */
       idx += step;
-      LOCAL_SET(base, MLuaMakeInt(L, idx));
+      {
+        MLuaValue nv = MLuaMakeInt(L, idx);
+        VM_CHECK_NIL(nv); /* 32-bit boxing can hit out-of-memory */
+        LOCAL_SET(base, nv);
 
-      /* Boundary check */
-      if ((step > 0 && idx <= limit) || (step < 0 && idx >= limit)) {
-        /* Continue loop - push new index, jump to body */
-        STACK_PUSH(MLuaMakeInt(L, idx));
-        pc = proto->Code + bodyPC;
+        /* Boundary check */
+        if ((step > 0 && idx <= limit) || (step < 0 && idx >= limit)) {
+          /* Continue loop - push new index, jump to body */
+          STACK_PUSH(nv);
+          pc = proto->Code + bodyPC;
+        }
       }
       /* Else: loop ends, fallthrough */
       break;

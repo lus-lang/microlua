@@ -153,4 +153,102 @@ test.describe("table holes", function()
     end)
 end)
 
+-- Indexed reads/writes with in-range integer keys take a direct array-slot
+-- path in the VM; these pin every precondition edge of that path against
+-- the generic route's semantics.
+test.describe("array-window access edges", function()
+    test.it("reads and writes at both ends of the array window", function()
+        local t = {}
+        for i = 1, 40 do t[i] = i * 3 end
+        test.expect(t[1]).toBe(3)
+        test.expect(t[40]).toBe(120)
+        t[1] = -1
+        t[40] = -40
+        test.expect(t[1]).toBe(-1)
+        test.expect(t[40]).toBe(-40)
+        test.expect(#t).toBe(40)
+    end)
+
+    test.it("append at len+1 still extends the length", function()
+        local t = { 10, 20 }
+        t[3] = 30
+        test.expect(#t).toBe(3)
+        test.expect(t[3]).toBe(30)
+    end)
+
+    test.it("reads past the length return nil", function()
+        local t = { 1, 2 }
+        test.expect(t[3]).toBeNil()
+        test.expect(t[100]).toBeNil()
+        test.expect(t[0]).toBeNil()
+        test.expect(t[-1]).toBeNil()
+    end)
+
+    test.it("nil store at the end shrinks, mid-array leaves a nil slot",
+            function()
+        local t = { 1, 2, 3 }
+        t[3] = nil
+        test.expect(#t).toBe(2)
+        local u = { 1, 2, 3, 4 }
+        u[2] = nil
+        test.expect(u[2]).toBeNil()
+        test.expect(u[3]).toBe(3)
+        test.expect(#u).toBe(4)
+    end)
+
+    test.it("nil mid-array slot delegates through the forward chain",
+            function()
+        local base = { 111, 222 }
+        local t = { 1, 2, 3 }
+        table.forward(t, base)
+        test.expect(t[2]).toBe(2)
+        t[2] = nil
+        -- the nil slot must fall through to the forward table, exactly
+        -- like the generic read path
+        test.expect(t[2]).toBe(222)
+    end)
+
+    test.it("float literal keys never touch the array part", function()
+        -- (Float keys go to the hash; their round-trip readability is
+        -- representation-dependent -- boxed floats hash by identity on
+        -- the 32-bit path -- so only the array part's isolation is
+        -- portable and pinned here.)
+        local t = { 7, 8, 9 }
+        t[2.0] = 80
+        test.expect(t[2]).toBe(8)
+        test.expect(#t).toBe(3)
+    end)
+
+    test.it("string keys on a table with an array part use the hash",
+            function()
+        local t = { 1, 2, 3 }
+        t.x = "side"
+        test.expect(t.x).toBe("side")
+        test.expect(t[1]).toBe(1)
+        test.expect(#t).toBe(3)
+    end)
+end)
+
+test.describe("integer arithmetic and comparison edges", function()
+    test.it("arithmetic near the 32-bit boundary stays exact", function()
+        local big = 2000000000
+        test.expect(big + 100000000).toBe(2100000000)
+        test.expect(-big - 100000000).toBe(-2100000000)
+        test.expect(1000000 * 2000).toBe(2000000000)
+    end)
+
+    test.it("comparisons across wide magnitudes", function()
+        test.expect(2000000000 > 1999999999).toBeTrue()
+        test.expect(-2000000000 < 2000000000).toBeTrue()
+        test.expect(268435456 == 268435456).toBeTrue()  -- above 2^28
+        test.expect(268435455 ~= 268435456).toBeTrue()
+    end)
+
+    test.it("int/float mixed comparison still crosses the divide", function()
+        test.expect(5 == 5.0).toBeTrue()
+        test.expect(5 < 5.5).toBeTrue()
+        test.expect(6.0 <= 6).toBeTrue()
+    end)
+end)
+
 assert(test.run())
