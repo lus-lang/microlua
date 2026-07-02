@@ -571,6 +571,34 @@ MLuaValue MLuaConcat(MLuaState *L, int count) {
 /* VM Interpreter Loop                                                        */
 /* ========================================================================== */
 
+#if MLUA_PROFILE_OPS
+static U32 OpProfileCounts[256];
+
+void MLuaDumpOpProfile(MLuaState *L) {
+  int i;
+  if (!L->OutputFunc) {
+    return;
+  }
+  for (i = 0; i < 256; i++) {
+    char buf[64];
+    Size pos = 0;
+    const char *name;
+    Size nameLen;
+    if (OpProfileCounts[i] == 0) {
+      continue;
+    }
+    name = MLuaOpName((MLuaOpCode)i);
+    nameLen = StrLen(name);
+    MemCpy(buf, name, nameLen);
+    pos = nameLen;
+    buf[pos++] = '\t';
+    pos += MLuaIntToStr((I64)OpProfileCounts[i], buf + pos);
+    buf[pos++] = '\n';
+    L->OutputFunc(L, MLUA_OUTPUT_PRINT, buf, pos);
+  }
+}
+#endif
+
 #define READ_BYTE() (*pc++)
 #define READ_U16() (pc += 2, (U16)((pc[-2]) | ((pc[-1]) << 8)))
 #define READ_I16() ((I16)READ_U16())
@@ -747,6 +775,10 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
     }
 
     op = READ_BYTE();
+
+#if MLUA_PROFILE_OPS
+    OpProfileCounts[op]++;
+#endif
 
     switch (op) {
     case OP_NOP:

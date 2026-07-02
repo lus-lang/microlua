@@ -21,6 +21,14 @@
 #define MLUA_ENABLE_DUMP 1
 #endif
 
+/* Opcode-frequency profiling: the VM counts every dispatched opcode and
+ * MLuaDumpOpProfile reports the nonzero counts through the installed output
+ * callback. Diagnostic tooling for interpreter performance work; off by
+ * default (the counter adds a memory write to every dispatch). */
+#ifndef MLUA_PROFILE_OPS
+#define MLUA_PROFILE_OPS 0
+#endif
+
 #ifndef MLUA_PTR_SIZE
 #if defined(__LP64__) || defined(_WIN64)
 #define MLUA_PTR_SIZE 8

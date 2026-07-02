@@ -567,5 +567,11 @@ int main(int argc, char **argv) {
     printf("Light Funcs:  %llu\n", (unsigned long long)L->LightFuncCount);
   }
 
+#if MLUA_PROFILE_OPS
+  printf("\n=== Opcode Profile ===\n");
+  fflush(stdout);
+  MLuaDumpOpProfile(L);
+#endif
+
   return 0;
 }
