@@ -689,6 +689,7 @@ static int StringMatch(MLuaState *L) {
   return 1;
 }
 
+#if MLUA_ENABLE_PACK
 /* ========================================================================== */
 /* string.pack                                                                */
 /* ========================================================================== */
@@ -883,6 +884,8 @@ static int StringPacksize(MLuaState *L) {
   return 1;
 }
 
+#endif /* MLUA_ENABLE_PACK */
+
 /* ========================================================================== */
 /* string.rep                                                                 */
 /* ========================================================================== */
@@ -1024,6 +1027,7 @@ static int StringSub(MLuaState *L) {
   return 1;
 }
 
+#if MLUA_ENABLE_PACK
 /* ========================================================================== */
 /* string.unpack                                                              */
 /* ========================================================================== */
@@ -1175,6 +1179,8 @@ static int StringUnpack(MLuaState *L) {
   return count + 1;
 }
 
+#endif /* MLUA_ENABLE_PACK */
+
 /* ========================================================================== */
 /* string.upper                                                               */
 /* ========================================================================== */
@@ -1223,9 +1229,14 @@ static const MLuaLibEntry StringLibEntries[] = {
     {"find", StringFind},
     {"format", StringFormat}, {"len", StringLen},
     {"lower", StringLower},   {"match", StringMatch},
+#if MLUA_ENABLE_PACK
     {"pack", StringPack},     {"packsize", StringPacksize},
+#endif
     {"rep", StringRep},       {"reverse", StringReverse},
-    {"sub", StringSub},       {"unpack", StringUnpack},
+    {"sub", StringSub},
+#if MLUA_ENABLE_PACK
+    {"unpack", StringUnpack},
+#endif
     {"upper", StringUpper},   {NULL, NULL}};
 
 void MLuaOpenString(MLuaState *L) {

@@ -20,6 +20,9 @@ in this directory), or `-Dport_header=path/to/board.h` — or define
 | `MLUA_FLOAT_BITS` | `64` | Bit width of `MLUA_FLOAT`. `< 64` enables binary64↔`MLUA_FLOAT` conversion at the bytecode boundary (numbers are always binary64 on disk). Only `32` is implemented. |
 | `MLUA_ENABLE_COMPILER` | `1` | `0` drops the lexer/parser; the runtime then loads bytecode only. Wired from Meson `-Dcompiler`. |
 | `MLUA_ENABLE_DUMP` | `1` | `0` drops the bytecode serializer (`MLuaDumpFunction`, `string.dump`) for ports with no way to store or transmit dumped chunks. Loading bytecode (`MLuaUndump`) is unaffected. |
+| `MLUA_ENABLE_PACK` | `1` | `0` drops `string.pack`/`packsize`/`unpack` (the binary format engine) for ports with no byte-oriented I/O to speak of; worth several KB of image on small targets. |
+| `MLUA_VM_COMPUTED_GOTO` | `0` | `1` dispatches through a GNU-C label table (one indirect jump per instruction, no bounds check). Needs GCC/Clang; costs ~1–2 KB of table + dispatch tails, so size-constrained ports should measure before opting in. |
+| `MLUA_PROFILE_OPS` | `0` | `1` counts every dispatched opcode; `MLuaDumpOpProfile` reports the counts through the output callback. Diagnostic builds only. |
 
 ## Arenas and GC (default constrained state)
 

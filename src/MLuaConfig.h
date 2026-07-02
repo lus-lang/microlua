@@ -21,6 +21,13 @@
 #define MLUA_ENABLE_DUMP 1
 #endif
 
+/* Binary (de)serialization helpers string.pack/packsize/unpack. Ports with
+ * no byte-oriented I/O to speak of can set this to 0 to drop the format
+ * engine from the image. */
+#ifndef MLUA_ENABLE_PACK
+#define MLUA_ENABLE_PACK 1
+#endif
+
 /* Opcode-frequency profiling: the VM counts every dispatched opcode and
  * MLuaDumpOpProfile reports the nonzero counts through the installed output
  * callback. Diagnostic tooling for interpreter performance work; off by
