@@ -564,6 +564,12 @@ static Bool HasLaterLocalRead(MLuaProto *proto, Size start, U8 slot) {
         proto->Code[pc + 1] == slot) {
       return TRUE;
     }
+    /* Fused indexing reads two locals through its packed nibbles */
+    if ((op == OP_GETTABLE_LL || op == OP_SETTABLE_LL) &&
+        ((proto->Code[pc + 1] >> 4) == slot ||
+         (proto->Code[pc + 1] & 0x0F) == slot)) {
+      return TRUE;
+    }
     pc += size;
   }
   return FALSE;
@@ -696,8 +702,7 @@ static void EmitGetVar(MLuaParser *p, const char *name, Size len) {
     break;
   default: {
     int k = MLuaAddStringK(fs, name, len);
-    MLuaEmitOpB(fs, OP_LOADK, (U8)k);
-    MLuaEmitOp(fs, OP_GETGLOBAL);
+    MLuaEmitOpB(fs, OP_GETGLOBAL_K, (U8)k);
     break;
   }
   }
@@ -991,6 +996,90 @@ typedef struct {
   U16 fieldConstIdx; /* For field access, the constant index */
 } AccessInfo;
 
+/*
+ * If the two most recently emitted instructions are exactly
+ * `OP_GETLOCAL x; OP_GETLOCAL y` with both slots <= 15, retract them and
+ * return TRUE with the nibble-packed operand in *slots. Used to fuse a
+ * pending t[k] access into one OP_GETTABLE_LL / OP_SETTABLE_LL.
+ *
+ * Retraction safety: only the last two instructions are removed, so every
+ * position recorded earlier (patch-stack jump positions, loop starts, line
+ * map entries, LastCallEnd) is at or before the retraction point. Forward
+ * jumps are patched with targets computed from live positions at patch
+ * time, and no patch can occur between the two GETLOCALs (a bare local
+ * read emits nothing else; and/or always place a jump or pop between
+ * loads), so no already-patched target can point inside the pair. A line
+ * map entry at the first GETLOCAL still lands on the boundary of whatever
+ * is emitted next.
+ */
+static Bool TryRetractLocalPair(MLuaFuncState *fs, U8 *slots) {
+  MLuaProto *proto = fs->Proto;
+  Size last = fs->LastInstrPos;
+  Size prev = fs->PrevInstrPos;
+  U8 t;
+  U8 k;
+
+  if (last == (Size)-1 || prev == (Size)-1) {
+    return FALSE;
+  }
+  /* The pair must be adjacent and must end the code buffer */
+  if (last != prev + 2 || proto->CodeSize != last + 2) {
+    return FALSE;
+  }
+  if (proto->Code[prev] != OP_GETLOCAL || proto->Code[last] != OP_GETLOCAL) {
+    return FALSE;
+  }
+  t = proto->Code[prev + 1];
+  k = proto->Code[last + 1];
+  if (t > 15 || k > 15) {
+    return FALSE;
+  }
+
+  proto->CodeSize = prev;
+  fs->LastInstrPos = (Size)-1;
+  fs->PrevInstrPos = (Size)-1;
+  *slots = (U8)((t << 4) | k);
+  return TRUE;
+}
+
+/*
+ * Reinsert a retracted `GETLOCAL t; GETLOCAL k` pair at `pos` (the start of
+ * the code emitted since the retraction). Fusion-repair path: safe because
+ * the block after `pos` is a single value expression, which cannot contain
+ * pending patches, break jumps, or line-map entries.
+ */
+static void InsertLocalPairAt(MLuaFuncState *fs, Size pos, U8 slots) {
+  U8 bytes[4];
+  bytes[0] = (U8)OP_GETLOCAL;
+  bytes[1] = (U8)(slots >> 4);
+  bytes[2] = (U8)OP_GETLOCAL;
+  bytes[3] = (U8)(slots & 0x0F);
+  MLuaInsertBytes(fs, pos, bytes, 4);
+}
+
+/*
+ * Complete a pending suffix access by emitting its table read (shared by
+ * every "complete pending access first" site). A t[k] access whose table
+ * and key were two just-emitted local loads becomes one OP_GETTABLE_LL.
+ */
+static void EmitPendingGet(MLuaParser *p, AccessInfo *info) {
+  MLuaFuncState *fs = p->FS;
+
+  if (info->accessType == 1) {
+    U8 slots;
+    if (TryRetractLocalPair(fs, &slots)) {
+      MLuaEmitOpB(fs, OP_GETTABLE_LL, slots);
+    } else {
+      MLuaEmitOp(fs, OP_GETTABLE);
+    }
+    StackPop(p, 1);
+  } else if (info->accessType == 2) {
+    MLuaEmitOpB(fs, OP_LOADK, (U8)info->fieldConstIdx);
+    MLuaEmitOp(fs, OP_GETTABLE);
+  }
+  info->accessType = 0;
+}
+
 static AccessInfo ParseSuffixForAssign(MLuaParser *p) {
   MLuaFuncState *fs = p->FS;
   AccessInfo info = {0, 0};
@@ -999,13 +1088,7 @@ static AccessInfo ParseSuffixForAssign(MLuaParser *p) {
     switch (p->Lex.Token.Type) {
     case TK_DOT: {
       /* .field - complete any pending access first */
-      if (info.accessType == 1) {
-        MLuaEmitOp(fs, OP_GETTABLE);
-        StackPop(p, 1);
-      } else if (info.accessType == 2) {
-        MLuaEmitOpB(fs, OP_LOADK, (U8)info.fieldConstIdx);
-        MLuaEmitOp(fs, OP_GETTABLE);
-      }
+      EmitPendingGet(p, &info);
 
       Advance(p);
       if (!Check(p, TK_NAME)) {
@@ -1022,13 +1105,7 @@ static AccessInfo ParseSuffixForAssign(MLuaParser *p) {
 
     case TK_LBRACKET: {
       /* [key] - complete any pending access first */
-      if (info.accessType == 1) {
-        MLuaEmitOp(fs, OP_GETTABLE);
-        StackPop(p, 1);
-      } else if (info.accessType == 2) {
-        MLuaEmitOpB(fs, OP_LOADK, (U8)info.fieldConstIdx);
-        MLuaEmitOp(fs, OP_GETTABLE);
-      }
+      EmitPendingGet(p, &info);
 
       Advance(p);
       ParseExpr(p);
@@ -1041,14 +1118,7 @@ static AccessInfo ParseSuffixForAssign(MLuaParser *p) {
 
     case TK_LPAREN: {
       /* Function call - complete pending access */
-      if (info.accessType == 1) {
-        MLuaEmitOp(fs, OP_GETTABLE);
-        StackPop(p, 1);
-      } else if (info.accessType == 2) {
-        MLuaEmitOpB(fs, OP_LOADK, (U8)info.fieldConstIdx);
-        MLuaEmitOp(fs, OP_GETTABLE);
-      }
-      info.accessType = 0;
+      EmitPendingGet(p, &info);
 
       int argCount = 0;
       Advance(p);
@@ -1073,14 +1143,7 @@ static AccessInfo ParseSuffixForAssign(MLuaParser *p) {
 
     case TK_STRING: {
       /* f"string" - complete pending access */
-      if (info.accessType == 1) {
-        MLuaEmitOp(fs, OP_GETTABLE);
-        StackPop(p, 1);
-      } else if (info.accessType == 2) {
-        MLuaEmitOpB(fs, OP_LOADK, (U8)info.fieldConstIdx);
-        MLuaEmitOp(fs, OP_GETTABLE);
-      }
-      info.accessType = 0;
+      EmitPendingGet(p, &info);
 
       int k = MLuaAddStringK(fs, p->Lex.Token.Value.String.Data,
                              p->Lex.Token.Value.String.Length);
@@ -1094,14 +1157,7 @@ static AccessInfo ParseSuffixForAssign(MLuaParser *p) {
 
     case TK_LBRACE: {
       /* f{table} - complete pending access */
-      if (info.accessType == 1) {
-        MLuaEmitOp(fs, OP_GETTABLE);
-        StackPop(p, 1);
-      } else if (info.accessType == 2) {
-        MLuaEmitOpB(fs, OP_LOADK, (U8)info.fieldConstIdx);
-        MLuaEmitOp(fs, OP_GETTABLE);
-      }
-      info.accessType = 0;
+      EmitPendingGet(p, &info);
 
       ParsePrefix(p);
       EmitCallOp(p, OP_CALL, 1);
@@ -1115,14 +1171,7 @@ static AccessInfo ParseSuffixForAssign(MLuaParser *p) {
       int argCount = 1; /* implicit self */
 
       /* Complete pending access so the receiver is at TOS */
-      if (info.accessType == 1) {
-        MLuaEmitOp(fs, OP_GETTABLE);
-        StackPop(p, 1);
-      } else if (info.accessType == 2) {
-        MLuaEmitOpB(fs, OP_LOADK, (U8)info.fieldConstIdx);
-        MLuaEmitOp(fs, OP_GETTABLE);
-      }
-      info.accessType = 0;
+      EmitPendingGet(p, &info);
 
       Advance(p);
       if (!Check(p, TK_NAME)) {
@@ -1188,13 +1237,7 @@ static void ParseSuffix(MLuaParser *p) {
   AccessInfo info = ParseSuffixForAssign(p);
 
   /* Complete any pending access - we're not assigning */
-  if (info.accessType == 1) {
-    MLuaEmitOp(p->FS, OP_GETTABLE);
-    StackPop(p, 1);
-  } else if (info.accessType == 2) {
-    MLuaEmitOpB(p->FS, OP_LOADK, (U8)info.fieldConstIdx);
-    MLuaEmitOp(p->FS, OP_GETTABLE);
-  }
+  EmitPendingGet(p, &info);
 }
 
 static void ParseSubExpr(MLuaParser *p, Precedence minPrec) {
@@ -1999,8 +2042,7 @@ static void ParseFunction(MLuaParser *p) {
      * (constructors rely on that), so drop it explicitly. */
     MLuaEmitOpB(fs, OP_LOADK, (U8)(U16)fieldK);
     MLuaEmitOp(fs, OP_SWAP);
-    MLuaEmitOp(fs, OP_SETTABLE);
-    MLuaEmitOpB(fs, OP_POP, 1);
+    MLuaEmitOp(fs, OP_SETTABLE_POP);
     StackPop(p, 2);
   } else {
     /* Simple global function */
@@ -2037,6 +2079,8 @@ static int ParseFuncBody(MLuaParser *p, Bool isMethod) {
   fs.StackLevel = 0;
   fs.MaxStack = 0;
   fs.MaxCapturedSlot = -1;
+  fs.LastInstrPos = (Size)-1;
+  fs.PrevInstrPos = (Size)-1;
 
   if (!fs.Proto) {
     Error(p, "out of memory for function");
@@ -2362,9 +2406,8 @@ static void ParseMultiAssign(MLuaParser *p, AccessInfo firstInfo,
       MLuaEmitOp(fs, OP_SETGLOBAL);
       break;
     case T_INDEX:
-      /* Stack: [..., t, k, v]; SETTABLE leaves t — drop it */
-      MLuaEmitOp(fs, OP_SETTABLE);
-      MLuaEmitOpB(fs, OP_POP, 1);
+      /* Stack: [..., t, k, v]; SETTABLE_POP also drops t */
+      MLuaEmitOp(fs, OP_SETTABLE_POP);
       StackPop(p, 2);
       break;
     }
@@ -2402,24 +2445,54 @@ static void ParseExprStat(MLuaParser *p) {
   if (Check(p, TK_ASSIGN)) {
     /* Assignment */
     if (accessInfo.accessType == 1) {
-      /* t[k] = v => Stack has: [t, k], consume =, parse value, emit SETTABLE.
-       * SETTABLE leaves t on the stack; drop it. */
+      /* t[k] = v => Stack has: [t, k], consume =, parse value, emit the
+       * store. When t and k are two just-emitted local loads the pair is
+       * retracted BEFORE the value is parsed (so nothing the value
+       * records can be invalidated) and one SETTABLE_LL does the store
+       * with neither crossing the stack.
+       *
+       * SETTABLE_LL reads its slots at store time, i.e. AFTER the value
+       * ran. That only diverges from the unfused order when the value
+       * can mutate them, which requires a closure capturing the slot
+       * (open upvalues write through to the Locals array). Slots already
+       * captured are refused up front; a capture that first appears
+       * inside the value is repaired by reinserting the two loads ahead
+       * of the value's code so both are read before it runs. */
+      U8 slots = 0;
+      Size valueStart;
+      Bool fused = TryRetractLocalPair(fs, &slots);
+      if (fused && (IsCapturedLocal(fs, slots >> 4) ||
+                    IsCapturedLocal(fs, slots & 0x0F))) {
+        MLuaEmitOpB(fs, OP_GETLOCAL, (U8)(slots >> 4));
+        MLuaEmitOpB(fs, OP_GETLOCAL, (U8)(slots & 0x0F));
+        fused = FALSE;
+      }
+      valueStart = MLuaCodePos(fs);
       Advance(p);
       ParseExpr(p);
       AdjustTo1(p);
-      MLuaEmitOp(fs, OP_SETTABLE);
-      MLuaEmitOpB(fs, OP_POP, 1);
+      if (fused && (IsCapturedLocal(fs, slots >> 4) ||
+                    IsCapturedLocal(fs, slots & 0x0F))) {
+        /* The value captured t or k: restore the read-before-value
+         * order by inserting the loads ahead of the value's code. */
+        InsertLocalPairAt(fs, valueStart, slots);
+        fused = FALSE;
+      }
+      if (fused) {
+        MLuaEmitOpB(fs, OP_SETTABLE_LL, slots);
+      } else {
+        MLuaEmitOp(fs, OP_SETTABLE_POP);
+      }
       StackPop(p, 3); /* Pop t, k, v */
     } else if (accessInfo.accessType == 2) {
-      /* t.field = v => Stack has: [t], consume =, parse value, emit SETTABLE.
-       * SETTABLE leaves t on the stack; drop it. */
+      /* t.field = v => Stack has: [t], consume =, parse value, emit the
+       * store (SETTABLE_POP also drops the table). */
       Advance(p);
       ParseExpr(p);
       AdjustTo1(p);
       MLuaEmitOpB(fs, OP_LOADK, (U8)accessInfo.fieldConstIdx);
       MLuaEmitOp(fs, OP_SWAP);
-      MLuaEmitOp(fs, OP_SETTABLE);
-      MLuaEmitOpB(fs, OP_POP, 1);
+      MLuaEmitOp(fs, OP_SETTABLE_POP);
       StackPop(p, 2); /* Pop t, v */
     } else if (name) {
       /* Simple name = value - ParseAssignment expects to see and consume = */
@@ -2433,13 +2506,7 @@ static void ParseExprStat(MLuaParser *p) {
     }
   } else {
     /* Expression statement (function call) - complete any pending access */
-    if (accessInfo.accessType == 1) {
-      MLuaEmitOp(fs, OP_GETTABLE);
-      StackPop(p, 1);
-    } else if (accessInfo.accessType == 2) {
-      MLuaEmitOpB(fs, OP_LOADK, (U8)accessInfo.fieldConstIdx);
-      MLuaEmitOp(fs, OP_GETTABLE);
-    }
+    EmitPendingGet(p, &accessInfo);
     /* Discard the statement's value(s): a trailing call may have produced
      * any number of results */
     if (EndsWithMultret(fs)) {
@@ -2552,6 +2619,8 @@ static MLuaProto *ParseOnce(MLuaState *L, const char *source, Size len,
   fs.StackLevel = 0;
   fs.MaxStack = 0;
   fs.MaxCapturedSlot = -1;
+  fs.LastInstrPos = (Size)-1;
+  fs.PrevInstrPos = (Size)-1;
 
   if (!fs.Proto) {
     *outError = "out of memory";

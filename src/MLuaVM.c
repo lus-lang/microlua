@@ -861,6 +861,14 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       break;
     }
 
+    case OP_GETGLOBAL_K: {
+      /* Fused LOADK B; GETGLOBAL */
+      U8 k = READ_BYTE();
+      MLuaValue val = MLuaTableGet(L, L->Globals, proto->Constants[k]);
+      STACK_PUSH(val);
+      break;
+    }
+
     case OP_POP: {
       U8 count = READ_BYTE();
       L->EvalTop -= count;
@@ -941,6 +949,64 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       MLuaValue val = STACK_POP();
       MLuaValue tbl = STACK_TOP();
       MLuaTableAppend(L, tbl, val);
+      break;
+    }
+
+    case OP_GETTABLE_LL: {
+      /* Fused GETLOCAL t; GETLOCAL k; GETTABLE. Operand: (t << 4) | k. */
+      U8 slots = READ_BYTE();
+      MLuaValue tbl = LOCAL_GET(slots >> 4);
+      MLuaValue key = LOCAL_GET(slots & 0x0F);
+      MLuaValue result;
+      if (IsTable(tbl) && IsInlineInt(key)) {
+        I32 i = GetInt(key);
+        MLuaTableHeader *th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl));
+        if (i >= 1 && (U32)i <= th->ArrayLen) {
+          MLuaValue v = MLuaTableArrayData(th)[i - 1];
+          if (!IsNil(v)) {
+            STACK_PUSH(v);
+            break;
+          }
+        }
+      }
+      VM_TRY(MLuaTableGetSafe(L, tbl, key, &result));
+      STACK_PUSH(result);
+      break;
+    }
+
+    case OP_SETTABLE_LL: {
+      /* Fused GETLOCAL t; GETLOCAL k; <value>; SETTABLE; POP 1: pops only
+       * the value, the table never crosses the stack. */
+      U8 slots = READ_BYTE();
+      MLuaValue val = STACK_POP();
+      MLuaValue tbl = LOCAL_GET(slots >> 4);
+      MLuaValue key = LOCAL_GET(slots & 0x0F);
+      if (IsTable(tbl) && IsInlineInt(key) && !IsNil(val)) {
+        I32 i = GetInt(key);
+        MLuaTableHeader *th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl));
+        if (i >= 1 && (U32)i <= th->ArrayLen) {
+          MLuaTableArrayData(th)[i - 1] = val;
+          break;
+        }
+      }
+      VM_TRY(MLuaTableSetSafe(L, tbl, key, val));
+      break;
+    }
+
+    case OP_SETTABLE_POP: {
+      /* SETTABLE that also drops the table (fuses the trailing POP 1) */
+      MLuaValue val = STACK_POP();
+      MLuaValue key = STACK_POP();
+      MLuaValue tbl = STACK_POP();
+      if (IsTable(tbl) && IsInlineInt(key) && !IsNil(val)) {
+        I32 i = GetInt(key);
+        MLuaTableHeader *th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl));
+        if (i >= 1 && (U32)i <= th->ArrayLen) {
+          MLuaTableArrayData(th)[i - 1] = val;
+          break;
+        }
+      }
+      VM_TRY(MLuaTableSetSafe(L, tbl, key, val));
       break;
     }
 

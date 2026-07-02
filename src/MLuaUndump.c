@@ -203,8 +203,17 @@ static Bool ValidateCode(BCReader *r, MLuaProto *p) {
       }
       break;
     case OP_LOADK:
+    case OP_GETGLOBAL_K:
       if ((Size)operand >= p->ConstantsSize) {
         Fail(r, "bytecode constant index out of range");
+        return FALSE;
+      }
+      break;
+    case OP_GETTABLE_LL:
+    case OP_SETTABLE_LL:
+      /* Both packed nibbles are local slots */
+      if ((operand >> 4) >= p->NumLocals || (operand & 0x0F) >= p->NumLocals) {
+        Fail(r, "bytecode local index out of range");
         return FALSE;
       }
       break;
