@@ -65,6 +65,12 @@ if compiler_enabled
         args: [files('security_regressions.py'), mlua_exe],
         suite: ['cli', 'security'],
     )
+
+    test('gc_pressure', python_prog,
+        args: [files('gc_pressure.py'), mlua_exe],
+        suite: ['cli', 'gc'],
+        timeout: 60,
+    )
 endif
 
 # Guard: the freestanding core must stay libc-free (see CLAUDE.md). The source
