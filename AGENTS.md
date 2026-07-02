@@ -20,11 +20,18 @@ ninja -C builddir
 ```
 
 - Port/build knobs live in `src/MLuaConfig.h`. Use Meson `-Dport=generic64`,
-  `generic32`, `cortex-m`, or `riscv32` for built-in presets, or
+  `generic32`, `cortex-m`, `riscv32`, or `ti84ce` for built-in presets, or
   `-Dport_header=path/to/header.h` to supply one board-specific header. That
   header may override pointer size, alignment, default stack/frame sizes, GC
   threshold, fixed-width type source, native float subtype/width, math hooks,
-  and `MLUA_ENABLE_COMPILER`.
+  `MLUA_PARSE_MAX_DEPTH`, `MLUA_ENABLE_COMPILER`, and `MLUA_ENABLE_DUMP`.
+- `platform/ti84ce/` is a complete board port (TI-84 Plus CE, eZ80: 24-bit
+  `int`/pointers, binary32 `double`), built with the external CE C toolchain
+  makefiles — not meson. Its `repl/` target is close to the calculator's RAM
+  ceiling; watch image size when adding core code. CE-side tests run via
+  CEmu's autotester (see `platform/ti84ce/README.md`); the `canary_ez80`
+  guard test compiles every core TU with `ez80-clang` when CEdev is
+  installed.
 - Source compilation is controlled by Meson `-Dcompiler=true|false`. When false,
   `libmicrolua.a` must not contain `MLuaLex`/`MLuaParse` symbols and callers must
   use `MLuaLoadBytecode` / `MLuaDoBytecode` or `MLuaLoadBuffer` / `MLuaDoBuffer`

@@ -122,3 +122,19 @@ test('canary_riscv32', python_prog,
            '-march=rv32imac', '-mabi=ilp32'],
     suite: 'guard',
 )
+# eZ80 (TI-84 Plus CE): 24-bit int/pointers, binary32 double. The port header
+# is required — without it MLUA_FLOAT stays double while the target double is
+# 4 bytes, and the float/bytecode boundary would be silently wrong. ez80-clang
+# ships without default include paths (the CE makefiles pass them), so derive
+# the freestanding header dir from the toolchain's own cedev-config.
+canary_ez80_args = []
+cedev_config = find_program('cedev-config', required: false)
+if cedev_config.found()
+    cedev_prefix = run_command(cedev_config, '--prefix', check: true).stdout().strip()
+    canary_ez80_args = ['-nostdinc', '-isystem', cedev_prefix / 'include']
+endif
+test('canary_ez80', python_prog,
+    args: [cross_canary, 'ez80-clang', cross_srcroot, '3', '3', '4',
+           '-DMLUA_PORT_HEADER="ports/ti84ce.h"'] + canary_ez80_args,
+    suite: 'guard',
+)
