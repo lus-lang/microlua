@@ -154,7 +154,6 @@ void MLuaGCMarkObject(MLuaState *L, MLuaGCHeader *obj) {
     MarkRaw(L, proto->Constants);
     MarkRaw(L, proto->Protos);
     MarkRaw(L, proto->Upvalues);
-    MarkRaw(L, proto->LineInfo);
     MarkRaw(L, proto->LineMap);
     MLuaGCMark(L, proto->Source);
     for (i = 0; i < proto->ConstantsSize; i++) {
@@ -575,7 +574,6 @@ static void UpdateReferences(MLuaState *L) {
         proto->Constants = (MLuaValue *)UpdateDataPtr(L, proto->Constants);
         proto->Protos = (MLuaProto **)UpdateDataPtr(L, proto->Protos);
         proto->Upvalues = (MLuaUpvalDesc *)UpdateDataPtr(L, proto->Upvalues);
-        proto->LineInfo = (U8 *)UpdateDataPtr(L, proto->LineInfo);
         proto->LineMap = UpdateDataPtr(L, proto->LineMap);
         break;
       }

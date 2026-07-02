@@ -37,7 +37,7 @@ ninja -C builddir
   use `MLuaLoadBytecode` / `MLuaDoBytecode` or `MLuaLoadBuffer` / `MLuaDoBuffer`
   with a bytecode buffer. `-o`, `-e`, the REPL, `load`, and `loadfile` are
   compiler-enabled workflows only.
-- MicroLua bytecode format v3 uses fixed-width serialized fields and an explicit
+- MicroLua bytecode uses fixed-width serialized fields and an explicit
   endianness byte. It is portable across supported endian/pointer-size targets
   with a compatible MicroLua bytecode version. Numeric constants are serialized
   as canonical IEEE-754 binary64 values and narrowed/widened at the boundary
@@ -198,7 +198,8 @@ size into `bench/RESULTS.md`. It auto-detects a local `lua5.5`/`lua` (verified `
 
 Debug and freestanding release suites are green locally, including internal C
 tests, interpreter suites, smoke tests, CLI bytecode output, security
-regressions, and the libc-free guard. Bytecode is at v4 (fused
+regressions, and the libc-free guard. Bytecode is at v5 (dead opcodes retired,
+line-info section dropped; v4 added the fused
 GETTABLE_LL/SETTABLE_LL/SETTABLE_POP/GETGLOBAL_K); older .mlu chunks must be
 recompiled. The TI-84 CE benchmarks now beat TI-BASIC on every workload
 (platform/ti84ce/README.md has the table).

@@ -33,19 +33,12 @@ typedef enum {
   OP_LOADFALSE = 0x03, /* 1B: → false     : Push false */
   OP_LOADINT = 0x04,   /* 2B: B → int     : Push signed 8-bit integer B */
   OP_LOADK = 0x05,     /* 2B: B → val     : Push constants[B] */
-  OP_LOADK_S = 0x06,   /* 1B: idx → val   : Pop idx, push constants[idx] */
 
-  /* ===== Locals (0x10-0x13) ===== */
+  /* ===== Locals (0x10-0x11) ===== */
   OP_GETLOCAL = 0x10,       /* 2B: B → val       : Push locals[B] */
   OP_SETLOCAL = 0x11,       /* 2B: B val →       : Pop to locals[B] */
-  OP_GETLOCAL_S = 0x12,     /* 1B: idx → val     : Pop idx, push locals[idx] */
-  OP_SETLOCAL_S = 0x13,     /* 1B: idx val →     : Pop idx and val, store */
   OP_CLEARLOCAL = 0x0E,     /* 2B: B →           : locals[B] = nil */
   OP_GETLOCAL_CLEAR = 0x0F, /* 2B: B → val       : Push and clear locals[B] */
-
-  /* ===== Arguments (0x14-0x15) ===== */
-  OP_GETARG = 0x14, /* 2B: B → val : Push args[B] */
-  OP_SETARG = 0x15, /* 2B: B val → : Pop to args[B] */
 
   /* ===== Upvalues (0x16-0x17) ===== */
   OP_GETUPVAL = 0x16, /* 2B: B → val : Push upvalue[B] */
@@ -99,19 +92,10 @@ typedef enum {
   OP_SUB = 0x41,  /* 1B: a b → res : a - b */
   OP_MUL = 0x42,  /* 1B: a b → res : a * b */
   OP_DIV = 0x43,  /* 1B: a b → res : a / b (float) */
-  OP_IDIV = 0x44, /* 1B: a b → res : a // b (int) */
   OP_MOD = 0x45,  /* 1B: a b → res : a % b */
   OP_POW = 0x46,  /* 1B: a b → res : a ^ b */
   OP_UNM = 0x47,  /* 1B: a → res   : -a */
   OP_LEN = 0x48,  /* 1B: a → int   : #a */
-
-  /* ===== Bitwise (0x50-0x55) ===== */
-  OP_BAND = 0x50, /* 1B: a b → res : a & b */
-  OP_BOR = 0x51,  /* 1B: a b → res : a | b */
-  OP_BXOR = 0x52, /* 1B: a b → res : a ~ b */
-  OP_SHL = 0x53,  /* 1B: a b → res : a << b */
-  OP_SHR = 0x54,  /* 1B: a b → res : a >> b */
-  OP_BNOT = 0x55, /* 1B: a → res   : ~a */
 
   /* ===== Control Flow (0x60-0x65) ===== */
   OP_JMP = 0x60,    /* 2B: B —         : PC += (I8)B */
@@ -202,13 +186,6 @@ struct MLuaProto {
   /* Debug info (optional, can be stripped) */
   MLuaValue Source; /* Source file name */
   Size LineDefined; /* Line where function starts */
-
-  /*
-   * Line info: Exp-Golomb encoded deltas (legacy, may be removed).
-   */
-  U8 *LineInfo;      /* Exp-Golomb encoded line deltas */
-  Size LineInfoSize; /* Number of bytes in LineInfo */
-  Size LineInfoCap;  /* Allocated capacity */
 
   /*
    * Line map: Array of (PC, Line) pairs for accurate line lookup.
@@ -389,25 +366,18 @@ Size MLuaCodePos(MLuaFuncState *fs);
 const char *MLuaOpName(MLuaOpCode op);
 
 /* ========================================================================== */
-/* Line Number Info (Exp-Golomb Compression)                                  */
+/* Line Number Info                                                           */
 /* ========================================================================== */
 
 /*
- * Emit a line number delta using Exp-Golomb encoding.
- * Delta is signed (line can go backward during compilation).
- */
-void MLuaEmitLineDelta(MLuaFuncState *fs, int delta);
-
-/*
  * Track current source line during compilation.
- * Emits line delta if line changed since last call.
+ * Appends a LineMap entry if line changed since last call.
  * Call this before emitting bytecode to record line info.
  */
 void MLuaEmitLine(MLuaFuncState *fs, Size line);
 
 /*
- * Get the source line number for a given PC offset.
- * Decodes the Exp-Golomb compressed line info.
+ * Get the source line number for a given PC offset using the LineMap.
  */
 Size MLuaGetLine(MLuaProto *p, Size pc);
 

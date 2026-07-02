@@ -325,19 +325,6 @@ static MLuaProto *ReadProto(BCReader *r) {
   }
 
   count = ReadU32(r);
-  if (count > BC_MAX_CODE_SIZE) {
-    Fail(r, "bytecode line info too large");
-    return NULL;
-  }
-  p->LineInfoSize = (Size)count;
-  p->LineInfoCap = p->LineInfoSize;
-  if (!AllocArray(r, (void **)&p->LineInfo, count, sizeof(U8),
-                  "bytecode line info too large") ||
-      !ReadBytes(r, p->LineInfo, p->LineInfoSize)) {
-    return NULL;
-  }
-
-  count = ReadU32(r);
   p->LineMapSize = (Size)count;
   p->LineMapCap = p->LineMapSize;
   if (!AllocArray(r, (void **)&p->LineMap, count, sizeof(p->LineMap[0]),

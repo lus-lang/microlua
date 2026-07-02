@@ -325,8 +325,6 @@ MLuaValue MLuaArith(MLuaState *L, MLuaOpCode op, MLuaValue a, MLuaValue b) {
       return MLuaMakeInt(L, ia - ib);
     case OP_MUL:
       return MLuaMakeInt(L, ia * ib);
-    case OP_IDIV:
-      return ib != 0 ? MLuaMakeInt(L, ia / ib) : MakeInt(0);
     case OP_MOD:
       return ib != 0 ? MLuaMakeInt(L, ia % ib) : MakeInt(0);
     case OP_UNM:
@@ -349,8 +347,6 @@ MLuaValue MLuaArith(MLuaState *L, MLuaOpCode op, MLuaValue a, MLuaValue b) {
     return MakeNumber(L, na * nb);
   case OP_DIV:
     return MakeNumber(L, nb != 0 ? na / nb : 0);
-  case OP_IDIV:
-    return MakeNumber(L, nb != 0 ? (double)(I32)(na / nb) : 0);
   case OP_MOD:
     return MakeNumber(L, nb != 0 ? na - (I32)(na / nb) * nb : 0);
   case OP_POW: {

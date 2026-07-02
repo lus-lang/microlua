@@ -94,7 +94,6 @@ typedef struct {
   Size ProtoConstantsBytes;
   Size ProtoProtosBytes;
   Size ProtoUpvaluesBytes;
-  Size ProtoLineInfoBytes;
   Size ProtoLineMapBytes;
 } MLuaMemoryStats;
 

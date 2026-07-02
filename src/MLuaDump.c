@@ -136,9 +136,6 @@ static Size DumpProto(MLuaState *L, MLuaProto *proto, char *buf, Size pos,
     pos = DumpProto(L, proto->Protos[i], buf, pos, cap, endian);
   }
 
-  pos = DumpU32(buf, pos, cap, (U32)proto->LineInfoSize, endian);
-  pos = DumpBytes(buf, pos, cap, proto->LineInfo, proto->LineInfoSize);
-
   pos = DumpU32(buf, pos, cap, (U32)proto->LineMapSize, endian);
   for (i = 0; i < proto->LineMapSize; i++) {
     pos = DumpU32(buf, pos, cap, (U32)proto->LineMap[i].PC, endian);
@@ -152,8 +149,7 @@ static Bool ProtoFits(MLuaProto *proto) {
   Size i;
   if (!FitsU32(proto->LineDefined) || !FitsU32(proto->CodeSize) ||
       !FitsU32(proto->ConstantsSize) || !FitsU32(proto->UpvaluesSize) ||
-      !FitsU32(proto->ProtosSize) || !FitsU32(proto->LineInfoSize) ||
-      !FitsU32(proto->LineMapSize)) {
+      !FitsU32(proto->ProtosSize) || !FitsU32(proto->LineMapSize)) {
     return FALSE;
   }
   if (IsAnyString(proto->Source) && !FitsU32(MLuaStringLen(proto->Source))) {

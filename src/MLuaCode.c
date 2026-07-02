@@ -10,91 +10,84 @@
 /* Instruction Sizes                                                          */
 /* ========================================================================== */
 
+/*
+ * Size 0 marks a byte that is not a live opcode: the bytecode loader rejects
+ * the chunk and the parser's code walks bail conservatively. A flat table is
+ * markedly smaller than the equivalent three-way switch on every target.
+ */
+static const U8 OpSizes[OP_COUNT] = {
+    /* 1-byte instructions (no operand) */
+    [OP_NOP] = 1,
+    [OP_LOADNIL] = 1,
+    [OP_LOADTRUE] = 1,
+    [OP_LOADFALSE] = 1,
+    [OP_GETGLOBAL] = 1,
+    [OP_SETGLOBAL] = 1,
+    [OP_DUP] = 1,
+    [OP_SWAP] = 1,
+    [OP_NEWTABLE] = 1,
+    [OP_GETTABLE] = 1,
+    [OP_SETTABLE] = 1,
+    [OP_APPEND] = 1,
+    [OP_APPENDM] = 1,
+    [OP_SETTABLE_POP] = 1,
+    [OP_NOT] = 1,
+    [OP_EQ] = 1,
+    [OP_LT] = 1,
+    [OP_LE] = 1,
+    [OP_NEQ] = 1,
+    [OP_ADD] = 1,
+    [OP_SUB] = 1,
+    [OP_MUL] = 1,
+    [OP_DIV] = 1,
+    [OP_MOD] = 1,
+    [OP_POW] = 1,
+    [OP_UNM] = 1,
+    [OP_LEN] = 1,
+    [OP_JMP_S] = 1,
+    [OP_LOOP_S] = 1,
+    [OP_CLOSURE_S] = 1,
+    [OP_RET0] = 1,
+    [OP_RET1] = 1,
+
+    /* 2-byte instructions (opcode + 8-bit operand) */
+    [OP_LOADINT] = 2,
+    [OP_LOADK] = 2,
+    [OP_CLEARLOCAL] = 2,
+    [OP_GETLOCAL_CLEAR] = 2,
+    [OP_GETLOCAL] = 2,
+    [OP_SETLOCAL] = 2,
+    [OP_GETUPVAL] = 2,
+    [OP_SETUPVAL] = 2,
+    [OP_CLOSE] = 2,
+    [OP_ADJUST] = 2,
+    [OP_POP] = 2,
+    [OP_JMP] = 2,
+    [OP_JMPF] = 2,
+    [OP_JMPT] = 2,
+    [OP_LOOP] = 2,
+    [OP_NLOOP_PREP] = 2,
+    [OP_NLOOP_STEP] = 2,
+    [OP_GLOOP_SETUP] = 2,
+    [OP_GLOOP_CALL] = 2,
+    [OP_GLOOP_STEP] = 2,
+    [OP_CLOSURE] = 2,
+    [OP_CALL] = 2,
+    [OP_CALLM] = 2,
+    [OP_RET] = 2,
+    [OP_VARARG] = 2,
+    [OP_TAILCALL] = 2,
+    [OP_CONCAT] = 2,
+    [OP_GETGLOBAL_K] = 2,
+    [OP_GETTABLE_LL] = 2,
+    [OP_SETTABLE_LL] = 2,
+};
+
 Size MLuaOpSize(MLuaOpCode op) {
-  switch (op) {
-  /* 1-byte instructions (no operand) */
-  case OP_NOP:
-  case OP_LOADNIL:
-  case OP_LOADTRUE:
-  case OP_LOADFALSE:
-  case OP_LOADK_S:
-  case OP_GETLOCAL_S:
-  case OP_SETLOCAL_S:
-  case OP_GETGLOBAL:
-  case OP_SETGLOBAL:
-  case OP_DUP:
-  case OP_SWAP:
-  case OP_NEWTABLE:
-  case OP_GETTABLE:
-  case OP_SETTABLE:
-  case OP_APPEND:
-  case OP_APPENDM:
-  case OP_SETTABLE_POP:
-  case OP_NOT:
-  case OP_EQ:
-  case OP_LT:
-  case OP_LE:
-  case OP_NEQ:
-  case OP_ADD:
-  case OP_SUB:
-  case OP_MUL:
-  case OP_DIV:
-  case OP_IDIV:
-  case OP_MOD:
-  case OP_POW:
-  case OP_UNM:
-  case OP_LEN:
-  case OP_BAND:
-  case OP_BOR:
-  case OP_BXOR:
-  case OP_SHL:
-  case OP_SHR:
-  case OP_BNOT:
-  case OP_JMP_S:
-  case OP_LOOP_S:
-  case OP_CLOSURE_S:
-  case OP_RET0:
-  case OP_RET1:
-    return 1;
-
-  /* 2-byte instructions (opcode + 8-bit operand) */
-  case OP_LOADINT:
-  case OP_LOADK:
-  case OP_CLEARLOCAL:
-  case OP_GETLOCAL_CLEAR:
-  case OP_GETLOCAL:
-  case OP_SETLOCAL:
-  case OP_GETARG:
-  case OP_SETARG:
-  case OP_GETUPVAL:
-  case OP_SETUPVAL:
-  case OP_CLOSE:
-  case OP_ADJUST:
-  case OP_POP:
-  case OP_JMP:
-  case OP_JMPF:
-  case OP_JMPT:
-  case OP_LOOP:
-  case OP_NLOOP_PREP:
-  case OP_NLOOP_STEP:
-  case OP_GLOOP_SETUP:
-  case OP_GLOOP_CALL:
-  case OP_GLOOP_STEP:
-  case OP_CLOSURE:
-  case OP_CALL:
-  case OP_CALLM:
-  case OP_RET:
-  case OP_VARARG:
-  case OP_TAILCALL:
-  case OP_CONCAT:
-  case OP_GETGLOBAL_K:
-  case OP_GETTABLE_LL:
-  case OP_SETTABLE_LL:
-    return 2;
-
-  default:
-    return 1;
+  if ((unsigned)op >= (unsigned)OP_COUNT) {
+    return 0;
   }
+  return OpSizes[op];
 }
 
 /* ========================================================================== */
@@ -323,13 +316,8 @@ const char *MLuaOpName(MLuaOpCode op) {
       [OP_GETLOCAL_CLEAR] = "GETLOCAL_CLEAR",
       [OP_LOADINT] = "LOADINT",
       [OP_LOADK] = "LOADK",
-      [OP_LOADK_S] = "LOADK_S",
       [OP_GETLOCAL] = "GETLOCAL",
       [OP_SETLOCAL] = "SETLOCAL",
-      [OP_GETLOCAL_S] = "GETLOCAL_S",
-      [OP_SETLOCAL_S] = "SETLOCAL_S",
-      [OP_GETARG] = "GETARG",
-      [OP_SETARG] = "SETARG",
       [OP_GETUPVAL] = "GETUPVAL",
       [OP_SETUPVAL] = "SETUPVAL",
       [OP_GETGLOBAL] = "GETGLOBAL",
@@ -358,17 +346,10 @@ const char *MLuaOpName(MLuaOpCode op) {
       [OP_SUB] = "SUB",
       [OP_MUL] = "MUL",
       [OP_DIV] = "DIV",
-      [OP_IDIV] = "IDIV",
       [OP_MOD] = "MOD",
       [OP_POW] = "POW",
       [OP_UNM] = "UNM",
       [OP_LEN] = "LEN",
-      [OP_BAND] = "BAND",
-      [OP_BOR] = "BOR",
-      [OP_BXOR] = "BXOR",
-      [OP_SHL] = "SHL",
-      [OP_SHR] = "SHR",
-      [OP_BNOT] = "BNOT",
       [OP_JMP] = "JMP",
       [OP_JMPF] = "JMPF",
       [OP_JMPT] = "JMPT",
@@ -398,194 +379,8 @@ const char *MLuaOpName(MLuaOpCode op) {
 }
 
 /* ========================================================================== */
-/* Exp-Golomb Line Number Compression                                         */
+/* Line Number Info                                                           */
 /* ========================================================================== */
-
-/*
- * Exp-Golomb encoding (order 0):
- * - For a non-negative integer x, the encoding is:
- *   1. Compute n = floor(log2(x + 1))
- *   2. Write n zeros, followed by the (n+1)-bit binary representation of x+1
- *
- * The encoding is self-delimiting: read zeros until a 1 is encountered,
- * count gives n, then read n more bits to get the full (n+1)-bit suffix.
- *
- * Examples:
- *   0 -> 1           (1 bit)
- *   1 -> 010         (3 bits)
- *   2 -> 011         (3 bits)
- *   3 -> 00100       (5 bits)
- *   4 -> 00101       (5 bits)
- *   5 -> 00110       (5 bits)
- *   6 -> 00111       (5 bits)
- *   7 -> 0001000     (7 bits)
- *
- * Signed Exp-Golomb (interleaved):
- *   0 -> encode(0), 1 -> encode(1), -1 -> encode(2),
- *   2 -> encode(3), -2 -> encode(4), etc.
- *   Formula: d >= 0: encode(2*d), d < 0: encode(2*|d| - 1)
- */
-
-/* Bit writer state - tracks bit position within byte stream */
-typedef struct {
-  MLuaProto *proto;
-  MLuaState *L;
-  int bitOffset; /* Current bit offset within LineInfo (0-based) */
-} BitWriter;
-
-/* Bit reader state */
-typedef struct {
-  const U8 *buf;
-  Size len;
-  int bitOffset; /* Current bit position */
-} BitReader;
-
-/* Grow line info buffer */
-static Bool GrowLineInfo(MLuaProto *p, MLuaState *L) {
-  Size newCap;
-  U8 *newBuf;
-
-  newCap = (p->LineInfoCap == 0) ? 32 : p->LineInfoCap * 2;
-  newBuf = (U8 *)MLuaAlloc(L, newCap);
-
-  if (!newBuf) {
-    return FALSE;
-  }
-
-  if (p->LineInfo) {
-    MemCpy(newBuf, p->LineInfo, p->LineInfoSize);
-  }
-
-  p->LineInfo = newBuf;
-  p->LineInfoCap = newCap;
-  return TRUE;
-}
-
-/* Write a single bit to the bit stream */
-static void WriteBit(BitWriter *w, int bit) {
-  Size byteIdx = (Size)(w->bitOffset / 8);
-  int bitIdx = w->bitOffset % 8;
-
-  /* Ensure capacity */
-  while (byteIdx >= w->proto->LineInfoCap) {
-    if (!GrowLineInfo(w->proto, w->L)) {
-      return;
-    }
-  }
-
-  /* Extend size if needed */
-  if (byteIdx >= w->proto->LineInfoSize) {
-    w->proto->LineInfoSize = byteIdx + 1;
-    w->proto->LineInfo[byteIdx] = 0; /* Initialize new byte to 0 */
-  }
-
-  /* Write bit (MSB first within each byte) */
-  if (bit) {
-    w->proto->LineInfo[byteIdx] |= (U8)(0x80 >> bitIdx);
-  }
-
-  w->bitOffset++;
-}
-
-/* Read a single bit from the bit stream */
-static int ReadBit(BitReader *r) {
-  Size byteIdx = (Size)(r->bitOffset / 8);
-  int bitIdx = r->bitOffset % 8;
-
-  if (byteIdx >= r->len) {
-    return 0; /* Past end of buffer */
-  }
-
-  r->bitOffset++;
-
-  /* Read bit (MSB first within each byte) */
-  return (r->buf[byteIdx] >> (7 - bitIdx)) & 1;
-}
-
-/* Count bits needed to represent value (floor(log2(x)) + 1) */
-static int CountBits(Size x) {
-  int n = 0;
-  while (x > 0) {
-    n++;
-    x >>= 1;
-  }
-  return n;
-}
-
-/*
- * Emit Exp-Golomb encoded unsigned value.
- * Writes n zeros followed by (n+1) bits of (value+1), where n =
- * floor(log2(value+1)).
- */
-static void EmitExpGolomb(BitWriter *w, Size value) {
-  Size code = value + 1;       /* The value we encode in binary */
-  int n = CountBits(code) - 1; /* Number of leading zeros */
-  int i;
-
-  /* Write n zeros */
-  for (i = 0; i < n; i++) {
-    WriteBit(w, 0);
-  }
-
-  /* Write code in (n+1) bits, MSB first */
-  for (i = n; i >= 0; i--) {
-    WriteBit(w, (int)((code >> i) & 1));
-  }
-}
-
-/*
- * Decode Exp-Golomb value from bit stream.
- * Reads zeros until a 1 is encountered, then reads that many more bits.
- */
-static Size DecodeExpGolomb(BitReader *r) {
-  int n = 0;
-  Size code;
-  int i;
-
-  /* Count leading zeros */
-  while (ReadBit(r) == 0) {
-    n++;
-    /* Safety limit to prevent infinite loop on corrupted data */
-    if (n > 64) {
-      return 0;
-    }
-  }
-
-  /* We've read the leading 1 bit, now read n more bits */
-  code = 1;
-  for (i = 0; i < n; i++) {
-    code = (code << 1) | (Size)ReadBit(r);
-  }
-
-  return code - 1; /* Decoded value is code - 1 */
-}
-
-/* Emit line number delta (signed) */
-void MLuaEmitLineDelta(MLuaFuncState *fs, int delta) {
-  MLuaProto *p = fs->Proto;
-  Size encoded;
-  BitWriter w;
-
-  /* Convert signed to unsigned using signed Exp-Golomb mapping */
-  if (delta >= 0) {
-    encoded = (Size)(2 * delta);
-  } else {
-    encoded = (Size)(2 * (-delta) - 1);
-  }
-
-  /* Initialize bit writer at current end of line info */
-  w.proto = p;
-  w.L = fs->L;
-  w.bitOffset = (int)(p->LineInfoSize * 8);
-
-  /* For first write, we need to track partial bytes properly */
-  /* Store bit count in a separate field, but for now we round up to bytes */
-
-  EmitExpGolomb(&w, encoded);
-
-  /* Update size to include any partial final byte */
-  p->LineInfoSize = (Size)((w.bitOffset + 7) / 8);
-}
 
 /* Track current line and add to LineMap */
 void MLuaEmitLine(MLuaFuncState *fs, Size line) {
