@@ -785,6 +785,13 @@ static Bool TryArrayGetFast(MLuaState *L, MLuaValue tbl, MLuaValue key,
         return TRUE;
       }
     }
+#if MLUA_TABLE_NUM_ARRAYS
+    /* Typed arrays keep ArrayLen == 0, so they land here on the generic
+     * miss path: the hit path above is byte-identical for generic tables. */
+    if (MLuaTableArrayKind(th) == MLUA_TABLE_ARRAY_NUM) {
+      return MLuaTableNumGetFast(L, th, i, out);
+    }
+#endif
   }
   return FALSE;
 }
@@ -797,6 +804,11 @@ static Bool TryArraySetFast(MLuaValue tbl, MLuaValue key, MLuaValue val) {
       MLuaTableArrayData(th)[i - 1] = val;
       return TRUE;
     }
+#if MLUA_TABLE_NUM_ARRAYS
+    if (MLuaTableArrayKind(th) == MLUA_TABLE_ARRAY_NUM) {
+      return MLuaTableNumSetFast(th, i, val);
+    }
+#endif
   }
   return FALSE;
 }

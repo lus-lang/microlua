@@ -18,6 +18,7 @@ if compiler_enabled
         'test_operators',
         'test_bigint',
         'test_index_fused',
+        'test_table_numarray',
     ]
     foreach t : interpreter_tests
         test('interp_' + t, mlua_exe,

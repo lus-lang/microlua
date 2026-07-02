@@ -390,6 +390,12 @@ void MLuaGetMemoryStats(MLuaState *L, MLuaMemoryStats *out) {
       MLuaTableHeader *th = MLUA_TABLEHEADER(obj);
       Size arrayBytes = th->ArraySize * sizeof(MLuaValue);
       Size hashBytes = th->NodeCapacity * sizeof(MLuaTableNode);
+#if MLUA_TABLE_NUM_ARRAYS
+      if (MLuaTableArrayKind(th) == MLUA_TABLE_ARRAY_NUM) {
+        /* Raw-float buffer: U32 length prefix + MLUA_FLOAT elements */
+        arrayBytes = sizeof(U32) + th->ArraySize * sizeof(MLUA_FLOAT);
+      }
+#endif
       out->TableArrayBytes += arrayBytes;
       out->TableHashBytes += hashBytes;
       if (MLuaTableArrayIsInline(th)) {

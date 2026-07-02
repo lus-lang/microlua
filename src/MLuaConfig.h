@@ -83,6 +83,25 @@
 #define MLUA_FLOAT_BITS 64
 #endif
 
+/* Typed numeric table array parts (32-bit tagging path only; ignored under
+ * NaN-boxing, which never heap-allocates numbers). When 1, a table whose
+ * FIRST array store is a heap float switches its array part to raw
+ * MLUA_FLOAT elements: ~4 bytes retained per element instead of a slot plus
+ * a heap box. Reads materialize values through the engine's canonical
+ * number constructor (integral values come back as plain integers, exactly
+ * as dump/undump already canonicalizes them; non-integral reads allocate a
+ * fresh box, so two reads of one slot are distinct box identities - float
+ * boxes were already identity-keyed in tables). Storing anything a float
+ * cannot hold exactly demotes the array to generic slots, once, in place.
+ * A memory-capacity feature for tiny-RAM ports, not a speed feature. */
+#ifndef MLUA_TABLE_NUM_ARRAYS
+#define MLUA_TABLE_NUM_ARRAYS 0
+#endif
+#if MLUA_PTR_SIZE == 8
+#undef MLUA_TABLE_NUM_ARRAYS
+#define MLUA_TABLE_NUM_ARRAYS 0
+#endif
+
 #ifndef MLUA_DEFAULT_STACK_SIZE
 #define MLUA_DEFAULT_STACK_SIZE 256
 #endif

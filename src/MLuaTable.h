@@ -230,6 +230,19 @@ MLuaValue MLuaTableRawGet(MLuaState *L, MLuaValue tbl, MLuaValue key);
 MLuaValue MLuaTableNext(MLuaState *L, MLuaValue tbl, MLuaValue key,
                         MLuaValue *value);
 
+#if MLUA_TABLE_NUM_ARRAYS
+/*
+ * Typed-array fast-path helpers for the VM's fused indexing opcodes: an
+ * in-range read (materializes; FALSE on out-of-range or OOM - the generic
+ * route then reports the error) and an in-place overwrite of an existing
+ * slot with a representable value (appends/demotions return FALSE and take
+ * the generic route). Callers must have checked the array kind is NUM.
+ */
+Bool MLuaTableNumGetFast(MLuaState *L, MLuaTableHeader *th, I32 i,
+                         MLuaValue *out);
+Bool MLuaTableNumSetFast(MLuaTableHeader *th, I32 i, MLuaValue val);
+#endif
+
 /* ========================================================================== */
 /* Safe Table API (SPEC.ERRORS.md compliant)                                  */
 /* ========================================================================== */

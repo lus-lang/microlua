@@ -277,6 +277,66 @@ TEST(Forward_Override) {
   ASSERT_EQ(GetInt(MLuaTableGet(L, child, key)), 2);
 }
 
+#if MLUA_TABLE_NUM_ARRAYS
+/* ========================================================================== */
+/* Typed Numeric Array Tests (knob-on builds only)                            */
+/* ========================================================================== */
+
+#include "MLuaGC.h"
+
+TEST(NumArray_SurvivesCompaction) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  MLuaGCRef tblRef;
+  MLuaTableHeader *th;
+  MLuaValue v;
+  int round;
+  Size i;
+  ASSERT_NE(L, NULL);
+
+  MLuaGCEnable(L, FALSE);
+  MLuaPushGCRef(L, &tblRef, MLuaTableNew(L));
+
+  /* Seed with a heap float: the array part must adopt the NUM kind */
+  ASSERT(MLuaTableSet(L, tblRef.Value, MakeInt(1), MLuaMakeFloat(L, 1.5)));
+  th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tblRef.Value));
+  ASSERT_EQ(MLuaTableArrayKind(th), MLUA_TABLE_ARRAY_NUM);
+  ASSERT_EQ(th->ArrayLen, 0); /* the no-regression invariant */
+
+  for (i = 2; i <= 40; i++) {
+    ASSERT(MLuaTableSet(L, tblRef.Value, MakeInt((I32)i),
+                        MLuaMakeFloat(L, (double)i + 0.5)));
+  }
+  ASSERT_EQ(MLuaTableLen(tblRef.Value), 40);
+
+  /* Repeated collections must remap the raw buffer without scanning its
+   * float bits as values; contents stay exact across moves. */
+  for (round = 0; round < 3; round++) {
+    MLuaAllocObject(L, OBJTYPE_STRING, 100 + (Size)round); /* garbage */
+    MLuaGCCollect(L);
+
+    th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tblRef.Value));
+    ASSERT_EQ(MLuaTableArrayKind(th), MLUA_TABLE_ARRAY_NUM);
+    for (i = 1; i <= 40; i++) {
+      v = MLuaTableGet(L, tblRef.Value, MakeInt((I32)i));
+      ASSERT(MLuaToNumber(v) == (double)i + 0.5);
+    }
+  }
+
+  /* Demotion in place: prior values preserved, kind locked */
+  ASSERT(MLuaTableSet(L, tblRef.Value, MakeInt(2),
+                      MLuaStringNew(L, "demoted", 7)));
+  th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tblRef.Value));
+  ASSERT_EQ(MLuaTableArrayKind(th), MLUA_TABLE_ARRAY_LOCKED);
+  ASSERT_EQ(MLuaTableLen(tblRef.Value), 40);
+  v = MLuaTableGet(L, tblRef.Value, MakeInt(1));
+  ASSERT(MLuaToNumber(v) == 1.5);
+  v = MLuaTableGet(L, tblRef.Value, MakeInt(40));
+  ASSERT(MLuaToNumber(v) == 40.5);
+
+  MLuaPopGCRef(L, &tblRef);
+}
+#endif /* MLUA_TABLE_NUM_ARRAYS */
+
 /* ========================================================================== */
 /* Iteration Tests                                                            */
 /* ========================================================================== */
@@ -337,6 +397,11 @@ int main(void) {
 
   printf("\nIteration:\n");
   RUN_TEST(Iteration_Array);
+
+#if MLUA_TABLE_NUM_ARRAYS
+  printf("\nTyped Numeric Arrays:\n");
+  RUN_TEST(NumArray_SurvivesCompaction);
+#endif
 
   printf("\n====================\n");
   printf("Results: %d passed, %d failed\n", TestsPassed, TestsFailed);

@@ -133,9 +133,16 @@ static void ScanGrayObject(MLuaState *L, MLuaGCHeader *obj) {
     if (!MLuaTableHashIsInline(th) && th->NodeCapacity > 0) {
       MarkRaw(L, nodes);
     }
-    /* Mark array part */
-    for (i = 0; i < th->ArraySize; i++) {
-      MLuaGCMark(L, array[i]);
+    /* Mark array part. A typed (NUM) array holds raw floats, never values:
+     * scanning its bits as tagged pointers would chase garbage. The buffer
+     * itself was marked above. */
+#if MLUA_TABLE_NUM_ARRAYS
+    if (MLuaTableArrayKind(th) != MLUA_TABLE_ARRAY_NUM)
+#endif
+    {
+      for (i = 0; i < th->ArraySize; i++) {
+        MLuaGCMark(L, array[i]);
+      }
     }
     /* Mark hash part */
     for (i = 0; i < th->NodeCapacity; i++) {
@@ -559,9 +566,16 @@ static void UpdateReferences(MLuaState *L) {
         MLuaTableNode *nodes = MLuaTableNodeData(th);
         Size i;
         /* Contents are updated through the OLD buffer (they move with it);
-         * the buffer pointers are then remapped to the new locations. */
-        for (i = 0; i < th->ArraySize; i++) {
-          array[i] = UpdateValue(L, array[i]);
+         * the buffer pointers are then remapped to the new locations. Typed
+         * (NUM) arrays hold raw floats: nothing inside to update, but the
+         * buffer pointer remap below still applies. */
+#if MLUA_TABLE_NUM_ARRAYS
+        if (MLuaTableArrayKind(th) != MLUA_TABLE_ARRAY_NUM)
+#endif
+        {
+          for (i = 0; i < th->ArraySize; i++) {
+            array[i] = UpdateValue(L, array[i]);
+          }
         }
         for (i = 0; i < th->NodeCapacity; i++) {
           nodes[i].Key = UpdateValue(L, nodes[i].Key);

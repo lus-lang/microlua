@@ -4,6 +4,7 @@
  */
 
 #include "MLuaTableLib.h"
+#include "../MLuaConvert.h"
 #include "../MLuaCore.h"
 #include "../MLuaGC.h"
 #include "../MLuaString.h"
@@ -13,6 +14,20 @@
 /* ========================================================================== */
 /* table.concat                                                               */
 /* ========================================================================== */
+
+/* Concat joins strings AND numbers (reference Lua semantics; numbers used
+ * to contribute nothing). Rendering is a pure function of the value, so the
+ * sizing pass and the fill pass always agree. */
+#define CONCAT_NUM_BUF 40
+static Size ConcatElemToStr(MLuaState *L, MLuaValue v, char *numBuf) {
+  if (IsAnyString(v)) {
+    return 0; /* caller copies string bytes directly */
+  }
+  if (MLuaIsNumber(v)) {
+    return MLuaValueToStr(L, v, numBuf, CONCAT_NUM_BUF);
+  }
+  return 0; /* other types contribute nothing (pre-existing tolerance) */
+}
 
 static int TableConcat(MLuaState *L) {
   MLuaValue tbl = MLuaGetStack(L, 1);
@@ -52,7 +67,13 @@ static int TableConcat(MLuaState *L) {
    * truncated at 4 KB; size a heap buffer exactly instead.
    */
   for (k = (Size)startI; k <= (Size)j; k++) {
-    totalLen += MLuaStringLen(MLuaTableGet(L, tbl, MakeInt((I32)k)));
+    MLuaValue v = MLuaTableGet(L, tbl, MakeInt((I32)k));
+    if (IsAnyString(v)) {
+      totalLen += MLuaStringLen(v);
+    } else {
+      char numBuf[CONCAT_NUM_BUF];
+      totalLen += ConcatElemToStr(L, v, numBuf);
+    }
   }
   if (j >= startI) {
     totalLen += (Size)(j - startI) * seplen; /* separators BETWEEN elements */
@@ -98,12 +119,13 @@ static int TableConcat(MLuaState *L) {
   }
 
   /*
-   * Second pass: fill. No allocation happens between MLuaAlloc above and the
-   * MLuaStringNew below, so 'buf' cannot move. Each operand's bytes are
-   * re-fetched immediately before they are copied, so a short string's
-   * rotating data buffer cannot alias across iterations (the bug the old
-   * once-captured 'sep' pointer was exposed to).
+   * Second pass: fill. Allocations below (typed-array reads materialize
+   * number values) never collect, so 'buf' cannot move. Each operand's
+   * bytes are re-fetched immediately before they are copied, so a short
+   * string's rotating data buffer cannot alias across iterations (the bug
+   * the old once-captured 'sep' pointer was exposed to).
    */
+  L->ErrorMsg = NULL; /* distinguish OOM nils from legit interior nils */
   for (k = (Size)startI; k <= (Size)j; k++) {
     MLuaValue v;
     const char *s;
@@ -118,10 +140,21 @@ static int TableConcat(MLuaState *L) {
     }
 
     v = MLuaTableGet(L, tbl, MakeInt((I32)k));
-    slen = MLuaStringLen(v);
-    s = MLuaStringData(v);
-    for (t = 0; t < slen; t++) {
-      buf[bufpos++] = s[t];
+    if (IsNil(v) && L->ErrorMsg) {
+      return -1; /* typed-element materialization failed mid-concat */
+    }
+    if (IsAnyString(v)) {
+      slen = MLuaStringLen(v);
+      s = MLuaStringData(v);
+      for (t = 0; t < slen; t++) {
+        buf[bufpos++] = s[t];
+      }
+    } else {
+      char numBuf[CONCAT_NUM_BUF];
+      slen = ConcatElemToStr(L, v, numBuf);
+      for (t = 0; t < slen; t++) {
+        buf[bufpos++] = numBuf[t];
+      }
     }
   }
 
@@ -451,6 +484,13 @@ static int TableMaxn(MLuaState *L) {
   array = MLuaTableArrayData(th);
   nodes = MLuaTableNodeData(th);
 
+#if MLUA_TABLE_NUM_ARRAYS
+  if (MLuaTableArrayKind(th) == MLUA_TABLE_ARRAY_NUM) {
+    /* Typed arrays are dense (no interior nils): maxn is the length. The
+     * generic loop below sees ArrayLen == 0 and is a no-op. */
+    maxn = (double)MLuaTableLen(tbl);
+  }
+#endif
   for (i = 0; i < th->ArrayLen; i++) {
     if (!IsNil(array[i]) && (double)(i + 1) > maxn) {
       maxn = (double)(i + 1);
