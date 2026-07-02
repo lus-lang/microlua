@@ -469,7 +469,7 @@ static void EmitBackJump(MLuaParser *p, MLuaOpCode op, Size target) {
  * (its watermark) and, at its resolution point, patches and pops every
  * entry above that watermark. Supports multiple breaks and nesting.
  */
-static void PushPatch(MLuaParser *p, MLuaFwdJump j) {
+static void PushPatch(MLuaParser *p, MLuaFwdJump j, Bool isBreak) {
   MLuaFuncState *fs = p->FS;
 
   if (fs->PatchTop >= fs->PatchCap) {
@@ -486,6 +486,7 @@ static void PushPatch(MLuaParser *p, MLuaFwdJump j) {
     fs->PatchCap = newCap;
   }
 
+  j.IsBreak = isBreak ? 1 : 0;
   fs->PatchStack[fs->PatchTop++] = j;
 }
 
@@ -496,6 +497,26 @@ static void PatchAll(MLuaParser *p, Size watermark, Size target) {
     fs->PatchTop--;
     PatchFwdJump(p, fs->PatchStack[fs->PatchTop], target);
   }
+}
+
+/*
+ * Patch and remove the if-chain end jumps above the watermark, keeping any
+ * pending breaks (compacted in order) for the enclosing loop to resolve.
+ * An if must not use PatchAll: a break inside one of its arms would be
+ * captured and retargeted to the end of the if instead of the loop exit.
+ */
+static void PatchNonBreaks(MLuaParser *p, Size watermark, Size target) {
+  MLuaFuncState *fs = p->FS;
+  Size src, dst = watermark;
+
+  for (src = watermark; src < fs->PatchTop; src++) {
+    if (fs->PatchStack[src].IsBreak) {
+      fs->PatchStack[dst++] = fs->PatchStack[src];
+    } else {
+      PatchFwdJump(p, fs->PatchStack[src], target);
+    }
+  }
+  fs->PatchTop = dst;
 }
 
 /*
@@ -1445,7 +1466,7 @@ static void ParseIf(MLuaParser *p) {
   EndScope(p);
 
   while (Check(p, TK_ELSEIF)) {
-    PushPatch(p, EmitFwdJump(p, OP_JMP)); /* Arm done -> jump to end */
+    PushPatch(p, EmitFwdJump(p, OP_JMP), FALSE); /* Arm done -> jump to end */
 
     PatchFwdJump(p, jmpToElse, MLuaCodePos(fs));
     Advance(p); /* Skip 'elseif' */
@@ -1462,7 +1483,7 @@ static void ParseIf(MLuaParser *p) {
   }
 
   if (Check(p, TK_ELSE)) {
-    PushPatch(p, EmitFwdJump(p, OP_JMP)); /* Arm done -> jump to end */
+    PushPatch(p, EmitFwdJump(p, OP_JMP), FALSE); /* Arm done -> jump to end */
 
     PatchFwdJump(p, jmpToElse, MLuaCodePos(fs));
     haveElse = TRUE;
@@ -1478,7 +1499,7 @@ static void ParseIf(MLuaParser *p) {
   if (!haveElse) {
     PatchFwdJump(p, jmpToElse, MLuaCodePos(fs));
   }
-  PatchAll(p, endWatermark, MLuaCodePos(fs));
+  PatchNonBreaks(p, endWatermark, MLuaCodePos(fs));
 }
 
 static void ParseWhile(MLuaParser *p) {
@@ -2143,7 +2164,7 @@ static void ParseBreak(MLuaParser *p) {
   /* Emit jump with placeholder; the enclosing loop patches it to its exit
    * point (which also closes captured loop locals). */
   EmitBreakCleanup(p);
-  PushPatch(p, EmitFwdJump(p, OP_JMP));
+  PushPatch(p, EmitFwdJump(p, OP_JMP), TRUE);
 }
 
 /*

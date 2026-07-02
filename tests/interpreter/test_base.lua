@@ -211,4 +211,94 @@ test.describe("lexical scopes", function()
     end)
 end)
 
+test.describe("break inside conditionals", function()
+    -- Regression: an if used to capture break jumps pushed inside its arms
+    -- and retarget them to the end of the if instead of the loop exit.
+    test.it("breaks a while-true loop from inside an if", function()
+        local n = 0
+        while true do
+            if n > 3 then
+                break
+            end
+            n = n + 1
+        end
+        test.expect(n).toBe(4)
+    end)
+
+    test.it("breaks a conditioned while loop early", function()
+        local n = 0
+        while n < 200 do
+            if n > 100 then
+                break
+            end
+            n = n + 1
+        end
+        test.expect(n).toBe(101)
+    end)
+
+    test.it("breaks a numeric for from inside an if", function()
+        local last = 0
+        for i = 1, 100 do
+            if i > 3 then
+                break
+            end
+            last = i
+        end
+        test.expect(last).toBe(3)
+    end)
+
+    test.it("breaks from an elseif arm", function()
+        local s = ""
+        for i = 1, 5 do
+            if i == 2 then
+                s = s .. "x"
+            elseif i == 4 then
+                break
+            else
+                s = s .. "y"
+            end
+        end
+        test.expect(s).toBe("yxy")
+    end)
+
+    test.it("breaks nested loops independently", function()
+        local n = 0
+        for i = 1, 10 do
+            if i == 3 then
+                break
+            end
+            for j = 1, 10 do
+                if j == 2 then
+                    break
+                end
+                n = n + 1
+            end
+        end
+        test.expect(n).toBe(2)
+    end)
+
+    test.it("breaks a repeat loop from inside an if", function()
+        local n = 0
+        repeat
+            if n > 3 then
+                break
+            end
+            n = n + 1
+        until false
+        test.expect(n).toBe(4)
+    end)
+
+    test.it("breaks a generic for from inside an if", function()
+        local t = { 10, 20, 30, 40 }
+        local sum = 0
+        for _, v in ipairs(t) do
+            if v > 20 then
+                break
+            end
+            sum = sum + v
+        end
+        test.expect(sum).toBe(30)
+    end)
+end)
+
 assert(test.run())

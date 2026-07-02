@@ -225,9 +225,11 @@ struct MLuaProto {
  * pushed before OP_JMP_S, so any distance is representable.
  */
 typedef struct {
-  Size Pos; /* Short: position of the jump opcode. Long: position AFTER the
-               OP_JMP_S (the offset's origin). */
-  int K;    /* -1 for short form; else the placeholder constant index */
+  Size Pos;   /* Short: position of the jump opcode. Long: position AFTER the
+                 OP_JMP_S (the offset's origin). */
+  int K;      /* -1 for short form; else the placeholder constant index */
+  U8 IsBreak; /* PatchStack entries only: break (resolved by the enclosing
+                 loop) vs if-chain end jump (resolved by the if) */
 } MLuaFwdJump;
 
 /* Compiler function state */
