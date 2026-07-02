@@ -159,23 +159,25 @@ typedef struct {
 /* Function prototype - stored in GC heap */
 typedef struct MLuaProto MLuaProto;
 struct MLuaProto {
-  /* Code (variable-length bytecode) */
-  U8 *Code;      /* Bytecode bytes */
-  Size CodeSize; /* Number of bytes */
-  Size CodeCap;  /* Allocated capacity */
+  /* Code (variable-length bytecode). Sizes are MLuaIdx: the emitter flags
+   * "function too large" and the loader rejects oversized section counts,
+   * so these never exceed MLUA_IDX_MAX. */
+  U8 *Code;         /* Bytecode bytes */
+  MLuaIdx CodeSize; /* Number of bytes */
+  MLuaIdx CodeCap;  /* Allocated capacity */
 
   /* Constants */
-  MLuaValue *Constants; /* Constant pool (k) */
-  Size ConstantsSize;   /* Number of constants */
-  Size ConstantsCap;    /* Allocated capacity */
+  MLuaValue *Constants;  /* Constant pool (k) */
+  MLuaIdx ConstantsSize; /* Number of constants */
+  MLuaIdx ConstantsCap;  /* Allocated capacity */
 
   /* Nested prototypes */
   MLuaProto **Protos; /* Nested function prototypes */
-  Size ProtosSize;    /* Number of nested prototypes */
+  MLuaIdx ProtosSize; /* Number of nested prototypes */
 
   /* Upvalues */
   MLuaUpvalDesc *Upvalues; /* Upvalue descriptions */
-  Size UpvaluesSize;       /* Number of upvalues */
+  MLuaIdx UpvaluesSize;    /* Number of upvalues */
 
   /* Function info */
   U8 NumParams;    /* Number of fixed parameters */
@@ -197,8 +199,8 @@ struct MLuaProto {
     MLUA_LINE_T PC;
     MLUA_LINE_T Line;
   } *LineMap;
-  Size LineMapSize; /* Number of entries */
-  Size LineMapCap;  /* Allocated capacity */
+  MLuaIdx LineMapSize; /* Number of entries */
+  MLuaIdx LineMapCap;  /* Allocated capacity */
 #endif
 };
 
@@ -286,6 +288,10 @@ struct MLuaFuncState {
 
   /* Set when a jump offset exceeded the I8 range (checked at body end) */
   Bool JumpOverflow;
+
+  /* Set when the function's bytecode outgrew MLUA_IDX_MAX (body end reports
+   * "function too large") */
+  Bool CodeOverflow;
 
   /* Backpatching for control flow (breaks, if-chain end jumps) */
   MLuaFwdJump *PatchStack; /* Stack of pending forward jumps */

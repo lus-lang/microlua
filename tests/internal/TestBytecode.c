@@ -175,6 +175,29 @@ TEST(RejectRetiredOpcode) {
   ASSERT_EQ(MLuaLoadBytecode(L, buf, size, "bad"), MLUA_ERRRUN);
 }
 
+TEST(RejectOversizedSectionCount) {
+  /* A proto record claiming 0x10000 code bytes: builds with a narrowed
+   * MLuaIdx (e.g. -DMLUA_IDX_T=U16) must reject the count itself; wide
+   * builds still fail on the truncated body. Never a silent narrow. */
+  unsigned char chunk[] = {
+      0x1B, 'M', 'L', 'u',              /* magic */
+      MLUA_BYTECODE_VERSION, 0, 0, 0,   /* version, format, LE, flags */
+      4, 4, 1, 8, 1,                    /* int/size/instr/number widths */
+      0x00,                             /* Source = nil */
+      0, 0, 0, 0,                       /* LineDefined */
+      0, 0, 0, 2,                       /* params, locals, vararg, maxstack */
+      0x00, 0x00, 0x01, 0x00,           /* code count = 0x10000 (LE) */
+  };
+  MLuaState *L = MLuaStateInit(TestHeapB, TEST_HEAP_SIZE);
+
+  ASSERT_EQ(MLuaLoadBytecode(L, (const char *)chunk, sizeof(chunk), "big"),
+            MLUA_ERRRUN);
+  if (sizeof(MLuaIdx) < sizeof(Size)) {
+    ASSERT(L->ErrorMsg != NULL);
+    ASSERT_EQ(StrCmp(L->ErrorMsg, "bytecode code section too large"), 0);
+  }
+}
+
 int main(void) {
   printf("MicroLua Bytecode Tests\n");
   printf("=======================\n\n");
@@ -188,6 +211,7 @@ int main(void) {
   RUN_TEST(RejectTruncatedChunk);
   RUN_TEST(RejectPriorVersion);
   RUN_TEST(RejectRetiredOpcode);
+  RUN_TEST(RejectOversizedSectionCount);
 
   printf("\nResults: %d passed, %d failed\n", TestsPassed, TestsFailed);
   return TestsFailed > 0 ? 1 : 0;

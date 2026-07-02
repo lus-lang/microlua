@@ -2135,6 +2135,11 @@ static int ParseFuncBody(MLuaParser *p, Bool isMethod) {
   /* Emit return if not already present */
   MLuaEmitOpB(&fs, OP_RET, 0);
 
+  if (fs.CodeOverflow) {
+    Error(p, "function too large");
+    p->FS = outerFS;
+    return -1;
+  }
   if (fs.MaxStack > 255) {
     Error(p, "expression too complex");
     p->FS = outerFS;
@@ -2647,6 +2652,10 @@ static MLuaProto *ParseOnce(MLuaState *L, const char *source, Size len,
     return NULL;
   }
 
+  if (fs.CodeOverflow) {
+    *outError = "function too large";
+    return NULL;
+  }
   if (fs.MaxStack > 255) {
     *outError = "expression too complex";
     return NULL;

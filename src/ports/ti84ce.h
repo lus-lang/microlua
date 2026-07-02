@@ -44,6 +44,12 @@
  * functions whose bytecode outgrows 64 KB could not fit RAM here anyway. */
 #define MLUA_LINE_T U16
 
+/* MLUA_IDX_T deliberately stays at the default (Size) here. U16 would take
+ * frames from 24 to 14 bytes (~480 B of arena), but measured on ez80-clang
+ * it GROWS the image by ~430 B - 16-bit fields need masking against the
+ * eZ80's 24-bit native word - including +52 B inside the RunVM hot loop.
+ * Image bytes are scarcer than heap bytes on this device. */
+
 /* No way to store or send a dumped chunk from the calculator, and the full
  * build only barely fits user RAM - drop the bytecode serializer. */
 #define MLUA_ENABLE_DUMP 0

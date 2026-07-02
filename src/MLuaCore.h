@@ -75,6 +75,9 @@ typedef I32 IPtr;
 /* Size type */
 typedef UPtr Size;
 
+/* Narrow index type for frames and prototype counters (see MLuaConfig.h). */
+typedef MLUA_IDX_T MLuaIdx;
+
 /* Fixed-width and pointer-width invariants (compile-time). */
 MLUA_STATIC_ASSERT(sizeof(U8) == 1, "U8 must be 1 byte");
 MLUA_STATIC_ASSERT(sizeof(I8) == 1, "I8 must be 1 byte");

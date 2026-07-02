@@ -42,6 +42,7 @@ in this directory), or `-Dport_header=path/to/board.h` — or define
 | `MLUA_STRING_TABLE_INITIAL_SIZE` | `64` | Initial intern-table capacity in slots (one `MLuaValue` each); also the floor the post-GC shrink pass rehashes down to. Power of two. |
 | `MLUA_ENABLE_LINEINFO` | `1` | `0` drops the per-function PC→line map: protos lose the map fields (~80 B minimum per function), errors report no line number, traces print `?`. The bytecode format is unchanged (the section is written empty and skipped on load). |
 | `MLUA_LINE_T` | `Size` | Type of the in-RAM line-map entry fields (`U16` halves the map on 32-bit targets). Serialization stays fixed-width U32; emit and load saturate at the type's max, keeping the map prefix for oversized functions. |
+| `MLUA_IDX_T` | `Size` | Type of call-frame fields (saved PC, arena bases, arg count) and prototype counters. The emitter rejects functions whose bytecode would exceed `MLUA_IDX_MAX` ("function too large"), the loader rejects oversized section counts, and static asserts keep the arena sizes in range. `U16` shrinks every frame and prototype on small ports. |
 
 ## Numeric limits and math backend (in `MLuaCore.h` / `MLuaValue.h`)
 

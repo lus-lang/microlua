@@ -152,7 +152,7 @@ static Bool AllocArray(BCReader *r, void **out, U32 count, Size elemSize,
   if (count == 0) {
     return TRUE;
   }
-  if (count > BC_MAX_COUNT ||
+  if (count > BC_MAX_COUNT || (Size)count > MLUA_IDX_MAX ||
       (elemSize != 0 && (Size)count > ((Size)-1 / elemSize))) {
     Fail(r, what);
     return FALSE;

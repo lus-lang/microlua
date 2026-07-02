@@ -118,7 +118,14 @@ static Bool GrowCode(MLuaFuncState *fs) {
   Size newCap;
   U8 *newCode;
 
-  newCap = (p->CodeCap == 0) ? 64 : p->CodeCap * 2;
+  if (p->CodeCap >= MLUA_IDX_MAX) {
+    fs->CodeOverflow = TRUE; /* body end reports "function too large" */
+    return FALSE;
+  }
+  newCap = (p->CodeCap == 0) ? 64 : (Size)p->CodeCap * 2;
+  if (newCap > MLUA_IDX_MAX) {
+    newCap = MLUA_IDX_MAX;
+  }
   newCode = (U8 *)MLuaAlloc(fs->L, newCap);
 
   if (!newCode) {
@@ -130,7 +137,7 @@ static Bool GrowCode(MLuaFuncState *fs) {
   }
 
   p->Code = newCode;
-  p->CodeCap = newCap;
+  p->CodeCap = (MLuaIdx)newCap;
   return TRUE;
 }
 
@@ -215,7 +222,10 @@ static Bool GrowConstants(MLuaFuncState *fs) {
   Size newCap;
   MLuaValue *newK;
 
-  newCap = (p->ConstantsCap == 0) ? 16 : p->ConstantsCap * 2;
+  if (p->ConstantsCap > MLUA_IDX_MAX / 2) {
+    return FALSE; /* callers report "too many constants in function" */
+  }
+  newCap = (p->ConstantsCap == 0) ? 16 : (Size)p->ConstantsCap * 2;
   newK = (MLuaValue *)MLuaAlloc(fs->L, newCap * sizeof(MLuaValue));
 
   if (!newK) {
@@ -227,7 +237,7 @@ static Bool GrowConstants(MLuaFuncState *fs) {
   }
 
   p->Constants = newK;
-  p->ConstantsCap = newCap;
+  p->ConstantsCap = (MLuaIdx)newCap;
   return TRUE;
 }
 
@@ -410,8 +420,13 @@ void MLuaEmitLine(MLuaFuncState *fs, Size line) {
 
     /* Grow LineMap if needed */
     if (p->LineMapSize >= p->LineMapCap) {
-      Size newCap = (p->LineMapCap == 0) ? 8 : p->LineMapCap * 2;
-      Size newBytes = newCap * sizeof(p->LineMap[0]);
+      Size newCap;
+      Size newBytes;
+      if (p->LineMapCap > MLUA_IDX_MAX / 2) {
+        return; /* map full; later lines degrade like an alloc failure */
+      }
+      newCap = (p->LineMapCap == 0) ? 8 : (Size)p->LineMapCap * 2;
+      newBytes = newCap * sizeof(p->LineMap[0]);
       void *newMap = MLuaAlloc(fs->L, newBytes);
       if (!newMap) {
         return; /* Allocation failed, skip line info */

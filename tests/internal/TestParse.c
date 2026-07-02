@@ -40,6 +40,37 @@ static U8 TestHeap[TEST_HEAP_SIZE] MLUA_ALIGNAS(MLUA_ALIGNMENT);
 /* Parse Tests                                                                */
 /* ========================================================================== */
 
+/* Only meaningful when MLuaIdx is narrower than Size (e.g. -DMLUA_IDX_T=U16
+ * variant builds): a chunk whose bytecode outgrows MLUA_IDX_MAX must be
+ * rejected with "function too large", never silently truncated. */
+static U8 BigFnHeap[512 * 1024] MLUA_ALIGNAS(MLUA_ALIGNMENT);
+static char BigFnSource[600 * 1024];
+
+TEST(FunctionTooLarge) {
+  MLuaState *L;
+  MLuaProto *proto;
+  Size pos = 0;
+  static const char stmt[] = "x=x+1 "; /* one line: line map stays tiny */
+
+  if (sizeof(MLuaIdx) >= sizeof(Size)) {
+    return; /* limit unreachable in this configuration */
+  }
+
+  L = MLuaStateInit(BigFnHeap, sizeof(BigFnHeap));
+  ASSERT_NE(L, NULL);
+
+  while (pos + sizeof(stmt) < sizeof(BigFnSource) - 1) {
+    MemCpy(BigFnSource + pos, stmt, sizeof(stmt) - 1);
+    pos += sizeof(stmt) - 1;
+  }
+  BigFnSource[pos] = '\0';
+
+  proto = MLuaParse(L, BigFnSource, pos, "bigfn");
+  ASSERT_EQ(proto, NULL);
+  ASSERT_NE(L->ErrorMsg, NULL);
+  ASSERT_EQ(StrCmp(L->ErrorMsg, "function too large"), 0);
+}
+
 TEST(Empty) {
   MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
   const char *src = "";
@@ -197,6 +228,7 @@ int main(void) {
   printf("=====================\n\n");
 
   printf("Basic Parsing:\n");
+  RUN_TEST(FunctionTooLarge);
   RUN_TEST(Empty);
   RUN_TEST(Return);
   RUN_TEST(LocalVar);

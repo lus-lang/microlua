@@ -123,6 +123,18 @@
 #define MLUA_STACKTRACE_BUF_SIZE 2048
 #endif
 
+/* Index/counter type for call frames and function prototypes (MLuaIdx).
+ * Frame fields (saved PC, arena bases, argument count) and proto counters
+ * (code/constant/upvalue/proto/line-map sizes) are bounded by the arena
+ * sizes and by MLUA_IDX_MAX: the emitter rejects functions whose bytecode
+ * would outgrow it ("function too large") and the bytecode loader rejects
+ * chunks whose section counts exceed it. Ports whose arenas and functions
+ * fit 16 bits can set U16 to shrink every frame and prototype. */
+#ifndef MLUA_IDX_T
+#define MLUA_IDX_T Size
+#endif
+#define MLUA_IDX_MAX ((Size)(MLUA_IDX_T)-1)
+
 /* Line-number debug info.
  *
  * MLUA_ENABLE_LINEINFO 0 drops the per-function PC->line map entirely:

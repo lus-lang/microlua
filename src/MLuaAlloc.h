@@ -165,13 +165,24 @@ Size MLuaNextGCThreshold(MLuaState *L, Size used);
  * Func as a GC-managed value, so suspended frames survive heap compaction.
  */
 typedef struct MLuaFrame {
-  MLuaValue Func;  /* The Lua closure being executed */
-  Size PC;         /* Saved bytecode offset: resume point / return point */
-  Size LocalsBase; /* This frame's base in the Locals array */
-  Size EvalBase;   /* EvalStack height at entry; results land here */
-  Size ArgsBase;   /* This frame's argument window start in Args */
-  Size ArgsCount;  /* Argument count (drives OP_VARARG / MLuaGetArg) */
+  MLuaValue Func;     /* The Lua closure being executed */
+  MLuaIdx PC;         /* Saved bytecode offset: resume point / return point */
+  MLuaIdx LocalsBase; /* This frame's base in the Locals array */
+  MLuaIdx EvalBase;   /* EvalStack height at entry; results land here */
+  MLuaIdx ArgsBase;   /* This frame's argument window start in Args */
+  MLuaIdx ArgsCount;  /* Argument count (drives OP_VARARG / MLuaGetArg) */
 } MLuaFrame;
+
+/* Frame fields must be able to index every arena slot and code offset; the
+ * emitter and loader enforce the code bound, these enforce the arenas'. */
+MLUA_STATIC_ASSERT(MLUA_DEFAULT_STACK_SIZE <= MLUA_IDX_MAX &&
+                       MLUA_DEFAULT_ARGS_SIZE <= MLUA_IDX_MAX &&
+                       MLUA_DEFAULT_FRAMES_SIZE <= MLUA_IDX_MAX &&
+                       MLUA_THREAD_EVAL_SIZE <= MLUA_IDX_MAX &&
+                       MLUA_THREAD_LOCALS_SIZE <= MLUA_IDX_MAX &&
+                       MLUA_THREAD_ARGS_SIZE <= MLUA_IDX_MAX &&
+                       MLUA_THREAD_FRAMES_SIZE <= MLUA_IDX_MAX,
+                   "arena sizes must fit MLuaIdx (MLUA_IDX_T too narrow)");
 
 /*
  * A full execution context: everything that distinguishes one thread of
