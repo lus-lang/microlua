@@ -29,6 +29,16 @@
 #define MLUA_PROFILE_OPS 0
 #endif
 
+/* Computed-goto dispatch (GNU C labels-as-values). Replaces the dispatch
+ * switch with a 256-entry label table: one indirect jump per instruction
+ * instead of a bounds-checked jump table, typically 10-20% on dispatch-bound
+ * code. Costs ~1-2 KB of label table + duplicated dispatch tails, so
+ * size-constrained ports should measure before opting in. Off by default;
+ * requires GCC or Clang. */
+#ifndef MLUA_VM_COMPUTED_GOTO
+#define MLUA_VM_COMPUTED_GOTO 0
+#endif
+
 #ifndef MLUA_PTR_SIZE
 #if defined(__LP64__) || defined(_WIN64)
 #define MLUA_PTR_SIZE 8
