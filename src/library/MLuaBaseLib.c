@@ -293,7 +293,13 @@ static int BaseTostring(MLuaState *L) {
 
   /* Use MLuaValueToStr for all other types */
   len = MLuaValueToStr(L, v, buf, sizeof(buf));
-  MLuaPush(L, MLuaStringNew(L, buf, len));
+  {
+    MLuaValue res = MLuaStringNew(L, buf, len);
+    if (IsNil(res)) {
+      return -1; /* ErrorMsg set by the failed creation */
+    }
+    MLuaPush(L, res);
+  }
   return 1;
 }
 

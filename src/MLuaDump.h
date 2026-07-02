@@ -9,11 +9,13 @@
 #include "MLuaCore.h"
 #include "MLuaValue.h"
 
-#define MLUA_BYTECODE_VERSION 3
+/* v4: fused opcodes GETGLOBAL_K, GETTABLE_LL, SETTABLE_LL, SETTABLE_POP */
+#define MLUA_BYTECODE_VERSION 4
 #define MLUA_BYTECODE_ENDIAN_LITTLE 0
 #define MLUA_BYTECODE_ENDIAN_BIG 1
 #define MLUA_BYTECODE_FLOAT_IEEE754 1
 
+#if MLUA_ENABLE_DUMP
 /*
  * Serialize a Lua closure in MicroLua's bytecode format.
  *
@@ -29,5 +31,6 @@ Size MLuaDumpFunction(MLuaState *L, MLuaValue func, char *buf, Size cap);
  */
 Size MLuaDumpFunctionEndian(MLuaState *L, MLuaValue func, char *buf, Size cap,
                             int endian);
+#endif /* MLUA_ENABLE_DUMP */
 
 #endif /* MLUA_DUMP_H */

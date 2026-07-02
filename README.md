@@ -104,8 +104,13 @@ meson setup build-board -Dport_header=path/to/my_board_mlua.h
 ```
 
 Built-in presets are available with `-Dport=generic64`, `generic32`,
-`cortex-m`, or `riscv32`. See `src/ports/README.md` for the full port-knob
-reference and verification matrix.
+`cortex-m`, `riscv32`, or `ti84ce`. See `src/ports/README.md` for the full
+port-knob reference and verification matrix.
+
+A complete board port lives in `platform/ti84ce/`: MicroLua on the TI-84
+Plus CE (eZ80 — 24-bit `int` and pointers, binary32 `double`), built with
+the CE C toolchain as two calculator programs (script runner + on-calc
+REPL) with graphics/keypad/timer bindings.
 
 ## License
 

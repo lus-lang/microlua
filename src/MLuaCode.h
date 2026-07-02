@@ -67,13 +67,25 @@ typedef enum {
   OP_ADJUST = 0x1E, /* 2B: B results → vals : Truncate/nil-pad the last
                        call's results (LastCallResults) to exactly B */
 
-  /* ===== Tables (0x20-0x24) ===== */
+  /* Fused LOADK+GETGLOBAL: reads _G[constants[B]] in one dispatch */
+  OP_GETGLOBAL_K = 0x1F, /* 2B: B → v : v = _G[constants[B]] */
+
+  /* ===== Tables (0x20-0x27) ===== */
   OP_NEWTABLE = 0x20, /* 1B: → tbl    : Create and push empty table */
   OP_GETTABLE = 0x21, /* 1B: t k → v  : v = t[k] */
   OP_SETTABLE = 0x22, /* 1B: t k v →  : t[k] = v */
   OP_APPEND = 0x23,   /* 1B: t v →    : t[#t + 1] = v */
   OP_APPENDM = 0x24,  /* 1B: t vals → : Append the last call's results
                          (LastCallResults values) in order */
+
+  /* Fused local-local indexing. The u8 operand packs two local slots as
+   * (table << 4) | key, so both must be in slots 0-15; the parser only
+   * fuses when that holds. Still opcode + one u8: the 2-byte ISA rule. */
+  OP_GETTABLE_LL = 0x25, /* 2B: B → v : v = locals[B>>4][locals[B&15]] */
+  OP_SETTABLE_LL = 0x26, /* 2B: B v → : locals[B>>4][locals[B&15]] = v */
+
+  /* SETTABLE that also pops the table: replaces SETTABLE; POP 1 */
+  OP_SETTABLE_POP = 0x27, /* 1B: t k v → : t[k] = v */
 
   /* ===== Logic (0x30-0x34) ===== */
   OP_NOT = 0x30, /* 1B: v → bool   : Push true if v is nil/false */
@@ -225,9 +237,11 @@ struct MLuaProto {
  * pushed before OP_JMP_S, so any distance is representable.
  */
 typedef struct {
-  Size Pos; /* Short: position of the jump opcode. Long: position AFTER the
-               OP_JMP_S (the offset's origin). */
-  int K;    /* -1 for short form; else the placeholder constant index */
+  Size Pos;   /* Short: position of the jump opcode. Long: position AFTER the
+                 OP_JMP_S (the offset's origin). */
+  int K;      /* -1 for short form; else the placeholder constant index */
+  U8 IsBreak; /* PatchStack entries only: break (resolved by the enclosing
+                 loop) vs if-chain end jump (resolved by the if) */
 } MLuaFwdJump;
 
 /* Compiler function state */
@@ -284,6 +298,13 @@ struct MLuaFuncState {
    * may produce any number of values. */
   Size LastCallEnd;
 
+  /* Start positions of the last two emitted instructions ((Size)-1 when
+   * fewer than two have been emitted). Instruction fusion inspects these
+   * to retract a just-emitted GETLOCAL pair; retraction never reaches
+   * further back, so earlier recorded positions stay valid. */
+  Size LastInstrPos;
+  Size PrevInstrPos;
+
   /* Set when a jump offset exceeded the I8 range (checked at body end) */
   Bool JumpOverflow;
 
@@ -322,6 +343,15 @@ Size MLuaEmitOpB(MLuaFuncState *fs, MLuaOpCode op, U8 b);
  * Emit raw bytes.
  */
 Size MLuaEmitBytes(MLuaFuncState *fs, const U8 *bytes, Size count);
+
+/*
+ * Insert raw bytes at `pos`, shifting later code. Recorded positions that
+ * point at or past `pos` (instruction tracking, LastCallEnd) are shifted
+ * along; the caller must ensure no jump target, pending patch, or line-map
+ * entry points past `pos`.
+ */
+Bool MLuaInsertBytes(MLuaFuncState *fs, Size pos, const U8 *bytes,
+                     Size count);
 
 /*
  * Add a constant to the constant pool (deduplicated).

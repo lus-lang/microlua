@@ -20,11 +20,18 @@ ninja -C builddir
 ```
 
 - Port/build knobs live in `src/MLuaConfig.h`. Use Meson `-Dport=generic64`,
-  `generic32`, `cortex-m`, or `riscv32` for built-in presets, or
+  `generic32`, `cortex-m`, `riscv32`, or `ti84ce` for built-in presets, or
   `-Dport_header=path/to/header.h` to supply one board-specific header. That
   header may override pointer size, alignment, default stack/frame sizes, GC
   threshold, fixed-width type source, native float subtype/width, math hooks,
-  and `MLUA_ENABLE_COMPILER`.
+  `MLUA_PARSE_MAX_DEPTH`, `MLUA_ENABLE_COMPILER`, and `MLUA_ENABLE_DUMP`.
+- `platform/ti84ce/` is a complete board port (TI-84 Plus CE, eZ80: 24-bit
+  `int`/pointers, binary32 `double`), built with the external CE C toolchain
+  makefiles — not meson. Its `repl/` target is close to the calculator's RAM
+  ceiling; watch image size when adding core code. CE-side tests run via
+  CEmu's autotester (see `platform/ti84ce/README.md`); the `canary_ez80`
+  guard test compiles every core TU with `ez80-clang` when CEdev is
+  installed.
 - Source compilation is controlled by Meson `-Dcompiler=true|false`. When false,
   `libmicrolua.a` must not contain `MLuaLex`/`MLuaParse` symbols and callers must
   use `MLuaLoadBytecode` / `MLuaDoBytecode` or `MLuaLoadBuffer` / `MLuaDoBuffer`
@@ -180,9 +187,18 @@ size into `bench/RESULTS.md`. It auto-detects a local `lua5.5`/`lua` (verified `
 - `return f(g())` / `return f(...)` (CALLM-form tails) are NOT tail calls; only
   plain `OP_CALL` returns are flipped to `OP_TAILCALL`. Correctness is identical,
   only frame reuse differs, and the flip-time check stays trivially safe.
+- Parser-level caching of repeated global reads (`string.byte` in a loop):
+  `_G` is mutable and a single-pass parser cannot prove safety. The user-side
+  idiom is `local byte = string.byte`.
+- Skipping the intern-table dedup for concat results: breaks the
+  pointer-equality-is-value-equality string invariant. The concat path already
+  hashes incrementally and reuses the dedup probe's insert slot.
 
-## Status (2026-06-30, release-candidate hardening)
+## Status (2026-07-02, performance pass landed)
 
 Debug and freestanding release suites are green locally, including internal C
 tests, interpreter suites, smoke tests, CLI bytecode output, security
-regressions, and the libc-free guard.
+regressions, and the libc-free guard. Bytecode is at v4 (fused
+GETTABLE_LL/SETTABLE_LL/SETTABLE_POP/GETGLOBAL_K); older .mlu chunks must be
+recompiled. The TI-84 CE benchmarks now beat TI-BASIC on every workload
+(platform/ti84ce/README.md has the table).

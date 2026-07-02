@@ -37,6 +37,8 @@ elif port == 'cortex-m'
     shared_c_args += ['-DMLUA_PORT_HEADER="ports/cortex_m.h"']
 elif port == 'riscv32'
     shared_c_args += ['-DMLUA_PORT_HEADER="ports/riscv32.h"']
+elif port == 'ti84ce'
+    shared_c_args += ['-DMLUA_PORT_HEADER="ports/ti84ce.h"']
 endif
 
 size_c_args = []

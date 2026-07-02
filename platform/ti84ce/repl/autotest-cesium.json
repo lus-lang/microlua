@@ -1,0 +1,91 @@
+{
+    "_comment": [
+        "OS 5.5+ variant: launches MLUA through the Cesium shell app, since the",
+        "OS itself refuses to run assembly programs. Assumes Cesium is APPS item",
+        "4 and MLUA is the 10th entry in its file list - adjust the key|down",
+        "count and the app slot for your ROM's contents.",
+        "Flow: run the transferred SMOKELUA source appvar (compiled on-calc,",
+        "hash 1), then open the REPL with mode and type print(2+3) (hash 2).",
+        "Run tools/get_clibs.py once to fetch test/clibs (LibLoad + graphx)."
+    ],
+    "rom": "84ce.rom",
+    "transfer_files": [
+        "bin/MLUA.8xp",
+        "test/SMOKELUA.8xv",
+        "test/clibs/libload.8xv",
+        "test/clibs/graphx.8xv"
+    ],
+    "target": {
+        "name": "MLUA",
+        "isASM": true
+    },
+    "sequence": [
+        "delay|2000",
+        "key|apps",
+        "delay|1000",
+        "key|4",
+        "delay|2500",
+        "key|down",
+        "key|down",
+        "key|down",
+        "key|down",
+        "key|down",
+        "key|down",
+        "key|down",
+        "key|down",
+        "key|down",
+        "key|down",
+        "delay|500",
+        "key|enter",
+        "delay|3500",
+        "key|enter",
+        "delay|5000",
+        "hashWait|1",
+        "key|enter",
+        "delay|1500",
+        "key|mode",
+        "delay|2000",
+        "key|alpha",
+        "key|8",
+        "key|alpha",
+        "key|mul",
+        "key|alpha",
+        "key|sq",
+        "key|alpha",
+        "key|log",
+        "key|alpha",
+        "key|4",
+        "key|(",
+        "key|2",
+        "key|+",
+        "key|3",
+        "key|)",
+        "delay|500",
+        "key|enter",
+        "delay|2500",
+        "hashWait|2",
+        "key|clear",
+        "delay|500",
+        "key|clear"
+    ],
+    "hashes": {
+        "1": {
+            "description": "SMOKELUA source compiled and run on-calc",
+            "start": "vram_start",
+            "size": "vram_16_size",
+            "expected_CRCs": [
+                "91375720"
+            ],
+            "timeout": 10000
+        },
+        "2": {
+            "description": "REPL evaluated print(2+3)",
+            "start": "vram_start",
+            "size": "vram_16_size",
+            "expected_CRCs": [
+                "C403FD24"
+            ],
+            "timeout": 10000
+        }
+    }
+}

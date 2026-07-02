@@ -31,12 +31,8 @@
  */
 #define VM_FAIL(L, code, msg)                                                  \
   do {                                                                         \
-    Size _pc = (Size)(pc - proto->Code);                                       \
     (L)->ErrorMsg = (msg);                                                     \
-    (L)->ErrorLine = MLuaGetLine(proto, _pc);                                  \
-    (L)->StackTrace = BuildStackTrace(L, proto, _pc);                          \
-    UnwindFrames(L, baseFrame);                                                \
-    return (code);                                                             \
+    return VMRaise(L, proto, pc, baseFrame, (code));                           \
   } while (0)
 
 /*
@@ -47,11 +43,7 @@
   do {                                                                         \
     MLuaStatus _s = (expr);                                                    \
     if (_s != MLUA_OK) {                                                       \
-      Size _pc = (Size)(pc - proto->Code);                                     \
-      L->ErrorLine = MLuaGetLine(proto, _pc);                                  \
-      L->StackTrace = BuildStackTrace(L, proto, _pc);                          \
-      UnwindFrames(L, baseFrame);                                              \
-      return _s;                                                               \
+      return VMRaise(L, proto, pc, baseFrame, _s);                             \
     }                                                                          \
   } while (0)
 
@@ -62,11 +54,7 @@
 #define VM_CHECK_NIL(result)                                                   \
   do {                                                                         \
     if (IsNil(result) && L->ErrorMsg) {                                        \
-      Size _pc = (Size)(pc - proto->Code);                                     \
-      L->ErrorLine = MLuaGetLine(proto, _pc);                                  \
-      L->StackTrace = BuildStackTrace(L, proto, _pc);                          \
-      UnwindFrames(L, baseFrame);                                              \
-      return MLUA_ERR_RUNTIME;                                                 \
+      return VMRaise(L, proto, pc, baseFrame, MLUA_ERR_RUNTIME);               \
     }                                                                          \
   } while (0)
 
@@ -515,6 +503,10 @@ MLuaValue MLuaConcat(MLuaState *L, int count) {
   /* Allocate buffer */
   buffer = (U8 *)MLuaAlloc(L, totalLen + 1);
   if (!buffer) {
+    /* The nil sentinel only raises when ErrorMsg is set; a bare nil would
+     * flow onward as a value (e.g. silently deleting the target of
+     * `t[#t+1] = a .. b`). */
+    L->ErrorMsg = "out of memory";
     return MLUA_NIL;
   }
 
@@ -570,6 +562,34 @@ MLuaValue MLuaConcat(MLuaState *L, int count) {
 /* ========================================================================== */
 /* VM Interpreter Loop                                                        */
 /* ========================================================================== */
+
+#if MLUA_PROFILE_OPS
+static U32 OpProfileCounts[256];
+
+void MLuaDumpOpProfile(MLuaState *L) {
+  int i;
+  if (!L->OutputFunc) {
+    return;
+  }
+  for (i = 0; i < 256; i++) {
+    char buf[64];
+    Size pos = 0;
+    const char *name;
+    Size nameLen;
+    if (OpProfileCounts[i] == 0) {
+      continue;
+    }
+    name = MLuaOpName((MLuaOpCode)i);
+    nameLen = StrLen(name);
+    MemCpy(buf, name, nameLen);
+    pos = nameLen;
+    buf[pos++] = '\t';
+    pos += MLuaIntToStr((I64)OpProfileCounts[i], buf + pos);
+    buf[pos++] = '\n';
+    L->OutputFunc(L, MLUA_OUTPUT_PRINT, buf, pos);
+  }
+}
+#endif
 
 #define READ_BYTE() (*pc++)
 #define READ_U16() (pc += 2, (U16)((pc[-2]) | ((pc[-1]) << 8)))
@@ -696,6 +716,33 @@ static void UnwindFrames(MLuaState *L, Size baseFrame) {
   }
 }
 
+/*
+ * Cold tail shared by every VM_FAIL/VM_TRY/VM_CHECK_NIL expansion: capture
+ * the line and stack trace while the frames are intact, unwind this RunVM's
+ * frames, and propagate the status. Out of line so the dozens of error
+ * checks in the dispatch loop each cost one call, not four statements.
+ */
+static MLuaStatus VMRaise(MLuaState *L, MLuaProto *proto, const U8 *pc,
+                          Size baseFrame, MLuaStatus status) {
+  Size pcOff = (Size)(pc - proto->Code);
+  L->ErrorLine = MLuaGetLine(proto, pcOff);
+  L->StackTrace = BuildStackTrace(L, proto, pcOff);
+  UnwindFrames(L, baseFrame);
+  return status;
+}
+
+/* Reload the dispatch loop's execution registers from the top frame */
+static void ReloadFrame(MLuaState *L, const U8 **pc, MLuaProto **proto,
+                        MLuaClosure **cl) {
+  MLuaFrame *f = &L->Frames[L->FrameTop - 1];
+  *cl = MLUA_CLOSURE((MLuaGCHeader *)GetPtr(f->Func));
+  *proto = (*cl)->Proto;
+  *pc = (*proto)->Code + f->PC;
+  L->LocalsBase = f->LocalsBase;
+  L->ArgsBase = f->ArgsBase;
+  L->ArgsCount = f->ArgsCount;
+}
+
 /* ========================================================================== */
 /* The Dispatch Loop                                                          */
 /* ========================================================================== */
@@ -710,27 +757,161 @@ static void UnwindFrames(MLuaState *L, Size baseFrame) {
  * C boundaries (pcall, require, library callbacks via MLuaCall) — which is
  * exactly where yielding is forbidden.
  */
+
+/*
+ * Direct array-window access, the hot shape of every indexed loop: an
+ * inline-int key hitting a live array slot. TRUE when handled; any
+ * precondition miss (nil slot -- which must consult the hash part and the
+ * Forward chain -- boxed-int keys, appends, growth, holes, nil stores)
+ * returns FALSE and the caller takes the generic path. Used by the fused
+ * indexing opcodes (the hot loop shapes) to skip even the call into
+ * MLuaTableGetSafe/MLuaTableSetSafe, whose entry points carry the same
+ * fast path for every other caller.
+ */
+static Bool TryArrayGetFast(MLuaValue tbl, MLuaValue key, MLuaValue *out) {
+  if (IsTable(tbl) && IsInlineInt(key)) {
+    I32 i = GetInt(key);
+    MLuaTableHeader *th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl));
+    if (i >= 1 && (U32)i <= th->ArrayLen) {
+      MLuaValue v = MLuaTableArrayData(th)[i - 1];
+      if (!IsNil(v)) {
+        *out = v;
+        return TRUE;
+      }
+    }
+  }
+  return FALSE;
+}
+
+static Bool TryArraySetFast(MLuaValue tbl, MLuaValue key, MLuaValue val) {
+  if (IsTable(tbl) && IsInlineInt(key) && !IsNil(val)) {
+    I32 i = GetInt(key);
+    MLuaTableHeader *th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl));
+    if (i >= 1 && (U32)i <= th->ArrayLen) {
+      MLuaTableArrayData(th)[i - 1] = val;
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+/*
+ * Dispatch plumbing. The default is a plain switch; MLUA_VM_COMPUTED_GOTO
+ * (GNU C labels-as-values) turns each case into a label reached through a
+ * 256-entry table -- one indirect jump per instruction, no bounds check.
+ * Both forms funnel every instruction through the same head: the GC
+ * safepoint check runs before EVERY instruction in either mode (that
+ * invariant is load-bearing -- see the safepoint comment below).
+ */
+#if MLUA_VM_COMPUTED_GOTO
+#define VM_SWITCH(op) goto *DispatchTable[op];
+#define VM_CASE(name) L_##name
+#define VM_CASE_DEFAULT L_VM_UNKNOWN
+#define VM_BREAK goto VM_DispatchNext
+#else
+#define VM_SWITCH(op) switch (op)
+#define VM_CASE(name) case name
+#define VM_CASE_DEFAULT default
+#define VM_BREAK break
+#endif
+
 static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
   const U8 *pc;
   MLuaProto *proto;
   MLuaClosure *cl;
 
-  /* Load (or reload after resume) the top frame's execution registers */
-#define RELOAD_FRAME()                                                         \
-  do {                                                                         \
-    MLuaFrame *_f = &L->Frames[L->FrameTop - 1];                               \
-    cl = MLUA_CLOSURE((MLuaGCHeader *)GetPtr(_f->Func));                       \
-    proto = cl->Proto;                                                         \
-    pc = proto->Code + _f->PC;                                                 \
-    L->LocalsBase = _f->LocalsBase;                                            \
-    L->ArgsBase = _f->ArgsBase;                                                \
-    L->ArgsCount = _f->ArgsCount;                                              \
-  } while (0)
+  /* Load (or reload after resume) the top frame's execution registers
+   * (shared out-of-line body: this runs at frame switches, not per
+   * instruction, and is expanded at many call sites) */
+#define RELOAD_FRAME() ReloadFrame(L, &pc, &proto, &cl)
+
+#if MLUA_VM_COMPUTED_GOTO
+  /* Label-address table: opcodes not listed dispatch to the unknown-opcode
+   * failure path, exactly like the switch default. (Range initializer plus
+   * per-opcode overrides is the intended pattern; silence the override
+   * warning for it.) */
+#pragma GCC diagnostic push
+#if defined(__clang__)
+#pragma GCC diagnostic ignored "-Winitializer-overrides"
+#else
+#pragma GCC diagnostic ignored "-Woverride-init"
+#endif
+  static const void *const DispatchTable[256] = {
+      [0 ... 255] = &&L_VM_UNKNOWN,
+      [OP_NOP] = &&L_OP_NOP,
+      [OP_LOADNIL] = &&L_OP_LOADNIL,
+      [OP_LOADFALSE] = &&L_OP_LOADFALSE,
+      [OP_LOADTRUE] = &&L_OP_LOADTRUE,
+      [OP_LOADINT] = &&L_OP_LOADINT,
+      [OP_LOADK] = &&L_OP_LOADK,
+      [OP_GETLOCAL] = &&L_OP_GETLOCAL,
+      [OP_GETLOCAL_CLEAR] = &&L_OP_GETLOCAL_CLEAR,
+      [OP_SETLOCAL] = &&L_OP_SETLOCAL,
+      [OP_CLEARLOCAL] = &&L_OP_CLEARLOCAL,
+      [OP_GETGLOBAL] = &&L_OP_GETGLOBAL,
+      [OP_SETGLOBAL] = &&L_OP_SETGLOBAL,
+      [OP_GETGLOBAL_K] = &&L_OP_GETGLOBAL_K,
+      [OP_POP] = &&L_OP_POP,
+      [OP_DUP] = &&L_OP_DUP,
+      [OP_SWAP] = &&L_OP_SWAP,
+      [OP_NEWTABLE] = &&L_OP_NEWTABLE,
+      [OP_GETTABLE] = &&L_OP_GETTABLE,
+      [OP_SETTABLE] = &&L_OP_SETTABLE,
+      [OP_APPEND] = &&L_OP_APPEND,
+      [OP_GETTABLE_LL] = &&L_OP_GETTABLE_LL,
+      [OP_SETTABLE_LL] = &&L_OP_SETTABLE_LL,
+      [OP_SETTABLE_POP] = &&L_OP_SETTABLE_POP,
+      [OP_NOT] = &&L_OP_NOT,
+      [OP_EQ] = &&L_OP_EQ,
+      [OP_NEQ] = &&L_OP_NEQ,
+      [OP_LT] = &&L_OP_LT,
+      [OP_LE] = &&L_OP_LE,
+      [OP_ADD] = &&L_OP_ADD,
+      [OP_SUB] = &&L_OP_SUB,
+      [OP_MUL] = &&L_OP_MUL,
+      [OP_DIV] = &&L_OP_DIV,
+      [OP_MOD] = &&L_OP_MOD,
+      [OP_POW] = &&L_OP_POW,
+      [OP_UNM] = &&L_OP_UNM,
+      [OP_LEN] = &&L_OP_LEN,
+      [OP_CONCAT] = &&L_OP_CONCAT,
+      [OP_JMP] = &&L_OP_JMP,
+      [OP_JMPF] = &&L_OP_JMPF,
+      [OP_JMPT] = &&L_OP_JMPT,
+      [OP_LOOP] = &&L_OP_LOOP,
+      [OP_JMP_S] = &&L_OP_JMP_S,
+      [OP_LOOP_S] = &&L_OP_LOOP_S,
+      [OP_NLOOP_PREP] = &&L_OP_NLOOP_PREP,
+      [OP_NLOOP_STEP] = &&L_OP_NLOOP_STEP,
+      [OP_GLOOP_SETUP] = &&L_OP_GLOOP_SETUP,
+      [OP_GLOOP_CALL] = &&L_OP_GLOOP_CALL,
+      [OP_GLOOP_STEP] = &&L_OP_GLOOP_STEP,
+      [OP_CALL] = &&L_OP_CALL,
+      [OP_CALLM] = &&L_OP_CALLM,
+      [OP_TAILCALL] = &&L_OP_TAILCALL,
+      [OP_CLOSURE] = &&L_OP_CLOSURE,
+      [OP_CLOSURE_S] = &&L_OP_CLOSURE_S,
+      [OP_GETUPVAL] = &&L_OP_GETUPVAL,
+      [OP_SETUPVAL] = &&L_OP_SETUPVAL,
+      [OP_CLOSE] = &&L_OP_CLOSE,
+      [OP_VARARG] = &&L_OP_VARARG,
+      [OP_ADJUST] = &&L_OP_ADJUST,
+      [OP_APPENDM] = &&L_OP_APPENDM,
+      [OP_RET] = &&L_OP_RET,
+      [OP_RET0] = &&L_OP_RET0,
+      [OP_RET1] = &&L_OP_RET1,
+  };
+#pragma GCC diagnostic pop
+#endif
 
   RELOAD_FRAME();
 
   for (;;) {
     U8 op;
+
+#if MLUA_VM_COMPUTED_GOTO
+  VM_DispatchNext:
+#endif
 
     /*
      * GC safepoint. Allocations never collect directly (they only set
@@ -748,253 +929,331 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
 
     op = READ_BYTE();
 
-    switch (op) {
-    case OP_NOP:
-      break;
+#if MLUA_PROFILE_OPS
+    OpProfileCounts[op]++;
+#endif
 
-    case OP_LOADNIL:
+    VM_SWITCH(op)
+    {
+    VM_CASE(OP_NOP):
+      VM_BREAK;
+
+    VM_CASE(OP_LOADNIL):
       STACK_PUSH(MLUA_NIL);
-      break;
+      VM_BREAK;
 
-    case OP_LOADFALSE:
+    VM_CASE(OP_LOADFALSE):
       STACK_PUSH(MLUA_FALSE);
-      break;
+      VM_BREAK;
 
-    case OP_LOADTRUE:
+    VM_CASE(OP_LOADTRUE):
       STACK_PUSH(MLUA_TRUE);
-      break;
+      VM_BREAK;
 
-    case OP_LOADINT: {
+    VM_CASE(OP_LOADINT): {
       I8 val = (I8)READ_BYTE();
       STACK_PUSH(MakeInt(val));
-      break;
+      VM_BREAK;
     }
 
-    case OP_LOADK: {
+    VM_CASE(OP_LOADK): {
       U8 k = READ_BYTE();
       if (k < proto->ConstantsSize) {
         STACK_PUSH(proto->Constants[k]);
       } else {
         STACK_PUSH(MLUA_NIL);
       }
-      break;
+      VM_BREAK;
     }
 
-    case OP_GETLOCAL: {
+    VM_CASE(OP_GETLOCAL): {
       U8 slot = READ_BYTE();
       MLuaValue val = LOCAL_GET(slot);
       STACK_PUSH(val);
-      break;
+      VM_BREAK;
     }
 
-    case OP_GETLOCAL_CLEAR: {
+    VM_CASE(OP_GETLOCAL_CLEAR): {
       U8 slot = READ_BYTE();
       MLuaValue val = LOCAL_GET(slot);
       LOCAL_SET(slot, MLUA_NIL);
       STACK_PUSH(val);
-      break;
+      VM_BREAK;
     }
 
-    case OP_SETLOCAL: {
+    VM_CASE(OP_SETLOCAL): {
       U8 slot = READ_BYTE();
       MLuaValue val = STACK_POP();
       LOCAL_SET(slot, val);
-      break;
+      VM_BREAK;
     }
 
-    case OP_CLEARLOCAL: {
+    VM_CASE(OP_CLEARLOCAL): {
       U8 slot = READ_BYTE();
       LOCAL_SET(slot, MLUA_NIL);
-      break;
+      VM_BREAK;
     }
 
-    case OP_GETGLOBAL: {
+    VM_CASE(OP_GETGLOBAL): {
       /* Stack-based: pops key, pushes _G[key] */
       MLuaValue key = STACK_POP();
       MLuaValue val = MLuaTableGet(L, L->Globals, key);
       MLuaDebugPrint("OP_GETGLOBAL val_type=%llx\n", (unsigned long long)val);
       STACK_PUSH(val);
-      break;
+      VM_BREAK;
     }
 
-    case OP_SETGLOBAL: {
+    VM_CASE(OP_SETGLOBAL): {
       /* Stack-based: pops key and val, sets _G[key]=val */
       MLuaValue val = STACK_POP();
       MLuaValue key = STACK_POP();
       MLuaTableSet(L, L->Globals, key, val);
-      break;
+      VM_BREAK;
     }
 
-    case OP_POP: {
+    VM_CASE(OP_GETGLOBAL_K): {
+      /* Fused LOADK B; GETGLOBAL */
+      U8 k = READ_BYTE();
+      MLuaValue val = MLuaTableGet(L, L->Globals, proto->Constants[k]);
+      STACK_PUSH(val);
+      VM_BREAK;
+    }
+
+    VM_CASE(OP_POP): {
       U8 count = READ_BYTE();
       L->EvalTop -= count;
-      break;
+      VM_BREAK;
     }
 
-    case OP_DUP: {
+    VM_CASE(OP_DUP): {
       /* Duplicate top of stack */
       MLuaValue val = STACK_TOP();
       STACK_PUSH(val);
-      break;
+      VM_BREAK;
     }
 
-    case OP_SWAP: {
+    VM_CASE(OP_SWAP): {
       /* Swap top two values */
       MLuaValue a = STACK_POP();
       MLuaValue b = STACK_POP();
       STACK_PUSH(a);
       STACK_PUSH(b);
-      break;
+      VM_BREAK;
     }
 
-    case OP_NEWTABLE: {
+    VM_CASE(OP_NEWTABLE): {
       MLuaValue t = MLuaTableNew(L);
       STACK_PUSH(t);
-      break;
+      VM_BREAK;
     }
 
-    case OP_GETTABLE: {
+    VM_CASE(OP_GETTABLE): {
       MLuaValue key = STACK_POP();
       MLuaValue tbl = STACK_POP();
       MLuaValue result;
       VM_TRY(MLuaTableGetSafe(L, tbl, key, &result));
       STACK_PUSH(result);
-      break;
+      VM_BREAK;
     }
 
-    case OP_SETTABLE: {
+    VM_CASE(OP_SETTABLE): {
       MLuaValue val = STACK_POP();
       MLuaValue key = STACK_POP();
       MLuaValue tbl = STACK_TOP();
       VM_TRY(MLuaTableSetSafe(L, tbl, key, val));
-      break;
+      VM_BREAK;
     }
 
-    case OP_APPEND: {
+    VM_CASE(OP_APPEND): {
       MLuaValue val = STACK_POP();
       MLuaValue tbl = STACK_TOP();
       MLuaTableAppend(L, tbl, val);
-      break;
+      VM_BREAK;
     }
 
-    case OP_NOT: {
+    VM_CASE(OP_GETTABLE_LL): {
+      /* Fused GETLOCAL t; GETLOCAL k; GETTABLE. Operand: (t << 4) | k. */
+      U8 slots = READ_BYTE();
+      MLuaValue tbl = LOCAL_GET(slots >> 4);
+      MLuaValue key = LOCAL_GET(slots & 0x0F);
+      MLuaValue result;
+      if (TryArrayGetFast(tbl, key, &result)) {
+        STACK_PUSH(result);
+        VM_BREAK;
+      }
+      VM_TRY(MLuaTableGetSafe(L, tbl, key, &result));
+      STACK_PUSH(result);
+      VM_BREAK;
+    }
+
+    VM_CASE(OP_SETTABLE_LL): {
+      /* Fused GETLOCAL t; GETLOCAL k; <value>; SETTABLE; POP 1: pops only
+       * the value, the table never crosses the stack. */
+      U8 slots = READ_BYTE();
+      MLuaValue val = STACK_POP();
+      MLuaValue tbl = LOCAL_GET(slots >> 4);
+      MLuaValue key = LOCAL_GET(slots & 0x0F);
+      if (TryArraySetFast(tbl, key, val)) {
+        VM_BREAK;
+      }
+      VM_TRY(MLuaTableSetSafe(L, tbl, key, val));
+      VM_BREAK;
+    }
+
+    VM_CASE(OP_SETTABLE_POP): {
+      /* SETTABLE that also drops the table (fuses the trailing POP 1) */
+      MLuaValue val = STACK_POP();
+      MLuaValue key = STACK_POP();
+      MLuaValue tbl = STACK_POP();
+      VM_TRY(MLuaTableSetSafe(L, tbl, key, val));
+      VM_BREAK;
+    }
+
+    VM_CASE(OP_NOT): {
       MLuaValue v = STACK_POP();
       STACK_PUSH(IsTruthy(v) ? MLUA_FALSE : MLUA_TRUE);
-      break;
+      VM_BREAK;
     }
 
-    case OP_EQ: {
+    VM_CASE(OP_EQ): {
       MLuaValue b = STACK_POP();
       MLuaValue a = STACK_POP();
       STACK_PUSH(MLuaCompare(L, OP_EQ, a, b) ? MLUA_TRUE : MLUA_FALSE);
-      break;
+      VM_BREAK;
     }
 
-    case OP_NEQ: {
+    VM_CASE(OP_NEQ): {
       MLuaValue b = STACK_POP();
       MLuaValue a = STACK_POP();
       STACK_PUSH(MLuaCompare(L, OP_NEQ, a, b) ? MLUA_TRUE : MLUA_FALSE);
-      break;
+      VM_BREAK;
     }
 
-    case OP_LT: {
+    VM_CASE(OP_LT): {
       MLuaValue b = STACK_POP();
       MLuaValue a = STACK_POP();
       STACK_PUSH(MLuaCompare(L, OP_LT, a, b) ? MLUA_TRUE : MLUA_FALSE);
-      break;
+      VM_BREAK;
     }
 
-    case OP_LE: {
+    VM_CASE(OP_LE): {
       MLuaValue b = STACK_POP();
       MLuaValue a = STACK_POP();
       STACK_PUSH(MLuaCompare(L, OP_LE, a, b) ? MLUA_TRUE : MLUA_FALSE);
-      break;
+      VM_BREAK;
     }
 
-    case OP_ADD:
-    case OP_SUB:
-    case OP_MUL:
-    case OP_DIV:
-    case OP_MOD:
-    case OP_POW: {
+    VM_CASE(OP_ADD):
+    VM_CASE(OP_SUB):
+    VM_CASE(OP_MUL): {
+      MLuaValue b = STACK_POP();
+      MLuaValue a = STACK_POP();
+      MLuaValue result;
+      /*
+       * Fast path: two inline ints whose result stays inline. The
+       * expressions match MLuaArith's integer path exactly; a result
+       * outside the inline range falls through so the generic path does
+       * the boxing (the range test folds to always-true on the 64-bit
+       * representation, where every I32 is inline).
+       */
+      if (IsInlineInt(a) && IsInlineInt(b)) {
+        I32 ia = GetInt(a);
+        I32 ib = GetInt(b);
+        I32 r = (op == OP_ADD)   ? ia + ib
+                : (op == OP_SUB) ? ia - ib
+                                 : ia * ib;
+        if (r >= MLUA_INLINE_INT_MIN && r <= MLUA_INLINE_INT_MAX) {
+          STACK_PUSH(MakeInt(r));
+          VM_BREAK;
+        }
+      }
+      result = MLuaArith(L, (MLuaOpCode)op, a, b);
+      VM_CHECK_NIL(result); /* Type error in arithmetic */
+      STACK_PUSH(result);
+      VM_BREAK;
+    }
+
+    VM_CASE(OP_DIV):
+    VM_CASE(OP_MOD):
+    VM_CASE(OP_POW): {
       MLuaValue b = STACK_POP();
       MLuaValue a = STACK_POP();
       MLuaValue result = MLuaArith(L, (MLuaOpCode)op, a, b);
       VM_CHECK_NIL(result); /* Type error in arithmetic */
       STACK_PUSH(result);
-      break;
+      VM_BREAK;
     }
 
-    case OP_UNM: {
+    VM_CASE(OP_UNM): {
       MLuaValue a = STACK_POP();
       MLuaValue result = MLuaArith(L, OP_UNM, a, MLUA_NIL);
       VM_CHECK_NIL(result); /* Type error in unary minus */
       STACK_PUSH(result);
-      break;
+      VM_BREAK;
     }
 
-    case OP_LEN: {
+    VM_CASE(OP_LEN): {
       MLuaValue v = STACK_POP();
       MLuaValue len = MLuaLen(L, v);
       VM_CHECK_NIL(len);
       STACK_PUSH(len);
-      break;
+      VM_BREAK;
     }
 
-    case OP_CONCAT: {
+    VM_CASE(OP_CONCAT): {
       U8 count = READ_BYTE();
       MLuaValue result = MLuaConcat(L, count);
       VM_CHECK_NIL(result);
       L->EvalTop -= count;
       STACK_PUSH(result);
-      break;
+      VM_BREAK;
     }
 
-    case OP_JMP: {
+    VM_CASE(OP_JMP): {
       I8 offset = (I8)READ_BYTE();
       pc += offset;
-      break;
+      VM_BREAK;
     }
 
-    case OP_JMPF: {
+    VM_CASE(OP_JMPF): {
       I8 offset = (I8)READ_BYTE();
       MLuaValue v = STACK_POP();
       if (!IsTruthy(v)) {
         pc += offset;
       }
-      break;
+      VM_BREAK;
     }
 
-    case OP_JMPT: {
+    VM_CASE(OP_JMPT): {
       I8 offset = (I8)READ_BYTE();
       MLuaValue v = STACK_POP();
       if (IsTruthy(v)) {
         pc += offset;
       }
-      break;
+      VM_BREAK;
     }
 
-    case OP_LOOP: {
+    VM_CASE(OP_LOOP): {
       U8 offset = READ_BYTE();
       pc -= offset;
-      break;
+      VM_BREAK;
     }
 
-    case OP_JMP_S: {
+    VM_CASE(OP_JMP_S): {
       /* Long forward jump: signed offset pushed via constant */
       MLuaValue v = STACK_POP();
       pc += GetInt(v);
-      break;
+      VM_BREAK;
     }
 
-    case OP_LOOP_S: {
+    VM_CASE(OP_LOOP_S): {
       /* Long backward jump: unsigned distance pushed via constant */
       MLuaValue v = STACK_POP();
       pc -= GetInt(v);
-      break;
+      VM_BREAK;
     }
 
-    case OP_NLOOP_PREP: {
+    VM_CASE(OP_NLOOP_PREP): {
       /*
        * NLOOP_PREP: Numeric for-loop preparation (SPEC.FORLOOP.md).
        * Format: [OP_NLOOP_PREP] [u8 Base_Index] (2 Bytes)
@@ -1042,10 +1301,10 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
         /* Note: Body follows immediately, or we could jump to bodyPC */
         (void)bodyPC; /* Body is inline, no jump needed */
       }
-      break;
+      VM_BREAK;
     }
 
-    case OP_NLOOP_STEP: {
+    VM_CASE(OP_NLOOP_STEP): {
       /*
        * NLOOP_STEP: Numeric for-loop step (SPEC.FORLOOP.md).
        * Format: [OP_NLOOP_STEP] [u8 Base_Index] (2 Bytes)
@@ -1066,21 +1325,26 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       I32 step = MLuaGetIntVal(LOCAL_GET(base + 2));
       I32 bodyPC = GetInt(LOCAL_GET(base + 3)); /* Stored body target PC */
 
-      /* Increment index */
+      /* Increment index (one boxing per step; the same value feeds the
+       * local and, when the loop continues, the pushed index) */
       idx += step;
-      LOCAL_SET(base, MLuaMakeInt(L, idx));
+      {
+        MLuaValue nv = MLuaMakeInt(L, idx);
+        VM_CHECK_NIL(nv); /* 32-bit boxing can hit out-of-memory */
+        LOCAL_SET(base, nv);
 
-      /* Boundary check */
-      if ((step > 0 && idx <= limit) || (step < 0 && idx >= limit)) {
-        /* Continue loop - push new index, jump to body */
-        STACK_PUSH(MLuaMakeInt(L, idx));
-        pc = proto->Code + bodyPC;
+        /* Boundary check */
+        if ((step > 0 && idx <= limit) || (step < 0 && idx >= limit)) {
+          /* Continue loop - push new index, jump to body */
+          STACK_PUSH(nv);
+          pc = proto->Code + bodyPC;
+        }
       }
       /* Else: loop ends, fallthrough */
-      break;
+      VM_BREAK;
     }
 
-    case OP_GLOOP_SETUP: {
+    VM_CASE(OP_GLOOP_SETUP): {
       /*
        * GLOOP_SETUP: Generic for-loop setup (SPEC.FORLOOP.md).
        * Format: [OP_GLOOP_SETUP] [u8 Base_Index] (2 Bytes)
@@ -1106,10 +1370,10 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       LOCAL_SET(base + 3, bodyTarget); /* Body_Target */
 
       /* Fallthrough to loop head */
-      break;
+      VM_BREAK;
     }
 
-    case OP_GLOOP_CALL: {
+    VM_CASE(OP_GLOOP_CALL): {
       /*
        * GLOOP_CALL: Generic for-loop call prep (SPEC.FORLOOP.md).
        * Format: [OP_GLOOP_CALL] [u8 Base_Index] (2 Bytes)
@@ -1128,10 +1392,10 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       STACK_PUSH(LOCAL_GET(base + 2)); /* Control */
 
       /* Fallthrough to OP_CALL - iterator takes 2 args (state, ctrl) */
-      break;
+      VM_BREAK;
     }
 
-    case OP_GLOOP_STEP: {
+    VM_CASE(OP_GLOOP_STEP): {
       /*
        * GLOOP_STEP: Generic for-loop step.
        * Format: [OP_GLOOP_STEP] [u8 Base_Index] (2 Bytes)
@@ -1172,12 +1436,12 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
         LOCAL_SET(base + 2, firstResult);
         pc = proto->Code + GetInt(LOCAL_GET(base + 3));
       }
-      break;
+      VM_BREAK;
     }
 
-    case OP_CALL:
-    case OP_CALLM:
-    case OP_TAILCALL: {
+    VM_CASE(OP_CALL):
+    VM_CASE(OP_CALLM):
+    VM_CASE(OP_TAILCALL): {
       /*
        * Function call. Stack: [..., func, arg1 .. argN].
        * OP_CALL:     N = operand.
@@ -1218,6 +1482,8 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
           L->ArgsCount = nargs_call;
           L->ArgsTop = win + nargs_call;
 
+          U32 gcBefore = L->GCCycleCount;
+
           L->Frames[L->FrameTop - 1].PC = (Size)(pc - proto->Code);
           savedInC = L->InCCall;
           L->InCCall = TRUE;
@@ -1239,9 +1505,13 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
           }
 
           /* The C function may have called back into Lua and triggered a
-           * compacting GC. Re-derive all frame-local raw pointers before
-           * touching proto/pc/cl again. */
-          RELOAD_FRAME();
+           * compacting GC, which moves proto/cl (the frames array itself
+           * is fixed-capacity, and nested calls restore the register
+           * fields on their way out). Re-derive the raw pointers only
+           * when a collection actually ran. */
+          if (L->GCCycleCount != gcBefore) {
+            RELOAD_FRAME();
+          }
 
           /* Release the C call's window, restore this frame's */
           L->ArgsTop = win;
@@ -1268,7 +1538,7 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
             goto do_return;
           }
         }
-        break;
+        VM_BREAK;
       }
 
       if (!IsPtr(func) ||
@@ -1314,11 +1584,11 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
         }
       }
       RELOAD_FRAME();
-      break;
+      VM_BREAK;
     }
 
-    case OP_CLOSURE:
-    case OP_CLOSURE_S: {
+    VM_CASE(OP_CLOSURE):
+    VM_CASE(OP_CLOSURE_S): {
       /* Create closure from nested proto and capture its upvalues */
       Size protoIdx;
       MLuaProto *childProto;
@@ -1370,10 +1640,10 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
 
         MLUA_CLOSURE_UPVALS(newCl)[u] = uv;
       }
-      break;
+      VM_BREAK;
     }
 
-    case OP_GETUPVAL: {
+    VM_CASE(OP_GETUPVAL): {
       U8 idx = READ_BYTE();
       MLuaUpvalue *uv;
       if (!cl || idx >= cl->NumUpvalues ||
@@ -1381,10 +1651,10 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
         VM_FAIL(L, MLUA_ERR_RUNTIME, "invalid upvalue");
       }
       STACK_PUSH(*uv->Location);
-      break;
+      VM_BREAK;
     }
 
-    case OP_SETUPVAL: {
+    VM_CASE(OP_SETUPVAL): {
       U8 idx = READ_BYTE();
       MLuaValue val = STACK_POP();
       MLuaUpvalue *uv;
@@ -1393,18 +1663,18 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
         VM_FAIL(L, MLUA_ERR_RUNTIME, "invalid upvalue");
       }
       *uv->Location = val;
-      break;
+      VM_BREAK;
     }
 
-    case OP_CLOSE: {
+    VM_CASE(OP_CLOSE): {
       U8 base = READ_BYTE();
       if (L->OpenUpvalues) {
         MLuaCloseUpvalues(L, &L->Locals[L->LocalsBase + base]);
       }
-      break;
+      VM_BREAK;
     }
 
-    case OP_VARARG: {
+    VM_CASE(OP_VARARG): {
       /*
        * Push varargs from this frame's Args window.
        * Varargs are Args[ArgsBase + NumParams .. ArgsBase + ArgsCount).
@@ -1435,10 +1705,10 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
           }
         }
       }
-      break;
+      VM_BREAK;
     }
 
-    case OP_ADJUST: {
+    VM_CASE(OP_ADJUST): {
       /* Normalize the last call's results to exactly 'want' values */
       U8 want = READ_BYTE();
       Size have = L->LastCallResults;
@@ -1452,10 +1722,10 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
         have++;
       }
       L->LastCallResults = want;
-      break;
+      VM_BREAK;
     }
 
-    case OP_APPENDM: {
+    VM_CASE(OP_APPENDM): {
       /* Append the last call's results to the table beneath them */
       Size n = L->LastCallResults;
       MLuaValue tbl = L->EvalStack[L->EvalTop - n - 1];
@@ -1465,12 +1735,12 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
         MLuaTableAppend(L, tbl, L->EvalStack[L->EvalTop - n + i]);
       }
       L->EvalTop -= n;
-      break;
+      VM_BREAK;
     }
 
-    case OP_RET:
-    case OP_RET0:
-    case OP_RET1: {
+    VM_CASE(OP_RET):
+    VM_CASE(OP_RET0):
+    VM_CASE(OP_RET1): {
       U8 nret;
 
       if (op == OP_RET) {
@@ -1501,11 +1771,11 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       }
 
       RELOAD_FRAME();
-      break;
+      VM_BREAK;
     }
     }
 
-    default:
+    VM_CASE_DEFAULT:
       VM_FAIL(L, MLUA_ERRRUN, "unknown opcode");
     }
   }

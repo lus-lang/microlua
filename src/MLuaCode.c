@@ -29,6 +29,7 @@ Size MLuaOpSize(MLuaOpCode op) {
   case OP_SETTABLE:
   case OP_APPEND:
   case OP_APPENDM:
+  case OP_SETTABLE_POP:
   case OP_NOT:
   case OP_EQ:
   case OP_LT:
@@ -86,6 +87,9 @@ Size MLuaOpSize(MLuaOpCode op) {
   case OP_VARARG:
   case OP_TAILCALL:
   case OP_CONCAT:
+  case OP_GETGLOBAL_K:
+  case OP_GETTABLE_LL:
+  case OP_SETTABLE_LL:
     return 2;
 
   default:
@@ -153,12 +157,51 @@ Size MLuaEmitBytes(MLuaFuncState *fs, const U8 *bytes, Size count) {
 
   Size pos = p->CodeSize;
   p->CodeSize += count;
+  fs->PrevInstrPos = fs->LastInstrPos;
+  fs->LastInstrPos = pos;
   return pos;
 }
 
 Size MLuaEmitOp(MLuaFuncState *fs, MLuaOpCode op) {
   U8 b = (U8)op;
   return MLuaEmitBytes(fs, &b, 1);
+}
+
+Bool MLuaInsertBytes(MLuaFuncState *fs, Size pos, const U8 *bytes,
+                     Size count) {
+  MLuaProto *p = fs->Proto;
+  Size i;
+
+  if (pos > p->CodeSize) {
+    return FALSE;
+  }
+  while (p->CodeSize + count > p->CodeCap) {
+    if (!GrowCode(fs)) {
+      return FALSE;
+    }
+  }
+
+  for (i = p->CodeSize; i > pos; i--) {
+    p->Code[i + count - 1] = p->Code[i - 1];
+  }
+  for (i = 0; i < count; i++) {
+    p->Code[pos + i] = bytes[i];
+  }
+  p->CodeSize += count;
+
+  /* Positions recorded inside the shifted block move with it. (Callers
+   * only insert where no jump target, patch position, or line-map entry
+   * can point past `pos` -- see the fusion-repair call site.) */
+  if (fs->LastCallEnd > pos) {
+    fs->LastCallEnd += count;
+  }
+  if (fs->LastInstrPos != (Size)-1 && fs->LastInstrPos >= pos) {
+    fs->LastInstrPos += count;
+  }
+  if (fs->PrevInstrPos != (Size)-1 && fs->PrevInstrPos >= pos) {
+    fs->PrevInstrPos += count;
+  }
+  return TRUE;
 }
 
 Size MLuaEmitOpB(MLuaFuncState *fs, MLuaOpCode op, U8 b) {
@@ -302,6 +345,10 @@ const char *MLuaOpName(MLuaOpCode op) {
       [OP_GETTABLE] = "GETTABLE",
       [OP_SETTABLE] = "SETTABLE",
       [OP_APPEND] = "APPEND",
+      [OP_GETGLOBAL_K] = "GETGLOBAL_K",
+      [OP_GETTABLE_LL] = "GETTABLE_LL",
+      [OP_SETTABLE_LL] = "SETTABLE_LL",
+      [OP_SETTABLE_POP] = "SETTABLE_POP",
       [OP_NOT] = "NOT",
       [OP_EQ] = "EQ",
       [OP_LT] = "LT",

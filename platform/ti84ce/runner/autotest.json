@@ -1,0 +1,43 @@
+{
+    "_comment": [
+        "Run with: cemu-autotester autotest.json (set AUTOTESTER_ROM to your ROM).",
+        "This sequence types Asm(prgmMLUAR, which only works on OS <= 5.4 ROMs;",
+        "TI removed assembly execution in OS 5.5+. On newer ROMs use",
+        "autotest-cesium.json (requires the Cesium shell installed as an app).",
+        "Flow: picker lists SMOKE (the transferred bytecode appvar), enter runs",
+        "it, the hash checks the printed output, then exit via pause + clear.",
+        "Run tools/get_clibs.py once to fetch test/clibs (LibLoad + graphx)."
+    ],
+    "rom": "84ce.rom",
+    "transfer_files": [
+        "bin/MLUAR.8xp",
+        "test/SMOKE.8xv",
+        "test/clibs/libload.8xv",
+        "test/clibs/graphx.8xv"
+    ],
+    "target": {
+        "name": "MLUAR",
+        "isASM": true
+    },
+    "sequence": [
+        "action|launch",
+        "delay|3000",
+        "key|enter",
+        "delay|4000",
+        "hashWait|1",
+        "key|enter",
+        "delay|1000",
+        "key|clear"
+    ],
+    "hashes": {
+        "1": {
+            "description": "Home screen after the SMOKE appvar ran",
+            "start": "vram_start",
+            "size": "vram_16_size",
+            "expected_CRCs": [
+                "91375720"
+            ],
+            "timeout": 10000
+        }
+    }
+}

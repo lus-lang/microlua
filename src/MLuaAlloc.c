@@ -16,15 +16,45 @@
 Size MLuaNextGCThreshold(MLuaState *L, Size used) {
   Size growth = (used * MLUA_DEFAULT_GC_THRESHOLD_PERCENT) / 100;
   Size threshold;
+  Size reserve;
+  Size ceiling;
+
+  /*
+   * Keep an allocation reserve below the heap wall. Allocations never
+   * collect (safepoint model), so the collection must be REQUESTED while
+   * the current instruction's allocations can still succeed from the
+   * remaining space; a threshold at HeapSize would only fail the very
+   * operation that crossed it, with the heap full of collectable garbage.
+   */
+  reserve = L->HeapSize / 8;
+  if (reserve < 512) {
+    reserve = 512;
+  }
+  if (reserve > 8192) {
+    reserve = 8192;
+  }
+  ceiling = L->HeapSize - reserve;
 
   if (growth < 4096) {
     growth = 4096;
   }
-  if (growth > L->HeapSize - used) {
-    return L->HeapSize;
-  }
   threshold = used + growth;
-  return threshold > L->HeapSize ? L->HeapSize : threshold;
+  if (threshold > ceiling) {
+    threshold = ceiling;
+  }
+  if (threshold <= used) {
+    /* Live data already sits above the ceiling: the reserve cannot be
+     * kept. Hand out half of whatever room remains before the next
+     * collection so consecutive collections amortize geometrically; a
+     * fixed small batch here means a full mark-compact every few
+     * allocations for as long as the heap stays this full. */
+    Size batch = (L->HeapSize - used) / 2;
+    if (batch < 256) {
+      batch = 256;
+    }
+    threshold = used + batch;
+  }
+  return threshold;
 }
 
 /* Common initialization logic */
@@ -353,7 +383,7 @@ void MLuaGetMemoryStats(MLuaState *L, MLuaMemoryStats *out) {
     switch (objType) {
     case OBJTYPE_STRING: {
       MLuaStringHeader *sh = MLUA_STRHEADER(obj);
-      out->StringPayloadBytes += sh->Length + 1;
+      out->StringPayloadBytes += MLuaStrHeaderLen(sh) + 1;
       break;
     }
     case OBJTYPE_TABLE: {

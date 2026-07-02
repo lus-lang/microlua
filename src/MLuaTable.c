@@ -632,6 +632,22 @@ MLuaStatus MLuaTableGetSafe(MLuaState *L, MLuaValue tbl, MLuaValue key,
     return MLUA_ERR_RUNTIME;
   }
 
+  /* Fast path: inline-int key hitting a live array slot -- the common
+   * shape of indexed reads. A nil slot must take the generic route (it
+   * consults the hash part and then the Forward chain); boxed-int keys
+   * (32-bit) do too. */
+  if (IsInlineInt(key)) {
+    I32 i = GetInt(key);
+    MLuaTableHeader *th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl));
+    if (i >= 1 && (U32)i <= th->ArrayLen) {
+      MLuaValue v = MLuaTableArrayData(th)[i - 1];
+      if (!IsNil(v)) {
+        *out = v;
+        return MLUA_OK;
+      }
+    }
+  }
+
   *out = MLuaTableGet(L, tbl, key);
   return MLUA_OK;
 }
@@ -643,6 +659,18 @@ MLuaStatus MLuaTableSetSafe(MLuaState *L, MLuaValue tbl, MLuaValue key,
     L->ErrorMsg = IsNil(tbl) ? "attempt to index a nil value"
                              : "attempt to index a non-table value";
     return MLUA_ERR_RUNTIME;
+  }
+
+  /* Fast path: non-nil store to an existing array slot. Appends, nil
+   * stores (length bookkeeping), growth, and holes take the generic
+   * route. */
+  if (IsInlineInt(key) && !IsNil(value)) {
+    I32 i = GetInt(key);
+    MLuaTableHeader *th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl));
+    if (i >= 1 && (U32)i <= th->ArrayLen) {
+      MLuaTableArrayData(th)[i - 1] = value;
+      return MLUA_OK;
+    }
   }
 
   L->ErrorMsg = NULL;

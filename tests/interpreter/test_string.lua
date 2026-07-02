@@ -76,6 +76,20 @@ test.describe("string.pack/unpack", function()
         local size = string.packsize("bHI")
         test.expect(size).toBe(7) -- 1 + 2 + 4
     end)
+
+    test.it("round-trips 4-byte values with high bytes set", function()
+        -- Bytes >= 0x80 in the upper positions exercise the <<16/<<24
+        -- reassembly paths, which must not depend on the width of int.
+        local function rt(fmt, v)
+            local value = string.unpack(fmt, string.pack(fmt, v))
+            return value
+        end
+        test.expect(rt("I", 0x12345678)).toBe(305419896)
+        test.expect(rt("I", 8388608)).toBe(8388608)     -- 00 00 80 00
+        test.expect(rt("I", -2147483648)).toBe(-2147483648) -- 00 00 00 80
+        test.expect(rt("I", 2147483647)).toBe(2147483647)   -- FF FF FF 7F
+        test.expect(rt("i", -1)).toBe(-1)               -- FF FF FF FF
+    end)
 end)
 
 test.describe("string.sub", function()
@@ -146,6 +160,73 @@ test.describe("unicode awareness", function()
     test.it("reverse keeps multibyte sequences intact", function()
         test.expect(string.reverse("日本語")).toBe("語本日")
         test.expect(string.reverse("aé")).toBe("éa")
+    end)
+
+    -- Positional ops take an O(1) path on strings whose cached all-ASCII
+    -- flag is set. These pin down that the flag (a) speeds ASCII strings
+    -- without changing results, (b) is NOT set when any byte is multibyte,
+    -- across every way a string acquires its header: literal/interning,
+    -- concat folding, and library builders.
+    test.it("positional ops on long ascii strings", function()
+        local s = "abcdefghijklmnop" -- long: heap-interned, flagged
+        test.expect(string.len(s)).toBe(16)
+        test.expect(string.byte(s, 16)).toBe(112)
+        test.expect(string.byte(s, -1)).toBe(112)
+        test.expect(string.sub(s, 3, 5)).toBe("cde")
+        test.expect(string.sub(s, -3)).toBe("nop")
+        test.expect(string.sub(s, 5, 100)).toBe("efghijklmnop")
+        test.expect(string.sub(s, 9, 3)).toBe("")
+        local a, b, c = string.byte(s, 2, 4)
+        test.expect(a).toBe(98)
+        test.expect(b).toBe(99)
+        test.expect(c).toBe(100)
+    end)
+
+    test.it("concat-built ascii strings stay codepoint-correct", function()
+        local s = "start"
+        for i = 1, 5 do
+            s = s .. "-seg" .. i
+        end
+        test.expect(string.len(s)).toBe(30)
+        test.expect(string.sub(s, 6, 10)).toBe("-seg1")
+        test.expect(string.byte(s, 30)).toBe(53) -- '5'
+    end)
+
+    test.it("concat with multibyte tail is not treated as ascii", function()
+        local s = "abcdefgh" .. "é" -- ascii head, multibyte fold
+        test.expect(string.len(s)).toBe(9)
+        test.expect(string.byte(s, 9)).toBe(233)
+        test.expect(string.sub(s, 9, 9)).toBe("é")
+        test.expect(string.sub(s, -1)).toBe("é")
+    end)
+
+    test.it("concat with multibyte head is not treated as ascii", function()
+        local s = "é" .. "abcdefgh"
+        test.expect(string.len(s)).toBe(9)
+        test.expect(string.byte(s, 1)).toBe(233)
+        test.expect(string.sub(s, 2, 4)).toBe("abc")
+    end)
+
+    test.it("multibyte deep inside a long string", function()
+        local s = "aaaaaaaaaa日bbbbbbbbbb"
+        test.expect(string.len(s)).toBe(21)
+        test.expect(string.byte(s, 11)).toBe(26085)
+        test.expect(string.sub(s, 11, 11)).toBe("日")
+        test.expect(string.sub(s, 12, 14)).toBe("bbb")
+        test.expect(string.sub(s, -10)).toBe("bbbbbbbbbb")
+    end)
+
+    test.it("library-built long strings scan correctly", function()
+        local r = string.rep("AB", 500)
+        test.expect(string.len(r)).toBe(1000)
+        local n = 0
+        for k = 1, 1000 do
+            if string.byte(r, k) == 65 then
+                n = n + 1
+            end
+        end
+        test.expect(n).toBe(500)
+        test.expect(string.sub(r, 999, 1000)).toBe("AB")
     end)
 
     test.it("upper and lower are ASCII-only by design", function()

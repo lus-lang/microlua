@@ -230,4 +230,13 @@ void MLuaSetRequirer(MLuaState *L, MLuaRequireFunc func);
  */
 void MLuaOpenLibs(MLuaState *L);
 
+#if MLUA_PROFILE_OPS
+/*
+ * Report per-opcode dispatch counts through the output callback, one
+ * "NAME<tab>count" line per opcode that executed. Counts accumulate for the
+ * process lifetime (across states).
+ */
+void MLuaDumpOpProfile(MLuaState *L);
+#endif
+
 #endif /* MLUA_VM_H */

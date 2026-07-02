@@ -231,9 +231,10 @@ static int MathMin(MLuaState *L) {
 /* ========================================================================== */
 
 static int MathModfF(MLuaState *L) {
-  double x = GetArg(L, 1);
-  double ipart;
-  double fpart = MathModf(x, &ipart);
+  /* MLUA_FLOAT locals: the MathModf hook's out-parameter is MLUA_FLOAT*. */
+  MLUA_FLOAT x = (MLUA_FLOAT)GetArg(L, 1);
+  MLUA_FLOAT ipart;
+  MLUA_FLOAT fpart = MathModf(x, &ipart);
   MLuaPush(L, MLuaMakeNumber(L, ipart));
   MLuaPush(L, MLuaMakeNumber(L, fpart));
   return 2;

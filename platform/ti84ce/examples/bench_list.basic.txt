@@ -1,0 +1,22 @@
+List benchmark: identical computation to bench_list.lua. 60 element-wise
+passes of L3 = L1*L2 + L1 over 500-element lists, then sum(. This is
+TI-BASIC's best case: each pass is a single vectorized statement running
+in OS assembly. Setup (seq( fills) is untimed on both sides.
+Expected SUM: 1025620.
+
+Build: python3 tools/make_basic.py examples/bench_list.basic.txt BENCHLST
+
+--- program source below this line ---
+seq(K-97int(K/97),K,1,500)->L1
+seq(K-89int(K/89),K,1,500)->L2
+startTmr->T
+For(R,1,60)
+L1L2+L1->L3
+End
+sum(L3)->S
+checkTmr(T)->T
+DelVar L1
+DelVar L2
+DelVar L3
+Disp "SUM",S
+Disp "SECONDS",T
