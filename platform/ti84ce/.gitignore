@@ -1,0 +1,4 @@
+bin/
+obj/
+*.rgba
+failure_*.bin

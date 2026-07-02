@@ -1,0 +1,59 @@
+{
+    "_comment": [
+        "OS 5.5+ variant: launches MLUAR through the Cesium shell app, since the",
+        "OS itself refuses to run assembly programs. Assumes Cesium is APPS item",
+        "4 and MLUAR is the 10th entry in its file list - adjust the key|down",
+        "count and the app slot for your ROM's contents.",
+        "Flow: picker lists SMOKE (the transferred bytecode appvar), enter runs",
+        "it, the hash checks the printed output, then exit via pause + clear.",
+        "Run tools/get_clibs.py once to fetch test/clibs (LibLoad + graphx)."
+    ],
+    "rom": "84ce.rom",
+    "transfer_files": [
+        "bin/MLUAR.8xp",
+        "test/SMOKE.8xv",
+        "test/clibs/libload.8xv",
+        "test/clibs/graphx.8xv"
+    ],
+    "target": {
+        "name": "MLUAR",
+        "isASM": true
+    },
+    "sequence": [
+        "delay|2000",
+        "key|apps",
+        "delay|1000",
+        "key|4",
+        "delay|2500",
+        "key|down",
+        "key|down",
+        "key|down",
+        "key|down",
+        "key|down",
+        "key|down",
+        "key|down",
+        "key|down",
+        "key|down",
+        "key|down",
+        "delay|500",
+        "key|enter",
+        "delay|3000",
+        "key|enter",
+        "delay|4000",
+        "hashWait|1",
+        "key|enter",
+        "delay|1000",
+        "key|clear"
+    ],
+    "hashes": {
+        "1": {
+            "description": "Home screen after the SMOKE appvar ran",
+            "start": "vram_start",
+            "size": "vram_16_size",
+            "expected_CRCs": [
+                "91375720"
+            ],
+            "timeout": 10000
+        }
+    }
+}
