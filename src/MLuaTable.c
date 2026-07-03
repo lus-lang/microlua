@@ -11,6 +11,17 @@
 /* Hash Utilities                                                             */
 /* ========================================================================== */
 
+/* Hash-part capacities are powers of two by construction (inline cap 1,
+ * initial 4, growth doubles from the live count), so every probe uses
+ * `hash & (cap - 1)` - the eZ80 has no divider, and even hosted CPUs pay
+ * 20+ cycles for the integer modulo this replaces. */
+MLUA_STATIC_ASSERT((MLUA_TABLE_INITIAL_HASH_SIZE &
+                    (MLUA_TABLE_INITIAL_HASH_SIZE - 1)) == 0,
+                   "hash capacity must stay a power of two");
+MLUA_STATIC_ASSERT((MLUA_TABLE_INLINE_HASH_CAP &
+                    (MLUA_TABLE_INLINE_HASH_CAP - 1)) == 0,
+                   "inline hash capacity must stay a power of two");
+
 static U32 HashValue(MLuaValue key) {
   if (IsInt(key)) {
     /* Simple integer hash (by value, so a boxed int hashes like its I32) */
@@ -104,8 +115,16 @@ MLuaValue MLuaTableNewSized(MLuaState *L, Size arrayHint, Size hashHint) {
     }
   }
 
-  /* Pre-allocate hash part if hint given */
+  /* Pre-allocate hash part if hint given. The capacity must be a power of
+   * two (probes mask with cap-1), so round any external hint up. */
   if (hashHint > 0) {
+    if (hashHint > MLUA_TABLE_INLINE_HASH_CAP) {
+      Size pow2 = MLUA_TABLE_INITIAL_HASH_SIZE;
+      while (pow2 < hashHint && pow2 <= ((Size)MLUA_TABLE_NODE_COUNT_MASK / 2)) {
+        pow2 *= 2;
+      }
+      hashHint = pow2;
+    }
     if (hashHint <= MLUA_TABLE_INLINE_HASH_CAP) {
       MLuaTableSetHashInline(th, TRUE);
       th->NodeCapacity = (U32)MLUA_TABLE_INLINE_HASH_CAP;
@@ -564,11 +583,11 @@ static Bool HashGrow(MLuaState *L, MLuaTableHeader *th) {
   for (i = 0; i < oldCap; i++) {
     if (oldNodes && !IsNil(oldNodes[i].Key) && !IsNil(oldNodes[i].Value)) {
       U32 hash = HashValue(oldNodes[i].Key);
-      Size slot = hash % newCap;
+      Size slot = hash & (newCap - 1);
       Size j;
 
       for (j = 0; j < newCap; j++) {
-        Size idx = (slot + j) % newCap;
+        Size idx = (slot + j) & (newCap - 1);
         if (IsNil(newNodes[idx].Key)) {
           newNodes[idx] = oldNodes[i];
           MLuaTableIncNodeCount(th);
@@ -617,10 +636,10 @@ static MLuaTableNode *HashFind(MLuaTableHeader *th, MLuaValue key) {
   }
 
   hash = HashValue(key);
-  slot = hash % th->NodeCapacity;
+  slot = hash & (th->NodeCapacity - 1);
 
   for (i = 0; i < th->NodeCapacity; i++) {
-    Size idx = (slot + i) % th->NodeCapacity;
+    Size idx = (slot + i) & (th->NodeCapacity - 1);
     MLuaTableNode *node = &nodes[idx];
 
     if (IsNil(node->Key)) {
@@ -702,10 +721,10 @@ static Bool HashSet(MLuaState *L, MLuaTableHeader *th, MLuaValue key,
    * unchanged (the slot was already occupied). */
   nodes = MLuaTableNodeData(th);
   hash = HashValue(key);
-  slot = hash % th->NodeCapacity;
+  slot = hash & (th->NodeCapacity - 1);
 
   for (i = 0; i < th->NodeCapacity; i++) {
-    Size idx = (slot + i) % th->NodeCapacity;
+    Size idx = (slot + i) & (th->NodeCapacity - 1);
     if (IsNil(nodes[idx].Key)) {
       nodes[idx].Key = key;
       nodes[idx].Value = value;
