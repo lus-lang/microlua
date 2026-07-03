@@ -80,6 +80,27 @@ typedef enum {
   /* SETTABLE that also pops the table: replaces SETTABLE; POP 1 */
   OP_SETTABLE_POP = 0x27, /* 1B: t k v → : t[k] = v */
 
+  /* Fused constant-key field access (t.f forms). The store comes in the
+   * same two flavors as SETTABLE vs SETTABLE_POP: the constructor keeps
+   * the table for the next field, a statement store drops it. */
+  OP_GETFIELD_K = 0x28,     /* 2B: t → v   : v = t[constants[B]] */
+  OP_SETFIELD_K = 0x29,     /* 2B: t v → t : t[constants[B]] = v */
+  OP_SETFIELD_K_POP = 0x2A, /* 2B: t v →   : t[constants[B]] = v */
+
+  /* Fused method-call receiver setup: t:m(...) needs [method, t] on the
+   * stack; this replaces DUP; LOADK m; GETTABLE; SWAP. */
+  OP_SELF_K = 0x2B, /* 2B: t → f t : f = t[constants[B]] */
+
+  /* Fused compare+branch: pop two operands, branch when the comparison is
+   * FALSE (the shape every if/while/repeat condition compiles to). Same
+   * I8 offset and backpatch mechanics as OP_JMPF. Emitted only in short
+   * jump form; the long-jump re-parse keeps the unfused compare (its
+   * inversion trick would need JMPT variants, deliberately not added). */
+  OP_JMPF_EQ = 0x2C,  /* 2B: B a b → : if not (a == b): PC += (I8)B */
+  OP_JMPF_NEQ = 0x2D, /* 2B: B a b → : if not (a ~= b): PC += (I8)B */
+  OP_JMPF_LT = 0x2E,  /* 2B: B a b → : if not (a < b):  PC += (I8)B */
+  OP_JMPF_LE = 0x2F,  /* 2B: B a b → : if not (a <= b): PC += (I8)B */
+
   /* ===== Logic (0x30-0x34) ===== */
   OP_NOT = 0x30, /* 1B: v → bool   : Push true if v is nil/false */
   OP_EQ = 0x31,  /* 1B: a b → bool : Push a == b */
@@ -111,7 +132,9 @@ typedef enum {
       0x66, /* 2B: B body exit step limit start → : Init numeric for */
   OP_NLOOP_STEP =
       0x67, /* 2B: B → idx? : Step numeric loop, push idx if continue */
-  OP_GLOOP_SETUP = 0x68, /* 2B: B body func state ctrl → : Init generic for */
+  OP_SETGLOBAL_K = 0x68, /* 2B: B v →   : _G[constants[B]] = v (fused
+                            LOADK B; SWAP; SETGLOBAL; slot reused from the
+                            retired OP_GLOOP_SETUP) */
   OP_GLOOP_CALL =
       0x69, /* 2B: B → func state ctrl : Push iterator args for CALL */
   OP_GLOOP_STEP =
@@ -161,15 +184,15 @@ typedef struct MLuaProto MLuaProto;
 struct MLuaProto {
   /* Code (variable-length bytecode). Sizes are MLuaIdx: the emitter flags
    * "function too large" and the loader rejects oversized section counts,
-   * so these never exceed MLUA_IDX_MAX. */
+   * so these never exceed MLUA_IDX_MAX. Buffer CAPACITIES live in
+   * MLuaFuncState: only the emitter grows these arrays, so keeping the cap
+   * here would store dead bytes in every proto for the program's lifetime. */
   U8 *Code;         /* Bytecode bytes */
   MLuaIdx CodeSize; /* Number of bytes */
-  MLuaIdx CodeCap;  /* Allocated capacity */
 
   /* Constants */
   MLuaValue *Constants;  /* Constant pool (k) */
   MLuaIdx ConstantsSize; /* Number of constants */
-  MLuaIdx ConstantsCap;  /* Allocated capacity */
 
   /* Nested prototypes */
   MLuaProto **Protos; /* Nested function prototypes */
@@ -199,8 +222,7 @@ struct MLuaProto {
     MLUA_LINE_T PC;
     MLUA_LINE_T Line;
   } *LineMap;
-  MLuaIdx LineMapSize; /* Number of entries */
-  MLuaIdx LineMapCap;  /* Allocated capacity */
+  MLuaIdx LineMapSize; /* Number of entries (capacity lives in MLuaFuncState) */
 #endif
 };
 
@@ -231,6 +253,19 @@ struct MLuaFuncState {
   MLuaFuncState *Prev; /* Enclosing function state */
   MLuaState *L;        /* Runtime state */
   MLuaProto *Proto;    /* Function being compiled */
+
+  /* Highest jump target resolved so far (compile-time; guards the
+   * compare-branch fusion's retraction against patched boundaries). */
+  Size MaxPatchTarget;
+
+  /* Grow capacities of the proto's Code/Constants/LineMap buffers. These
+   * exist only while compiling - the finished proto keeps just its sizes
+   * (undump allocates exact-size buffers and never grows them). */
+  MLuaIdx CodeCap;
+  MLuaIdx ConstantsCap;
+#if MLUA_ENABLE_LINEINFO
+  MLuaIdx LineMapCap;
+#endif
 
   /* Stack tracking */
   int StackLevel; /* Current stack depth (compile time) */
@@ -369,9 +404,12 @@ void MLuaPatchJump(MLuaFuncState *fs, Size jmp, Size target);
 Size MLuaCodePos(MLuaFuncState *fs);
 
 /*
- * Get opcode name for debugging.
+ * Get opcode name for debugging. Only compiled for the opcode-profiling
+ * build; nothing else consumes the name table.
  */
+#if MLUA_PROFILE_OPS
 const char *MLuaOpName(MLuaOpCode op);
+#endif
 
 /* ========================================================================== */
 /* Line Number Info                                                           */

@@ -13,13 +13,20 @@
 #define FNV_OFFSET_BASIS 2166136261U
 #define FNV_PRIME 16777619U
 
+/* One byte's worth of hash mixing. Both variants are left folds, so the
+ * incremental concat hashing below works identically with either. */
+#if MLUA_HASH_SHIFT_XOR
+#define HASH_STEP(h, c) ((h) ^ (((h) << 5) + ((h) >> 2) + (U32)(c)))
+#else
+#define HASH_STEP(h, c) (((h) ^ (U32)(c)) * FNV_PRIME)
+#endif
+
 U32 MLuaStringHash(const char *str, Size len) {
   U32 hash = FNV_OFFSET_BASIS;
   Size i;
 
   for (i = 0; i < len; i++) {
-    hash ^= (U8)str[i];
-    hash *= FNV_PRIME;
+    hash = HASH_STEP(hash, (U8)str[i]);
   }
 
   return hash;
@@ -33,8 +40,7 @@ static U32 StringHashAscii(const char *str, Size len, Bool *allAscii) {
 
   for (i = 0; i < len; i++) {
     U8 c = (U8)str[i];
-    hash ^= c;
-    hash *= FNV_PRIME;
+    hash = HASH_STEP(hash, c);
     acc |= c;
   }
 
@@ -626,8 +632,7 @@ MLuaValue MLuaStringConcatMany(MLuaState *L, const MLuaValue *vals, int count) {
     }
     for (k = firstLen; k < totalLen; k++) {
       U8 c = (U8)data[k];
-      hash ^= c;
-      hash *= FNV_PRIME;
+      hash = HASH_STEP(hash, c);
       acc |= c;
     }
     sh->Hash = hash;

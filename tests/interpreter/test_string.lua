@@ -300,4 +300,28 @@ test.describe("concatenation", function()
     end)
 end)
 
+test.describe("concat renders every numeric type", function()
+    test.it("floats concatenate instead of vanishing", function()
+        -- Regression: the .. operator dropped float operands outright.
+        test.expect("x" .. 1.5).toBe("x1.5")
+        test.expect(1.25 .. "z").toBe("1.25z")
+        test.expect("a" .. 0.5 .. "b").toBe("a0.5b")
+    end)
+
+    test.it("integer extremes concatenate exactly", function()
+        -- Regression: INT_MIN's negation overflowed and emitted garbage.
+        test.expect("m" .. (-2147483647 - 1)).toBe("m-2147483648")
+        test.expect("p" .. 2147483647).toBe("p2147483647")
+        test.expect("z" .. 0).toBe("z0")
+        test.expect("n" .. -1).toBe("n-1")
+    end)
+
+    test.it("mixed chains agree with tostring", function()
+        local v = 7.25
+        test.expect("v=" .. v).toBe("v=" .. tostring(v))
+        local i = -42
+        test.expect("i=" .. i).toBe("i=" .. tostring(i))
+    end)
+end)
+
 assert(test.run())

@@ -35,6 +35,89 @@ test.describe("table.sort", function()
         table.sort(t)
         test.expect(t[1]).toBe(42)
     end)
+
+    test.it("sorts an already-sorted 10k array", function()
+        -- Worst case for a last-element-pivot scheme; median-of-3 keeps it
+        -- O(n log n) so this also guards against quadratic hangs.
+        local t = {}
+        for i = 1, 10000 do t[i] = i end
+        table.sort(t)
+        for i = 1, 10000 do
+            if t[i] ~= i then test.expect(t[i]).toBe(i) end
+        end
+        test.expect(t[10000]).toBe(10000)
+    end)
+
+    test.it("sorts a reverse-sorted 10k array", function()
+        local t = {}
+        for i = 1, 10000 do t[i] = 10001 - i end
+        table.sort(t)
+        for i = 1, 10000 do
+            if t[i] ~= i then test.expect(t[i]).toBe(i) end
+        end
+        test.expect(t[1]).toBe(1)
+    end)
+
+    test.it("sorts an all-equal 5k array", function()
+        -- Hoare partitioning splits equal runs evenly; Lomuto degrades to
+        -- O(n^2) here.
+        local t = {}
+        for i = 1, 5000 do t[i] = 7 end
+        table.sort(t)
+        test.expect(t[1]).toBe(7)
+        test.expect(t[5000]).toBe(7)
+    end)
+
+    test.it("sorts 30k random elements and keeps them a permutation", function()
+        -- Sized well past what the old fixed 64-entry range stack could
+        -- hold when it pushed both sides: it silently DROPPED ranges and
+        -- returned unsorted data.
+        local t = {}
+        local seed = 1
+        local sum = 0
+        for i = 1, 30000 do
+            seed = (seed * 1103 + 12345) % 100003
+            t[i] = seed
+            sum = sum + seed
+        end
+        table.sort(t)
+        local after = 0
+        for i = 1, 30000 do
+            after = after + t[i]
+            if i > 1 and t[i - 1] > t[i] then
+                test.expect(t[i - 1] <= t[i]).toBeTrue()
+            end
+        end
+        test.expect(after).toBe(sum)
+    end)
+
+    test.it("supports a custom descending comparator", function()
+        local t = { 3, 1, 4, 1, 5, 9, 2, 6 }
+        table.sort(t, function(a, b) return a > b end)
+        test.expect(t[1]).toBe(9)
+        test.expect(t[8]).toBe(1)
+        for i = 2, 8 do
+            test.expect(t[i - 1] >= t[i]).toBeTrue()
+        end
+    end)
+
+    test.it("propagates comparator errors", function()
+        local t = {}
+        for i = 1, 100 do t[i] = i * 3 % 17 end
+        local ok = pcall(table.sort, t, function() error("boom") end)
+        test.expect(ok).toBe(false)
+    end)
+
+    test.it("stays memory-safe with an inconsistent comparator", function()
+        local t = {}
+        for i = 1, 500 do t[i] = i end
+        -- A lying comparator may not produce an order, but must not crash
+        -- or lose elements.
+        pcall(table.sort, t, function() return true end)
+        local sum = 0
+        for i = 1, 500 do sum = sum + t[i] end
+        test.expect(sum).toBe(125250)
+    end)
 end)
 
 test.describe("table.concat", function()
@@ -248,6 +331,161 @@ test.describe("integer arithmetic and comparison edges", function()
         test.expect(5 == 5.0).toBeTrue()
         test.expect(5 < 5.5).toBeTrue()
         test.expect(6.0 <= 6).toBeTrue()
+    end)
+end)
+
+test.describe("positional insert/remove shifting", function()
+    test.it("insert at head, middle, and end", function()
+        local t = { "b", "d" }
+        table.insert(t, 1, "a")
+        table.insert(t, 3, "c")
+        table.insert(t, "e")
+        test.expect(table.concat(t)).toBe("abcde")
+        test.expect(#t).toBe(5)
+    end)
+
+    test.it("remove from head, middle, and end", function()
+        local t = { "a", "b", "c", "d", "e" }
+        test.expect(table.remove(t, 1)).toBe("a")
+        test.expect(table.remove(t, 2)).toBe("c")
+        test.expect(table.remove(t)).toBe("e")
+        test.expect(table.concat(t)).toBe("bd")
+        test.expect(#t).toBe(2)
+    end)
+
+    test.it("interleaved churn stays consistent", function()
+        local t = {}
+        for i = 1, 50 do table.insert(t, 1, i) end -- 50..1
+        test.expect(t[1]).toBe(50)
+        test.expect(t[50]).toBe(1)
+        for i = 1, 25 do table.remove(t, 1) end
+        test.expect(t[1]).toBe(25)
+        test.expect(#t).toBe(25)
+        local sum = 0
+        for _, v in ipairs(t) do sum = sum + v end
+        test.expect(sum).toBe(325) -- 1+..+25
+    end)
+
+    test.it("out-of-bounds insert positions raise", function()
+        test.expect(pcall(table.insert, { 1 }, 5, "x")).toBe(false)
+        test.expect(pcall(table.insert, { 1 }, 0, "x")).toBe(false)
+    end)
+end)
+
+test.describe("large array append", function()
+    test.it("fills 200k sequential elements correctly", function()
+        -- Regression canary for growth policy: flat (+256) growth made this
+        -- quadratic (~800 reallocations); geometric growth does ~15.
+        local t = {}
+        for i = 1, 200000 do t[i] = i * 2 - 1 end
+        test.expect(#t).toBe(200000)
+        test.expect(t[1]).toBe(1)
+        test.expect(t[100000]).toBe(199999)
+        test.expect(t[200000]).toBe(399999)
+        local sum = 0
+        for i = 199990, 200000 do sum = sum + t[i] end
+        test.expect(sum).toBe(4399879)
+    end)
+
+    test.it("append stays correct across the 1024-slot policy boundary", function()
+        local t = {}
+        for i = 1, 3000 do t[i] = i end
+        for i = 1, 3000 do
+            if t[i] ~= i then test.expect(t[i]).toBe(i) end
+        end
+        test.expect(#t).toBe(3000)
+    end)
+end)
+
+test.describe("hash deletion", function()
+    test.it("keeps other keys reachable after a delete", function()
+        -- Regression: nilling a deleted node's Key terminated probe chains
+        -- early and orphaned every later same-chain entry.
+        local t = {}
+        for i = 1, 200 do t["a" .. i] = i end
+        for i = 1, 200, 2 do t["a" .. i] = nil end
+        for i = 2, 200, 2 do
+            test.expect(t["a" .. i]).toBe(i)
+        end
+        for i = 1, 200, 2 do
+            test.expect(t["a" .. i]).toBe(nil)
+        end
+    end)
+
+    test.it("reinserting a deleted key resurrects it", function()
+        local t = {}
+        for i = 1, 50 do t["k" .. i] = i end
+        for i = 1, 50 do t["k" .. i] = nil end
+        for i = 1, 50 do t["k" .. i] = i * 10 end
+        for i = 1, 50 do
+            test.expect(t["k" .. i]).toBe(i * 10)
+        end
+    end)
+
+    test.it("delete/reinsert cycles do not balloon the table", function()
+        -- Dead nodes must be reclaimed on rebuild, not accumulate forever.
+        local t = {}
+        for cycle = 1, 100 do
+            for i = 1, 20 do t["c" .. i] = cycle end
+            for i = 1, 20 do t["c" .. i] = nil end
+        end
+        local n = 0
+        for _ in pairs(t) do n = n + 1 end
+        test.expect(n).toBe(0)
+    end)
+
+    test.it("next() sees exactly the live keys after deletes", function()
+        local t = {}
+        for i = 1, 60 do t["n" .. i] = i end
+        for i = 1, 60, 3 do t["n" .. i] = nil end
+        local count, sum = 0, 0
+        for k, v in pairs(t) do
+            count = count + 1
+            sum = sum + v
+        end
+        local expectCount, expectSum = 0, 0
+        for i = 1, 60 do
+            if i % 3 ~= 1 then
+                expectCount = expectCount + 1
+                expectSum = expectSum + i
+            end
+        end
+        test.expect(count).toBe(expectCount)
+        test.expect(sum).toBe(expectSum)
+    end)
+
+    test.it("deleting the current key during pairs keeps iterating", function()
+        local t = {}
+        for i = 1, 40 do t["p" .. i] = i end
+        local seen = 0
+        for k in pairs(t) do
+            seen = seen + 1
+            t[k] = nil -- delete the key we are standing on
+        end
+        test.expect(seen).toBe(40)
+        for i = 1, 40 do
+            test.expect(t["p" .. i]).toBe(nil)
+        end
+    end)
+
+    test.it("erased key falls through to the forward table", function()
+        local base = { shadowed = "base" }
+        local t = { shadowed = "own" }
+        table.forward(t, base)
+        test.expect(t.shadowed).toBe("own")
+        t.shadowed = nil
+        test.expect(t.shadowed).toBe("base")
+    end)
+
+    test.it("integer hash keys survive same-chain deletes", function()
+        -- Positive int keys live in the array part (holes are rejected), so
+        -- negative keys exercise the hash part's integer chains instead.
+        local t = {}
+        for i = 1000, 1512 do t[-i * 7] = i end
+        for i = 1000, 1512, 2 do t[-i * 7] = nil end
+        for i = 1001, 1512, 2 do
+            test.expect(t[-i * 7]).toBe(i)
+        end
     end)
 end)
 

@@ -202,21 +202,68 @@ size into `bench/RESULTS.md`. It auto-detects a local `lua5.5`/`lua` (verified `
   of arena RAM but GROW the eZ80 image ~430 B (masking against the 24-bit
   native word, +52 B of it inside the RunVM hot loop). The knob exists for
   targets with cheap 16-bit loads; the measurement lives in `ports/ti84ce.h`.
+- EvalTop register caching in RunVM: attempted-and-dropped per its pre-agreed
+  criterion in the 2026-07 perf pass — after the locals/constants pointer
+  caching and the compare fast paths landed, the projected gain fell under
+  the 3% bar while the sync-point audit (every helper call, safepoint, yield,
+  and error unwind) remained the riskiest change on the table.
+- `MLUA_INT_BITS 16` (narrower runtime integer): collides with the portable
+  bytecode format's fixed 32-bit integer constants (`BC_INT_SIZE 4`); a
+  16-bit-int port could not load ordinary chunks deterministically.
+- Whole-subsystem fences for UTF-8 / coroutine core / pattern engine
+  (`MLUA_ENABLE_UTF8`-style): deferred, not refused — UTF-8 handling is woven
+  through the lexer and string internals, and the per-library knobs already
+  let a port drop the entire string library (patterns and format included),
+  which captures most of the image win without invasive fencing. A dedicated
+  pass with its own build matrix is the right vehicle. The same applies to an
+  integer-only (float-free) build, the single biggest lever for a 6502-class
+  port.
+- Parser shrink-to-fit of proto buffers: the trim's transient peak (old and
+  new buffer both live) is exactly wrong for the CE repl's 48 KB on-calc
+  compiles; the ~50-150 B/proto slack only matters on hosts that don't care.
+- Freestanding decimal float parsing is a final-ulp off on some literals
+  (e.g. `0.25` parses one ulp high, so `0.5 + 0.25 ~= 0.75`): known,
+  pre-existing divergence from reference Lua; an exact strtod needs big-int
+  machinery that doesn't fit the footprint. Tests use exact binary fractions
+  (`1/4`) instead of decimal literals where it matters.
 
-## Status (2026-07-02, memory-footprint pass landed)
+## Status (2026-07-03, follow-up perf/footprint pass landed)
 
-All build-variant suites are green locally: debug, freestanding release,
-generic32, bytecode-only, true 32-bit (`cross/x86-multilib.ini`), and the
-narrow-config variants (packed GC header, U16 line/index types, line info
-off, typed numeric arrays on). Current bytecode retires dead opcodes, omits
-the unused line-info section, and includes fused global/table-indexing
-opcodes; older `.mlu` chunks may need to be recompiled. The GC marks
-iteratively (gray list through header Forward fields, no C-stack recursion)
-and the per-object header is a port knob
-(`MLUA_GC_HEADER_ALIGN`: 8 bytes on the CE, so float/int boxes cost 16 not
-24). `table.concat` renders numeric elements (it used to drop them). The
-TI-84 CE runner ships typed float arrays (`MLUA_TABLE_NUM_ARRAYS`, ~4 B
-retained per float element); the repl build skips them for image headroom.
-The CE benchmarks still beat TI-BASIC on every workload — CE size/perf
-regressions are checked with `tools/map_size.py` and the CEmu procedure in
-platform/ti84ce/README.md.
+All supported build-variant suites are green locally: debug, freestanding
+release, generic32, bytecode-only, true 32-bit (`cross/x86-multilib.ini`),
+the narrow-config variants, and the new knob variants (folding/fusion off,
+shift-xor hashing, 32-bit formatting). Current bytecode retires the dead
+OP_GLOOP_SETUP slot and includes five fused opcodes (SETGLOBAL_K, GETFIELD_K,
+SETFIELD_K, SETFIELD_K_POP, SELF_K) plus four compare+branch opcodes
+(JMPF_EQ/NEQ/LT/LE); older `.mlu` chunks must be recompiled and the runner's
+SMOKE.8xv fixture was regenerated.
+
+Host bench (bench/bench.py vs Lua 5.5): geomean 3.24x, from 7.05x at the
+pass baseline; `sort` (0.94x) and `tableconcat` (0.76x) now beat reference
+Lua outright, and `sieve` fell from 149x to 3.5x (table array growth was
+quadratic above 1024 slots — now x1.5 geometric, costing some min-heap
+headroom on array-heavy workloads by design). Five correctness bugs were
+fixed en route, each with pinned regressions: hash-part deletion orphaned
+probe chains (dead-node scheme now), the compactor broke address-hashed
+table keys (GCFLAG_HASHSTALE + rehash-on-access), table.sort could silently
+drop ranges from its fixed stack (bounded push-larger scheme now, plus
+median-of-3/Hoare for the quadratic inputs), `..` dropped float operands
+outright and corrupted INT_MIN, and on the NaN-boxing path a hardware NaN
+(0xFFF8...) aliased MLUA_NIL (MakeDouble canonicalizes NaNs now). Pattern
+escapes of magic characters (`%.`, `%%`) also never matched — fixed.
+
+Parser features are knob-gated for image-tight ports (`MLUA_PARSE_FOLD_INT`
+off on the CE repl, `MLUA_PARSE_FUSE_COMPARE` on everywhere); the fused-op
+VM handlers are always compiled so any v6 runtime runs any v6 chunk.
+New 8/16-bit enabler knobs (defaults preserve current behavior):
+print/format buffer sizes, per-library MLUA_ENABLE_*LIB, RAM floors
+(MLUA_MIN_HEAP_SIZE, MLUA_DEFAULT_LOCALS_SIZE, GC pacing floors),
+MLUA_HASH_SHIFT_XOR, MLUA_FORMAT_INT64 (0 on the CE: -417 B/target), and
+the inline-int/short-string limits now derive from the word width.
+
+CE images: repl 139,642 B (~136.4 KB, ceiling ~137 KB), runner 107,711 B
+(~105.2 KB). All four CE benchmarks re-verified at-or-below their recorded
+values with exact checksums via deterministic CEmu screen-CRC gates
+(control-run-learned PASS-screen CRCs; wrapper pattern in the session
+scratchpad). CE size/perf regressions are checked with `tools/map_size.py`
+and the CEmu procedure in platform/ti84ce/README.md.

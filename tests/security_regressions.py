@@ -42,9 +42,19 @@ def main(argv):
     cases = [
         (
             "unmatched_capture",
-            'local ok = pcall(function() string.find("x", ")") end); print(ok)',
+            # ".)" forces the pattern engine (bare ")" is a literal per the
+            # PUC SPECIALS rule and never reaches the matcher).
+            'local ok = pcall(function() string.find("xy", ".)") end); print(ok)',
             None,
             "false",
+        ),
+        (
+            "literal_close_paren_is_plain",
+            # Reference behavior: ")" has no magic chars, so it searches as
+            # a literal instead of erroring.
+            'print(string.find("x)", ")"))',
+            None,
+            "2\t2",
         ),
         (
             "too_many_captures",

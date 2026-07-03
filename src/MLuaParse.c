@@ -394,11 +394,58 @@ static int ResolveVar(MLuaParser *p, MLuaFuncState *fs, const char *name,
  * form immediately and never trigger a re-parse.
  */
 
+#if MLUA_PARSE_FUSE_COMPARE
+/* If a bare 1-byte compare ends the code buffer, retract it and return the
+ * corresponding fused JMPF_* opcode; else return OP_JMPF unchanged. Only
+ * statement conditions can present this shape: and/or, assignments and
+ * not() always emit something between the compare and the branch. */
+static MLuaOpCode FuseCompareBranch(MLuaFuncState *fs) {
+  MLuaProto *proto = fs->Proto;
+  Size last = fs->LastInstrPos;
+  MLuaOpCode fused;
+
+  if (last == (Size)-1 || proto->CodeSize != last + 1) {
+    return OP_JMPF;
+  }
+  if (fs->MaxPatchTarget >= proto->CodeSize) {
+    /* Some jump already lands exactly after this compare (and/or chains
+     * jump over their RHS to the branch). Retracting would leave that
+     * target pointing into the fused instruction's operand byte. */
+    return OP_JMPF;
+  }
+  switch (proto->Code[last]) {
+  case OP_EQ:
+    fused = OP_JMPF_EQ;
+    break;
+  case OP_NEQ:
+    fused = OP_JMPF_NEQ;
+    break;
+  case OP_LT:
+    fused = OP_JMPF_LT;
+    break;
+  case OP_LE:
+    fused = OP_JMPF_LE;
+    break;
+  default:
+    return OP_JMPF;
+  }
+  proto->CodeSize = last;
+  fs->LastInstrPos = (Size)-1;
+  fs->PrevInstrPos = (Size)-1;
+  return fused;
+}
+#endif
+
 static MLuaFwdJump EmitFwdJump(MLuaParser *p, MLuaOpCode op) {
   MLuaFuncState *fs = p->FS;
   MLuaFwdJump j;
 
   if (!p->LongJumps) {
+#if MLUA_PARSE_FUSE_COMPARE
+    if (op == OP_JMPF) {
+      op = FuseCompareBranch(fs);
+    }
+#endif
     j.Pos = MLuaEmitOpB(fs, op, 0);
     j.K = -1;
     return j;
@@ -425,6 +472,13 @@ static MLuaFwdJump EmitFwdJump(MLuaParser *p, MLuaOpCode op) {
 static void PatchFwdJump(MLuaParser *p, MLuaFwdJump j, Size target) {
   MLuaFuncState *fs = p->FS;
 
+  /* Record the highest resolved jump target: compare-branch fusion must
+   * not retract an instruction some already-patched jump lands after
+   * (an and/or jump over its RHS targets exactly that boundary). */
+  if (target > fs->MaxPatchTarget) {
+    fs->MaxPatchTarget = target;
+  }
+
   if (j.K < 0) {
     MLuaPatchJump(fs, j.Pos, target);
   } else {
@@ -437,6 +491,16 @@ static void EmitBackJump(MLuaParser *p, MLuaOpCode op, Size target) {
   int shortOff = (int)target - ((int)MLuaCodePos(fs) + 2);
 
   if (shortOff >= -128) {
+#if MLUA_PARSE_FUSE_COMPARE
+    if (op == OP_JMPF) {
+      MLuaOpCode fusedOp = FuseCompareBranch(fs);
+      if (fusedOp != OP_JMPF) {
+        /* The retracted compare moved the code end; recompute. */
+        shortOff = (int)target - ((int)MLuaCodePos(fs) + 2);
+        op = fusedOp;
+      }
+    }
+#endif
     MLuaEmitOpB(fs, op, (U8)(I8)shortOff);
     return;
   }
@@ -599,7 +663,9 @@ static void OptimizeLastLocalUses(MLuaFuncState *fs) {
     if (size == 0 || pc + size > proto->CodeSize) {
       return;
     }
-    if ((op == OP_JMP || op == OP_JMPF || op == OP_JMPT) && size == 2) {
+    if ((op == OP_JMP || op == OP_JMPF || op == OP_JMPT || op == OP_JMPF_EQ ||
+         op == OP_JMPF_NEQ || op == OP_JMPF_LT || op == OP_JMPF_LE) &&
+        size == 2) {
       I8 off = (I8)proto->Code[pc + 1];
       if (off < 0) {
         Size target = (Size)((IPtr)(pc + 2) + (IPtr)off);
@@ -723,6 +789,126 @@ typedef enum {
   PREC_UNARY,   /* not # - */
   PREC_POW      /* ^ */
 } Precedence;
+
+#if MLUA_PARSE_FOLD_INT
+/* ---- Parse-time integer constant folding ---------------------------------
+ * Only integers fold, and only for ops whose integer semantics are exact and
+ * width-independent (ADD/SUB/MUL wrap two's-complement like the VM's I32
+ * path; MOD only when both operands are non-negative, keeping clear of the
+ * documented C-truncation divergence and of the b==0 runtime error). Floats
+ * NEVER fold: parse-time evaluation also runs on binary32 ports and folded
+ * constants cross the binary64 bytecode boundary, so a float fold could
+ * differ from the same expression evaluated at run time. */
+
+/* Read the integer literal loaded by the single 2-byte instruction at pos
+ * (OP_LOADINT, or OP_LOADK of an int constant). */
+static Bool LiteralIntAt(MLuaFuncState *fs, Size pos, I32 *out) {
+  MLuaProto *proto = fs->Proto;
+  U8 opb;
+
+  if (pos == (Size)-1 || pos + 2 > proto->CodeSize) {
+    return FALSE;
+  }
+  opb = proto->Code[pos];
+  if (opb == OP_LOADINT) {
+    *out = (I32)(I8)proto->Code[pos + 1];
+    return TRUE;
+  }
+  if (opb == OP_LOADK) {
+    MLuaValue k = proto->Constants[proto->Code[pos + 1]];
+    if (IsInt(k)) {
+      *out = MLuaGetIntVal(k);
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+/* Emit an integer literal exactly the way a source literal emits. */
+static void EmitIntLiteral(MLuaParser *p, I32 v) {
+  MLuaFuncState *fs = p->FS;
+  if (v >= -128 && v <= 127) {
+    MLuaEmitOpB(fs, OP_LOADINT, (U8)(I8)v);
+  } else {
+    int k = MLuaAddConstant(fs, MLuaMakeInt(p->L, v));
+    if (k < 0 || k > 255) {
+      Error(p, "too many constants in function");
+      return;
+    }
+    MLuaEmitOpB(fs, OP_LOADK, (U8)k);
+  }
+}
+
+/* If the two just-emitted instructions ending the code buffer are integer
+ * literals, retract them and emit the folded result. */
+static Bool TryFoldBinaryInt(MLuaParser *p, MLuaOpCode binOp) {
+  MLuaFuncState *fs = p->FS;
+  MLuaProto *proto = fs->Proto;
+  Size last = fs->LastInstrPos;
+  Size prev = fs->PrevInstrPos;
+  I32 a;
+  I32 b;
+  I32 r;
+
+  if (binOp != OP_ADD && binOp != OP_SUB && binOp != OP_MUL &&
+      binOp != OP_MOD) {
+    return FALSE;
+  }
+  if (last == (Size)-1 || prev == (Size)-1 || last != prev + 2 ||
+      proto->CodeSize != last + 2) {
+    return FALSE;
+  }
+  if (!LiteralIntAt(fs, prev, &a) || !LiteralIntAt(fs, last, &b)) {
+    return FALSE;
+  }
+
+  switch (binOp) {
+  case OP_ADD:
+    r = (I32)((U32)a + (U32)b);
+    break;
+  case OP_SUB:
+    r = (I32)((U32)a - (U32)b);
+    break;
+  case OP_MUL:
+    r = (I32)((U32)a * (U32)b);
+    break;
+  default: /* OP_MOD */
+    if (a < 0 || b <= 0) {
+      return FALSE;
+    }
+    r = a % b;
+    break;
+  }
+
+  proto->CodeSize = prev;
+  fs->LastInstrPos = (Size)-1;
+  fs->PrevInstrPos = (Size)-1;
+  EmitIntLiteral(p, r);
+  return TRUE;
+}
+
+/* Same for unary minus over one just-emitted integer literal. */
+static Bool TryFoldUnaryMinus(MLuaParser *p) {
+  MLuaFuncState *fs = p->FS;
+  MLuaProto *proto = fs->Proto;
+  Size last = fs->LastInstrPos;
+  I32 v;
+
+  if (last == (Size)-1 || proto->CodeSize != last + 2 ||
+      !LiteralIntAt(fs, last, &v)) {
+    return FALSE;
+  }
+
+  proto->CodeSize = last;
+  fs->LastInstrPos = (Size)-1;
+  fs->PrevInstrPos = (Size)-1;
+  EmitIntLiteral(p, (I32)(0U - (U32)v));
+  return TRUE;
+}
+#else
+#define TryFoldBinaryInt(p, binOp) (FALSE)
+#define TryFoldUnaryMinus(p) (FALSE)
+#endif /* MLUA_PARSE_FOLD_INT */
 
 static MLuaOpCode BinaryOp(MLuaTokenType t) {
   switch (t) {
@@ -890,9 +1076,7 @@ static void ParsePrefix(MLuaParser *p) {
           Advance(p); /* = */
           ParseExpr(p);
           AdjustTo1(p);
-          MLuaEmitOpB(fs, OP_LOADK, (U8)(U16)k);
-          MLuaEmitOp(fs, OP_SWAP);
-          MLuaEmitOp(fs, OP_SETTABLE);
+          MLuaEmitOpB(fs, OP_SETFIELD_K, (U8)(U16)k);
           StackPop(p, 1);
         } else {
           /* Array element. The FINAL element expands all its call/vararg
@@ -934,7 +1118,9 @@ static void ParsePrefix(MLuaParser *p) {
     Advance(p);
     ParseSubExpr(p, PREC_UNARY);
     AdjustTo1(p);
-    MLuaEmitOp(fs, OP_UNM);
+    if (!TryFoldUnaryMinus(p)) {
+      MLuaEmitOp(fs, OP_UNM);
+    }
     break;
 
   case TK_NOT:
@@ -1074,8 +1260,7 @@ static void EmitPendingGet(MLuaParser *p, AccessInfo *info) {
     }
     StackPop(p, 1);
   } else if (info->accessType == 2) {
-    MLuaEmitOpB(fs, OP_LOADK, (U8)info->fieldConstIdx);
-    MLuaEmitOp(fs, OP_GETTABLE);
+    MLuaEmitOpB(fs, OP_GETFIELD_K, (U8)info->fieldConstIdx);
   }
   info->accessType = 0;
 }
@@ -1182,14 +1367,9 @@ static AccessInfo ParseSuffixForAssign(MLuaParser *p) {
                                p->Lex.Token.Value.String.Length);
       Advance(p);
 
-      /* [t] -> [func, t]: duplicate receiver, look up method, reorder */
-      MLuaEmitOp(fs, OP_DUP);
+      /* [t] -> [func, t]: fused receiver setup */
+      MLuaEmitOpB(fs, OP_SELF_K, (U8)methodK);
       StackPush(p, 1);
-      MLuaEmitOpB(fs, OP_LOADK, (U8)methodK);
-      StackPush(p, 1);
-      MLuaEmitOp(fs, OP_GETTABLE);
-      StackPop(p, 1);
-      MLuaEmitOp(fs, OP_SWAP);
 
       /* Arguments: (expr list), "string" or {table} */
       if (Check(p, TK_LPAREN)) {
@@ -1330,7 +1510,9 @@ static void ParseSubExpr(MLuaParser *p, Precedence minPrec) {
         MLuaEmitOp(fs, OP_SWAP);
       }
 
-      MLuaEmitOp(fs, binOp);
+      if (swap || !TryFoldBinaryInt(p, binOp)) {
+        MLuaEmitOp(fs, binOp);
+      }
       StackPop(p, 1); /* Two operands -> one result */
     }
   }
@@ -1452,9 +1634,7 @@ static void ParseAssignment(MLuaParser *p, const char *name, Size len) {
     break;
   default: {
     int k = MLuaAddStringK(fs, name, len);
-    MLuaEmitOpB(fs, OP_LOADK, (U8)k);
-    MLuaEmitOp(fs, OP_SWAP);
-    MLuaEmitOp(fs, OP_SETGLOBAL);
+    MLuaEmitOpB(fs, OP_SETGLOBAL_K, (U8)k);
     break;
   }
   }
@@ -1892,11 +2072,11 @@ static void ParseFor(MLuaParser *p) {
      *     JMP to loop head
      */
 
-    /* Loop head position */
-    Size loopHead = MLuaCodePos(fs);
-
-    /* Store body target PC in the local slot. Pushed through a placeholder
-     * constant (patched below) so positions beyond 127 work. */
+    /* Store body target PC in the local slot, ONCE, before the loop head:
+     * the slot is invariant across iterations, and re-storing it per
+     * iteration cost two dispatches (LOADK+SETLOCAL) in every generic-for.
+     * Pushed through a placeholder constant (patched below) so positions
+     * beyond 127 work. */
     int bodyK = MLuaAddConstantRaw(fs, MakeInt(0));
     if (bodyK < 0 || bodyK > 255) {
       Error(p, "too many constants in function");
@@ -1906,6 +2086,9 @@ static void ParseFor(MLuaParser *p) {
     StackPush(p, 1);
     MLuaEmitOpB(fs, OP_SETLOCAL, (U8)bodyTargetSlot);
     StackPop(p, 1);
+
+    /* Loop head position: the back-jump lands on GLOOP_CALL */
+    Size loopHead = MLuaCodePos(fs);
 
     /* GLOOP_CALL: Push Func, State, Control for iterator call */
     MLuaEmitOpB(fs, OP_GLOOP_CALL, (U8)iterSlot);
@@ -2053,9 +2236,7 @@ static void ParseFunction(MLuaParser *p) {
     StackPush(p, 1);
 
     /* Assign closure to global */
-    MLuaEmitOpB(fs, OP_LOADK, (U8)baseK);
-    MLuaEmitOp(fs, OP_SWAP);
-    MLuaEmitOp(fs, OP_SETGLOBAL);
+    MLuaEmitOpB(fs, OP_SETGLOBAL_K, (U8)baseK);
     StackPop(p, 1);
   }
 }
@@ -2308,12 +2489,12 @@ static void ParseMultiAssign(MLuaParser *p, AccessInfo firstInfo,
           k = MLuaAddStringK(fs, p->Lex.Token.Value.String.Data,
                              p->Lex.Token.Value.String.Length);
           Advance(p);
-          MLuaEmitOpB(fs, OP_LOADK, (U8)k);
-          StackPush(p, 1);
           if (Check(p, TK_DOT) || Check(p, TK_LBRACKET)) {
-            MLuaEmitOp(fs, OP_GETTABLE); /* Intermediate access */
-            StackPop(p, 1);
+            /* Intermediate access */
+            MLuaEmitOpB(fs, OP_GETFIELD_K, (U8)k);
           } else {
+            MLuaEmitOpB(fs, OP_LOADK, (U8)k);
+            StackPush(p, 1);
             break; /* Final: [t, k] stays */
           }
         } else if (Match(p, TK_LBRACKET)) {
@@ -2406,9 +2587,7 @@ static void ParseMultiAssign(MLuaParser *p, AccessInfo firstInfo,
       MLuaEmitOpB(fs, OP_SETUPVAL, targets[i].Idx);
       break;
     case T_GLOBAL:
-      MLuaEmitOpB(fs, OP_LOADK, (U8)targets[i].NameK);
-      MLuaEmitOp(fs, OP_SWAP);
-      MLuaEmitOp(fs, OP_SETGLOBAL);
+      MLuaEmitOpB(fs, OP_SETGLOBAL_K, (U8)targets[i].NameK);
       break;
     case T_INDEX:
       /* Stack: [..., t, k, v]; SETTABLE_POP also drops t */
@@ -2495,13 +2674,27 @@ static void ParseExprStat(MLuaParser *p) {
       Advance(p);
       ParseExpr(p);
       AdjustTo1(p);
-      MLuaEmitOpB(fs, OP_LOADK, (U8)accessInfo.fieldConstIdx);
-      MLuaEmitOp(fs, OP_SWAP);
-      MLuaEmitOp(fs, OP_SETTABLE_POP);
+      MLuaEmitOpB(fs, OP_SETFIELD_K_POP, (U8)accessInfo.fieldConstIdx);
       StackPop(p, 2); /* Pop t, v */
     } else if (name) {
-      /* Simple name = value - ParseAssignment expects to see and consume = */
-      MLuaEmitOpB(fs, OP_POP, 1);
+      /* Simple name = value. The prefix parse already emitted a READ of
+       * the name (one 2-byte GETLOCAL/GETUPVAL/GETGLOBAL_K, necessarily
+       * the last instruction); the assignment discards that value, so
+       * retract the read instead of emitting a POP - for a global, the
+       * dead read was a live _G hash lookup on every execution. The
+       * opcode check keeps any unexpected shape on the old POP path. */
+      MLuaProto *proto = fs->Proto;
+      Size last = fs->LastInstrPos;
+      if (last != (Size)-1 && proto->CodeSize == last + 2 &&
+          (proto->Code[last] == OP_GETLOCAL ||
+           proto->Code[last] == OP_GETUPVAL ||
+           proto->Code[last] == OP_GETGLOBAL_K)) {
+        proto->CodeSize = last;
+        fs->LastInstrPos = (Size)-1;
+        fs->PrevInstrPos = (Size)-1;
+      } else {
+        MLuaEmitOpB(fs, OP_POP, 1);
+      }
       StackPop(p, 1);
       ParseAssignment(p, name, nameLen);
     } else {

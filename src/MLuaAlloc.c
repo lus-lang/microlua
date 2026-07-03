@@ -27,16 +27,16 @@ Size MLuaNextGCThreshold(MLuaState *L, Size used) {
    * operation that crossed it, with the heap full of collectable garbage.
    */
   reserve = L->HeapSize / 8;
-  if (reserve < 512) {
-    reserve = 512;
+  if (reserve < MLUA_GC_RESERVE_MIN) {
+    reserve = MLUA_GC_RESERVE_MIN;
   }
-  if (reserve > 8192) {
-    reserve = 8192;
+  if (reserve > MLUA_GC_RESERVE_MAX) {
+    reserve = MLUA_GC_RESERVE_MAX;
   }
   ceiling = L->HeapSize - reserve;
 
-  if (growth < 4096) {
-    growth = 4096;
+  if (growth < MLUA_GC_GROWTH_FLOOR) {
+    growth = MLUA_GC_GROWTH_FLOOR;
   }
   threshold = used + growth;
   if (threshold > ceiling) {
@@ -128,7 +128,7 @@ MLuaState *MLuaNewConstrainedState(void *memory, Size size) {
   Size evalBytes, localsBytes, argsBytes, framesBytes;
   Size remaining;
 
-  if (!memory || size < 4096) {
+  if (!memory || size < MLUA_MIN_HEAP_SIZE) {
     return NULL; /* Need at least 4KB */
   }
 
@@ -140,7 +140,7 @@ MLuaState *MLuaNewConstrainedState(void *memory, Size size) {
 
   /* State structure at start of heap */
   stateSize = ALIGN_UP(sizeof(MLuaState), MLUA_ALIGNMENT);
-  if (size < stateSize + 2048) {
+  if (size < stateSize + MLUA_MIN_HEAP_SLACK) {
     return NULL; /* Not enough space */
   }
 
@@ -160,7 +160,7 @@ MLuaState *MLuaNewConstrainedState(void *memory, Size size) {
   /* Calculate array sizes */
   evalBytes = MLUA_DEFAULT_STACK_SIZE * sizeof(MLuaValue);
   evalBytes = ALIGN_UP(evalBytes, MLUA_ALIGNMENT);
-  localsBytes = MLUA_DEFAULT_STACK_SIZE * sizeof(MLuaValue);
+  localsBytes = MLUA_DEFAULT_LOCALS_SIZE * sizeof(MLuaValue);
   localsBytes = ALIGN_UP(localsBytes, MLUA_ALIGNMENT);
   argsBytes = MLUA_DEFAULT_ARGS_SIZE * sizeof(MLuaValue);
   argsBytes = ALIGN_UP(argsBytes, MLUA_ALIGNMENT);
@@ -180,7 +180,7 @@ MLuaState *MLuaNewConstrainedState(void *memory, Size size) {
 
   /* Allocate Locals */
   L->Locals = (MLuaValue *)(base + L->HeapTop);
-  L->LocalsSize = MLUA_DEFAULT_STACK_SIZE;
+  L->LocalsSize = MLUA_DEFAULT_LOCALS_SIZE;
   L->LocalsBase = 0;
   L->LocalsTop = 0;
   L->HeapTop += localsBytes;
@@ -254,7 +254,7 @@ MLuaState *MLuaNewVectorState(void *ctx, MLuaAllocFunc allocFn,
   L->EvalTop = 0;
 
   /* Allocate Locals */
-  localsBytes = MLUA_DEFAULT_STACK_SIZE * sizeof(MLuaValue);
+  localsBytes = MLUA_DEFAULT_LOCALS_SIZE * sizeof(MLuaValue);
   L->Locals = (MLuaValue *)allocFn(L, ctx, localsBytes);
   if (!L->Locals) {
     if (freeFn) {
@@ -263,7 +263,7 @@ MLuaState *MLuaNewVectorState(void *ctx, MLuaAllocFunc allocFn,
     }
     return NULL;
   }
-  L->LocalsSize = MLUA_DEFAULT_STACK_SIZE;
+  L->LocalsSize = MLUA_DEFAULT_LOCALS_SIZE;
   L->LocalsBase = 0;
   L->LocalsTop = 0;
 
@@ -414,12 +414,12 @@ void MLuaGetMemoryStats(MLuaState *L, MLuaMemoryStats *out) {
     }
     case OBJTYPE_PROTO: {
       MLuaProto *proto = MLUA_PROTOHEADER(obj);
-      out->ProtoCodeBytes += proto->CodeCap * sizeof(U8);
-      out->ProtoConstantsBytes += proto->ConstantsCap * sizeof(MLuaValue);
+      out->ProtoCodeBytes += proto->CodeSize * sizeof(U8);
+      out->ProtoConstantsBytes += proto->ConstantsSize * sizeof(MLuaValue);
       out->ProtoProtosBytes += proto->ProtosSize * sizeof(MLuaProto *);
       out->ProtoUpvaluesBytes += proto->UpvaluesSize * sizeof(MLuaUpvalDesc);
 #if MLUA_ENABLE_LINEINFO
-      out->ProtoLineMapBytes += proto->LineMapCap * sizeof(proto->LineMap[0]);
+      out->ProtoLineMapBytes += proto->LineMapSize * sizeof(proto->LineMap[0]);
 #endif
       break;
     }

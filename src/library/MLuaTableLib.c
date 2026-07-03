@@ -4,6 +4,8 @@
  */
 
 #include "MLuaTableLib.h"
+
+#if MLUA_ENABLE_TABLELIB
 #include "../MLuaConvert.h"
 #include "../MLuaCore.h"
 #include "../MLuaGC.h"
@@ -201,13 +203,16 @@ static int TableInsert(MLuaState *L) {
     }
     pos = (Size)MLuaGetIntVal(posv);
 
-    /* Shift elements up (top-down, so the array never transiently holds a
-       hole) */
-    for (i = len; i >= pos; i--) {
-      MLuaValue v = MLuaTableGet(L, tbl, MakeInt((I32)i));
-      MLuaTableSet(L, tbl, MakeInt((I32)(i + 1)), v);
+    /* Raw array-part shift (one grow + MemMove) instead of a boxed-key
+       get/set round trip per shifted element. */
+    if (!MLuaTableArrayInsert(L, tbl, pos, value)) {
+      if (L->ErrorMsg) {
+        return -1;
+      }
+      L->ErrorMsg = "bad argument #1 to 'insert' (table expected)";
+      return -1;
     }
-    MLuaTableSet(L, tbl, MakeInt((I32)pos), value);
+    UNUSED(i);
   }
 
   return 0;
@@ -293,17 +298,12 @@ static int TableRemove(MLuaState *L) {
     pos = len;
   }
 
-  /* Get the element to remove */
-  removed = MLuaTableGet(L, tbl, MakeInt((I32)pos));
-
-  /* Shift elements down */
-  for (i = pos; i < len; i++) {
-    MLuaValue v = MLuaTableGet(L, tbl, MakeInt((I32)(i + 1)));
-    MLuaTableSet(L, tbl, MakeInt((I32)i), v);
+  /* Raw array-part shift; out-of-range positions keep the old tolerant
+     behavior (remove nothing, return the read value). */
+  if (!MLuaTableArrayRemove(L, tbl, pos, &removed)) {
+    removed = MLuaTableGet(L, tbl, MakeInt((I32)pos));
   }
-
-  /* Remove last element */
-  MLuaTableSet(L, tbl, MakeInt((I32)len), MLUA_NIL);
+  UNUSED(i);
 
   MLuaPush(L, removed);
   return 1;
@@ -319,6 +319,13 @@ typedef struct {
   MLuaGCRef Comp;
   Bool HasComp;
   Bool Error;
+  /* Direct pointer into the table's generic array part, set ONLY for
+   * default-comparator sorts over a fully-array-resident sequence: the
+   * default compare (MLuaCompare) never allocates, so nothing can move
+   * while the sort runs and every element access skips the boxed-key
+   * generic table path. Custom comparators call back into Lua (GC can
+   * move the buffer), so they always take the table-access route. */
+  MLuaValue *Raw;
 } TableSortContext;
 
 static Bool TableSortCompare(MLuaState *L, TableSortContext *ctx, MLuaValue a,
@@ -353,79 +360,129 @@ static Bool TableSortCompare(MLuaState *L, TableSortContext *ctx, MLuaValue a,
   }
 }
 
-/* Helper: swap two table elements */
-static void TableSwap(MLuaState *L, MLuaValue tbl, Size i, Size j) {
-  MLuaValue a = MLuaTableGet(L, tbl, MakeInt((I32)i));
-  MLuaValue b = MLuaTableGet(L, tbl, MakeInt((I32)j));
-  MLuaTableSet(L, tbl, MakeInt((I32)i), b);
-  MLuaTableSet(L, tbl, MakeInt((I32)j), a);
+/* Element accessors: raw array slots when ctx->Raw is set, generic table
+ * access otherwise. */
+static MLuaValue SortGet(MLuaState *L, TableSortContext *ctx, Size i) {
+  if (ctx->Raw) {
+    return ctx->Raw[i - 1];
+  }
+  return MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)i));
 }
 
-/* Quicksort partition */
+static void SortSwap(MLuaState *L, TableSortContext *ctx, Size i, Size j) {
+  if (ctx->Raw) {
+    MLuaValue tmp = ctx->Raw[i - 1];
+    ctx->Raw[i - 1] = ctx->Raw[j - 1];
+    ctx->Raw[j - 1] = tmp;
+    return;
+  }
+  {
+    MLuaValue a = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)i));
+    MLuaValue b = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)j));
+    MLuaTableSet(L, ctx->Table.Value, MakeInt((I32)i), b);
+    MLuaTableSet(L, ctx->Table.Value, MakeInt((I32)j), a);
+  }
+}
+
+/* Hoare partition around a median-of-3 pivot. Returns j such that
+ * [lo..j] and [j+1..hi] are the two sides; with lo < hi, j is always in
+ * [lo, hi-1], so both sides are non-empty ranges and the caller always
+ * makes progress. Median-of-3 sinks sorted/reverse inputs' worst case, and
+ * Hoare splits runs of equal elements evenly (Lomuto degrades to O(n^2) on
+ * all-equal input). The i<hi / j>lo scan guards keep an inconsistent user
+ * comparator memory-safe: the result is then some permutation, never an
+ * out-of-range access. On comparator error, returns with ctx->Error set. */
 static Size TablePartition(MLuaState *L, TableSortContext *ctx, Size lo,
                            Size hi) {
   MLuaGCRef pivotRef;
-  MLuaValue pivot = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)hi));
-  Size i = lo;
+  Size mid = lo + (hi - lo) / 2;
+  Size i;
   Size j;
+  MLuaValue a;
+  MLuaValue b;
 
-  MLuaPushGCRef(L, &pivotRef, pivot);
-
-  for (j = lo; j < hi; j++) {
-    MLuaValue val = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)j));
-    if (TableSortCompare(L, ctx, val, pivotRef.Value)) {
-      TableSwap(L, ctx->Table.Value, i, j);
-      i++;
-    }
-    if (ctx->Error) {
-      MLuaPopGCRef(L, &pivotRef);
-      return i;
+  /* Order t[lo] <= t[mid] <= t[hi]; the ends double as scan sentinels. */
+  a = SortGet(L, ctx, mid);
+  b = SortGet(L, ctx, lo);
+  if (TableSortCompare(L, ctx, a, b)) {
+    SortSwap(L, ctx, mid, lo);
+  }
+  a = SortGet(L, ctx, hi);
+  b = SortGet(L, ctx, mid);
+  if (!ctx->Error && TableSortCompare(L, ctx, a, b)) {
+    SortSwap(L, ctx, hi, mid);
+    a = SortGet(L, ctx, mid);
+    b = SortGet(L, ctx, lo);
+    if (!ctx->Error && TableSortCompare(L, ctx, a, b)) {
+      SortSwap(L, ctx, mid, lo);
     }
   }
-  TableSwap(L, ctx->Table.Value, i, hi);
+  if (ctx->Error) {
+    return lo;
+  }
+
+  MLuaPushGCRef(L, &pivotRef, SortGet(L, ctx, mid));
+
+  i = lo;
+  j = hi;
+  for (;;) {
+    for (;;) { /* scan right while t[i] < pivot */
+      a = SortGet(L, ctx, i);
+      if (ctx->Error || i >= hi ||
+          !TableSortCompare(L, ctx, a, pivotRef.Value)) {
+        break;
+      }
+      i++;
+    }
+    for (;;) { /* scan left while pivot < t[j] */
+      b = SortGet(L, ctx, j);
+      if (ctx->Error || j <= lo ||
+          !TableSortCompare(L, ctx, pivotRef.Value, b)) {
+        break;
+      }
+      j--;
+    }
+    if (ctx->Error || i >= j) {
+      break;
+    }
+    SortSwap(L, ctx, i, j);
+    i++;
+    j--;
+  }
+
   MLuaPopGCRef(L, &pivotRef);
-  return i;
+  return (j < lo) ? lo : ((j >= hi) ? hi - 1 : j);
 }
 
-/* Quicksort recursive implementation (iterative via stack to avoid deep
- * recursion) */
+/* Iterative quicksort. Each partition pushes its LARGER side and loops on
+ * the smaller, so the pending segment halves with every stacked range:
+ * the stack never holds more than log2(length) ranges, and 32 ranges cover
+ * any 32-bit length. (The previous scheme pushed both sides and silently
+ * DROPPED ranges when its fixed stack filled, returning unsorted data.) */
 static void TableQuicksort(MLuaState *L, TableSortContext *ctx, Size lo,
                            Size hi) {
-  /* Use an explicit stack to avoid deep recursion */
   Size stack[64];
-  int top = -1;
+  int top = 0;
 
-  stack[++top] = lo;
-  stack[++top] = hi;
-
-  while (top >= 0 && !ctx->Error) {
-    Size high = stack[top--];
-    Size low = stack[top--];
-
-    if (low < high) {
-      Size p = TablePartition(L, ctx, low, high);
-
-      /* Push larger partition first (to minimize stack depth) */
-      if (p > 1 && p - 1 - low > high - p - 1) {
-        if (low < p - 1 && top < 62) {
-          stack[++top] = low;
-          stack[++top] = p - 1;
-        }
-        if (p + 1 < high && top < 62) {
-          stack[++top] = p + 1;
-          stack[++top] = high;
-        }
+  for (;;) {
+    while (lo < hi && !ctx->Error) {
+      Size p = TablePartition(L, ctx, lo, hi);
+      /* Sides: [lo..p] and [p+1..hi], both non-empty. */
+      if (p - lo < hi - p) {
+        stack[top++] = p + 1; /* push larger (right), iterate left */
+        stack[top++] = hi;
+        hi = p;
       } else {
-        if (p + 1 < high && top < 62) {
-          stack[++top] = p + 1;
-          stack[++top] = high;
-        }
-        if (p > 0 && low < p - 1 && top < 62) {
-          stack[++top] = low;
-          stack[++top] = p - 1;
-        }
+        stack[top++] = lo; /* push larger (left), iterate right */
+        stack[top++] = p;
+        lo = p + 1;
       }
     }
+    if (ctx->Error || top == 0) {
+      return;
+    }
+    hi = stack[--top];
+    lo = stack[--top];
   }
 }
 
@@ -438,6 +495,18 @@ static int TableSort(MLuaState *L) {
 
   ctx.HasComp = hasComp;
   ctx.Error = FALSE;
+  ctx.Raw = NULL;
+  if (!hasComp && IsTable(tbl)) {
+    MLuaTableHeader *th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl));
+#if MLUA_TABLE_NUM_ARRAYS
+    if (MLuaTableArrayKind(th) != MLUA_TABLE_ARRAY_NUM)
+#endif
+    {
+      if ((Size)th->ArrayLen == len) {
+        ctx.Raw = MLuaTableArrayData(th);
+      }
+    }
+  }
   MLuaPushGCRef(L, &ctx.Table, tbl);
   MLuaPushGCRef(L, &ctx.Comp, compFunc);
   if (len > 1) {
@@ -538,3 +607,5 @@ void MLuaOpenTable(MLuaState *L) {
   /* Lua 5.1 global alias */
   MLuaRegisterGlobal(L, "unpack", TableUnpack);
 }
+
+#endif /* MLUA_ENABLE_TABLELIB */

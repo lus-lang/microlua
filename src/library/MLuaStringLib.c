@@ -4,6 +4,8 @@
  */
 
 #include "MLuaStringLib.h"
+
+#if MLUA_ENABLE_STRINGLIB
 #include "../MLuaCode.h"
 #include "../MLuaConvert.h"
 #include "../MLuaCore.h"
@@ -216,7 +218,9 @@ static Bool MatchClass(char c, char cl) {
           (c >= 'A' && c <= 'F');
     break;
   default:
-    res = FALSE;
+    /* Not a class letter: '%x' matches the literal character x. This is
+     * how %. %% %( %[ %- etc. escape the magic characters (PUC rule). */
+    res = (c == cl);
     break;
   }
   return res;
@@ -415,6 +419,34 @@ static int StringFind(MLuaState *L) {
     return 1;
   }
 
+  /* A pattern containing no magic characters is a literal: route it to
+   * the plain substring scan below instead of running the backtracking
+   * matcher at every position (PUC's strpbrk-SPECIALS check, inlined -
+   * no libc here). */
+  if (!plain) {
+    Size m;
+    Bool magic = FALSE;
+    for (m = 0; m < plen && !magic; m++) {
+      switch (pattern[m]) {
+      case '^':
+      case '$':
+      case '*':
+      case '+':
+      case '?':
+      case '.':
+      case '(':
+      case '[':
+      case '%':
+      case '-':
+        magic = TRUE;
+        break;
+      default:
+        break;
+      }
+    }
+    plain = !magic;
+  }
+
   /* Plain text search */
   if (plain) {
     for (i = init - 1; i + plen <= slen; i++) {
@@ -510,9 +542,9 @@ static int StringFind(MLuaState *L) {
 static int StringFormat(MLuaState *L) {
   Size fmtlen;
   const char *fmt = GetStrArg(L, 1, &fmtlen);
-  char buf[4096];
+  char buf[MLUA_FORMAT_BUF_SIZE];
   int top = MLuaGetTop(L);
-  MLuaValue args[32];
+  MLuaValue args[MLUA_FORMAT_MAX_ARGS];
   int nargs = 0;
   int i;
 
@@ -522,7 +554,7 @@ static int StringFormat(MLuaState *L) {
   }
 
   /* Gather arguments */
-  for (i = 2; i <= top && nargs < 32; i++) {
+  for (i = 2; i <= top && nargs < MLUA_FORMAT_MAX_ARGS; i++) {
     args[nargs++] = MLuaGetStack(L, i);
   }
 
@@ -1243,3 +1275,5 @@ void MLuaOpenString(MLuaState *L) {
   MLuaValue lib = MLuaNewLib(L, "string");
   MLuaRegisterLib(L, lib, StringLibEntries);
 }
+
+#endif /* MLUA_ENABLE_STRINGLIB */

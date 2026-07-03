@@ -105,7 +105,11 @@ typedef UPtr MLuaValue;
 
 #define TAG_MASK 7 /* Low 3 bits */
 #define TAG_BITS 3
-#define MLUA_SHORTSTR_MAX 3
+/* Inline string capacity is derived from the value word: whole bytes that
+ * fit above the tag (3 on a 32-bit word; a 16-bit-word experiment would
+ * inherit 1 instead of a silently-wrong hardcoded 3). MLUA_PTR_SIZE rather
+ * than sizeof so the tests' preprocessor checks can read it. */
+#define MLUA_SHORTSTR_MAX ((MLUA_PTR_SIZE * 8 - TAG_BITS) / 8)
 
 #endif /* MLUA_PTR_SIZE */
 
@@ -219,13 +223,22 @@ typedef UPtr MLuaValue;
                (U64)(idx)))
 #define GetLightFuncIndex(v) ((Size)((v) & NANBOX_PAYLOAD_MASK))
 
-/* Double: stored directly (no encoding needed) */
+/* Double: stored directly (no encoding needed) - except NaNs. A hardware
+ * NaN can be 0xFFF8000000000000 (the x86 default NaN, e.g. inf-inf), which
+ * is exactly the NaN-box tag base: stored raw it aliases MLUA_NIL, turning
+ * a NaN result into nil. Every NaN canonicalizes to the positive quiet NaN,
+ * which the box range excludes (high 16 bits 0x7FF8 < 0xFFF8). */
+#define MLUA_CANONICAL_NAN ((U64)0x7FF8000000000000ULL)
 static inline MLuaValue MakeDouble(double d) {
   union {
     double d;
     U64 u;
   } conv;
   conv.d = d;
+  if ((conv.u & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL &&
+      (conv.u & 0x000FFFFFFFFFFFFFULL) != 0) {
+    conv.u = MLUA_CANONICAL_NAN;
+  }
   return (MLuaValue)conv.u;
 }
 static inline double GetDouble(MLuaValue v) {
@@ -286,8 +299,15 @@ static inline double GetDouble(MLuaValue v) {
 #define MLUA_INLINE_INT_MAX MLUA_INT_MAX
 #define MLUA_INLINE_INT_MIN MLUA_INT_MIN
 #else
-#define MLUA_INLINE_INT_MAX ((I32)0x0FFFFFFF)
-#define MLUA_INLINE_INT_MIN ((I32)(-0x0FFFFFFF - 1))
+/* Derived from the value word: a tagging word of W bits holds W-TAG_BITS
+ * payload bits, one of them the sign. Today's 32-bit word gives the same
+ * 29-bit range the old hardcoded 0x0FFFFFFF literal did; a future narrower
+ * word (a 16-bit port experimenting with 16-bit values) inherits the right
+ * range instead of silently truncating behind a stale constant. */
+#define MLUA_VALUE_BITS (MLUA_PTR_SIZE * 8)
+#define MLUA_INLINE_INT_MAX                                                    \
+  ((I32)((U32)1 << (MLUA_VALUE_BITS - TAG_BITS - 1)) - 1)
+#define MLUA_INLINE_INT_MIN (-MLUA_INLINE_INT_MAX - 1)
 #endif
 
 /* Backward compatibility alias */
@@ -320,6 +340,9 @@ static inline double GetDouble(MLuaValue v) {
 
 /* Flag bits in header byte */
 #define GCFLAG_TYPE_MASK 0x0F /* Low 4 bits: type */
+#define GCFLAG_HASHSTALE 0x10 /* Bit 4: TABLE only - a pointer-hashed key
+                                 moved in compaction; slots no longer match
+                                 HashValue order until the table rehashes */
 #define GCFLAG_MARKED 0x20    /* Bit 5: marked by GC */
 #define GCFLAG_PINNED 0x40    /* Bit 6: pinned (don't move) */
 #define GCFLAG_ROM 0x80       /* Bit 7: read-only memory */

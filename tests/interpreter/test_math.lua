@@ -76,4 +76,45 @@ test.describe("random", function()
     end)
 end)
 
+test.describe("unary function table", function()
+    -- Every entry routed through the shared Math1 body: pin one exact or
+    -- near-exact value each so a mis-wired thunk (wrong function for a
+    -- name) cannot pass.
+    local function near(a, b)
+        local d = a - b
+        if d < 0 then d = -d end
+        return d < 1e-5
+    end
+
+    test.it("dispatches each name to the right function", function()
+        test.expect(math.abs(-3)).toBe(3)
+        test.expect(math.floor(2.7)).toBe(2)
+        test.expect(math.ceil(2.2)).toBe(3)
+        test.expect(math.sqrt(9)).toBe(3)
+        test.expect(near(math.sin(0), 0)).toBeTrue()
+        test.expect(near(math.cos(0), 1)).toBeTrue()
+        test.expect(near(math.tan(0), 0)).toBeTrue()
+        test.expect(near(math.asin(1), math.pi / 2)).toBeTrue()
+        test.expect(near(math.acos(1), 0)).toBeTrue()
+        test.expect(near(math.exp(0), 1)).toBeTrue()
+        test.expect(near(math.exp(1), 2.71828)).toBeTrue()
+        test.expect(near(math.log10(100), 2)).toBeTrue()
+        test.expect(near(math.deg(math.pi), 180)).toBeTrue()
+        test.expect(near(math.rad(180), math.pi)).toBeTrue()
+        test.expect(near(math.cosh(0), 1)).toBeTrue()
+        test.expect(near(math.sinh(0), 0)).toBeTrue()
+        test.expect(near(math.tanh(0), 0)).toBeTrue()
+    end)
+
+    test.it("distinguishes easily-confused neighbors", function()
+        -- sin vs sinh, cos vs cosh, tan vs tanh at x=1 differ clearly
+        test.expect(near(math.sin(1), 0.84147)).toBeTrue()
+        test.expect(near(math.sinh(1), 1.17520)).toBeTrue()
+        test.expect(near(math.cos(1), 0.54030)).toBeTrue()
+        test.expect(near(math.cosh(1), 1.54308)).toBeTrue()
+        test.expect(near(math.tan(1), 1.55740)).toBeTrue()
+        test.expect(near(math.tanh(1), 0.76159)).toBeTrue()
+    end)
+end)
+
 assert(test.run())

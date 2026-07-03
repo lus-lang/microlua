@@ -214,4 +214,105 @@ test.describe("fused chunks survive dump and load", function()
     end)
 end)
 
+test.describe("constant-key field fusion (GETFIELD_K/SETFIELD_K)", function()
+    test.it("reads and writes dotted fields", function()
+        local t = { x = 1 }
+        test.expect(t.x).toBe(1)
+        t.x = 2
+        test.expect(t.x).toBe(2)
+        t.newfield = "n"
+        test.expect(t.newfield).toBe("n")
+    end)
+
+    test.it("chained field paths read and write", function()
+        local t = { a = { b = { c = 41 } } }
+        test.expect(t.a.b.c).toBe(41)
+        t.a.b.c = 42
+        test.expect(t.a.b.c).toBe(42)
+        t.a.b = { c = 43 }
+        test.expect(t.a.b.c).toBe(43)
+    end)
+
+    test.it("constructor field keys store into the right table", function()
+        local t = { one = 1, 10, two = 2, 20, [3] = 30, three = 3 }
+        test.expect(t.one).toBe(1)
+        test.expect(t.two).toBe(2)
+        test.expect(t.three).toBe(3)
+        test.expect(t[1]).toBe(10)
+        test.expect(t[2]).toBe(20)
+        test.expect(t[3]).toBe(30)
+    end)
+
+    test.it("field of a call result", function()
+        local function mk() return { q = 7 } end
+        test.expect(mk().q).toBe(7)
+    end)
+
+    test.it("fields delegate through forward tables", function()
+        local base = { shared = "base", shadowed = "base" }
+        local t = { shadowed = "own" }
+        table.forward(t, base)
+        test.expect(t.shared).toBe("base")
+        test.expect(t.shadowed).toBe("own")
+        t.shared = "written" -- writes land on t, not the forward table
+        test.expect(t.shared).toBe("written")
+        test.expect(base.shared).toBe("base")
+    end)
+
+    test.it("multi-assign field targets", function()
+        local t = { p = 0, q = 0 }
+        local u = { r = { s = 0 } }
+        t.p, t.q, u.r.s = 1, 2, 3
+        test.expect(t.p).toBe(1)
+        test.expect(t.q).toBe(2)
+        test.expect(u.r.s).toBe(3)
+    end)
+
+    test.it("mixed bracket and dot chains", function()
+        local t = { arr = { { v = 1 }, { v = 2 } } }
+        test.expect(t.arr[2].v).toBe(2)
+        t.arr[1].v = 9
+        test.expect(t.arr[1].v).toBe(9)
+    end)
+
+    test.it("method calls through SELF_K", function()
+        local obj = { val = 10 }
+        function obj.get(self) return self.val end
+        function obj.add(self, n)
+            self.val = self.val + n
+            return self
+        end
+        test.expect(obj:get()).toBe(10)
+        test.expect(obj:add(5):get()).toBe(15) -- chained t:a():b()
+        -- methods resolved through the forward table
+        local proto = {}
+        function proto.kind(self) return self.name end
+        local inst = { name = "widget" }
+        table.forward(inst, proto)
+        test.expect(inst:kind()).toBe("widget")
+        -- method call on nil receiver raises
+        local ok = pcall(function()
+            local x = nil
+            return x:m()
+        end)
+        test.expect(ok).toBe(false)
+        -- arguments flow correctly after the receiver
+        function obj.sum3(self, a, b, c) return self.val + a + b + c end
+        test.expect(obj:sum3(1, 2, 3)).toBe(21)
+    end)
+
+    test.it("field reads on non-tables raise", function()
+        local ok = pcall(function()
+            local x = nil
+            return x.field
+        end)
+        test.expect(ok).toBe(false)
+        ok = pcall(function()
+            local x = 5
+            x.field = 1
+        end)
+        test.expect(ok).toBe(false)
+    end)
+end)
+
 assert(test.run())

@@ -216,7 +216,7 @@ static char *TraceAppendLine(char *p, char *end, const char *src, Size srcLen,
     numBuf[0] = '?';
     numLen = 1;
   } else {
-    numLen = MLuaIntToStr((I64)line, numBuf);
+    numLen = MLuaIntToStr((MLuaFmtInt)line, numBuf);
   }
 
   p = TraceAppend(p, end, "\t", 1);
@@ -467,6 +467,7 @@ MLuaValue MLuaConcat(MLuaState *L, int count) {
   /* Concatenate 'count' values from top of stack into a single string */
   Size totalLen = 0;
   Bool allStrings = TRUE;
+  char scratch[128]; /* small-result assembly, see below */
   U8 *buffer;
   U8 *p;
   int i;
@@ -475,7 +476,10 @@ MLuaValue MLuaConcat(MLuaState *L, int count) {
     return MLuaStringNew(L, "", 0);
   }
 
-  /* First pass: Type check and calculate total length */
+  /* First pass: type check and compute the EXACT total length. Numbers
+   * render through the same MLuaValueToStr as table.concat/tostring, so
+   * every numeric type concatenates consistently (floats used to be
+   * dropped outright here, and INT_MIN's negation corrupted digits). */
   for (i = 0; i < count; i++) {
     MLuaValue v = L->EvalStack[L->EvalTop - count + i];
     if (IsString(v)) {
@@ -483,8 +487,8 @@ MLuaValue MLuaConcat(MLuaState *L, int count) {
     } else if (IsShortStr(v)) {
       totalLen += MLuaShortStrLen(v);
     } else if (IsInt(v) || MLuaIsNumber(v)) {
-      /* Estimate max digits for number */
-      totalLen += 24;
+      char numBuf[40];
+      totalLen += MLuaValueToStr(L, v, numBuf, sizeof(numBuf));
       allStrings = FALSE;
     } else {
       /* Invalid type for concatenation */
@@ -504,14 +508,20 @@ MLuaValue MLuaConcat(MLuaState *L, int count) {
     return MLuaStringConcatMany(L, &L->EvalStack[L->EvalTop - count], count);
   }
 
-  /* Allocate buffer */
-  buffer = (U8 *)MLuaAlloc(L, totalLen + 1);
-  if (!buffer) {
-    /* The nil sentinel only raises when ErrorMsg is set; a bare nil would
-     * flow onward as a value (e.g. silently deleting the target of
-     * `t[#t+1] = a .. b`). */
-    L->ErrorMsg = "out of memory";
-    return MLUA_NIL;
+  /* Assemble on the C stack when the result is small - the common
+   * `s = s .. i` loop shape - so each iteration stops leaving a throwaway
+   * RAW buffer behind for the GC. Large results still use the heap. */
+  if (totalLen + 1 <= sizeof(scratch)) {
+    buffer = (U8 *)scratch;
+  } else {
+    buffer = (U8 *)MLuaAlloc(L, totalLen + 1);
+    if (!buffer) {
+      /* The nil sentinel only raises when ErrorMsg is set; a bare nil
+       * would flow onward as a value (e.g. silently deleting the target
+       * of `t[#t+1] = a .. b`). */
+      L->ErrorMsg = "out of memory";
+      return MLUA_NIL;
+    }
   }
 
   /* Copy strings into buffer */
@@ -528,26 +538,11 @@ MLuaValue MLuaConcat(MLuaState *L, int count) {
       Size len = MLuaShortStrLen(v);
       MemCpy(p, s, len);
       p += len;
-    } else if (IsInt(v)) {
-      /* Simple integer to string */
-      I32 n = MLuaGetIntVal(v);
-      char numBuf[16];
-      char *np = numBuf + sizeof(numBuf) - 1;
-      Bool neg = FALSE;
-      Size numLen;
-      if (n < 0) {
-        neg = TRUE;
-        n = -n;
-      }
-      *np = '\0';
-      do {
-        *--np = '0' + (n % 10);
-        n /= 10;
-      } while (n > 0);
-      if (neg)
-        *--np = '-';
-      numLen = (numBuf + sizeof(numBuf) - 1) - np;
-      MemCpy(p, np, numLen);
+    } else {
+      /* Number (int or float): same renderer as the length pass */
+      char numBuf[40];
+      Size numLen = MLuaValueToStr(L, v, numBuf, sizeof(numBuf));
+      MemCpy(p, numBuf, numLen);
       p += numLen;
     }
   }
@@ -588,7 +583,7 @@ void MLuaDumpOpProfile(MLuaState *L) {
     MemCpy(buf, name, nameLen);
     pos = nameLen;
     buf[pos++] = '\t';
-    pos += MLuaIntToStr((I64)OpProfileCounts[i], buf + pos);
+    pos += MLuaIntToStr((MLuaFmtInt)OpProfileCounts[i], buf + pos);
     buf[pos++] = '\n';
     L->OutputFunc(L, MLUA_OUTPUT_PRINT, buf, pos);
   }
@@ -608,8 +603,12 @@ void MLuaDumpOpProfile(MLuaState *L) {
 #define EVAL_TOP() (L->EvalStack[L->EvalTop - 1])
 #define EVAL_PEEK(n) (L->EvalStack[L->EvalTop - 1 - (n)])
 
-#define LOCAL_GET(slot) (L->Locals[L->LocalsBase + (slot)])
-#define LOCAL_SET(slot, v) (L->Locals[L->LocalsBase + (slot)] = (v))
+/* Local-slot access through RunVM's cached frame-base pointer: LocalsBase
+ * only changes at frame switches, which all funnel through RELOAD_FRAME,
+ * and the Locals arena is a pinned RAW buffer (never moved by the GC), so
+ * the cached pointer saves two dependent loads on every local access. */
+#define LOCAL_GET(slot) (locals[slot])
+#define LOCAL_SET(slot, v) (locals[slot] = (v))
 
 /* Stack macros now redirect to EvalStack */
 #define STACK_PUSH(v) EVAL_PUSH(v)
@@ -653,14 +652,21 @@ static MLuaStatus PushFrame(MLuaState *L, Size funcPos, Size nargs) {
   }
 
   win = L->ArgsTop;
-  if (win + nargs > L->ArgsSize) {
-    L->ErrorMsg = "argument stack overflow";
-    return MLUA_ERRRUN;
-  }
 
-  /* Copy arguments into this frame's window */
-  for (i = 0; i < nargs; i++) {
-    L->Args[win + i] = L->EvalStack[funcPos + 1 + i];
+  /* Only a VARARG callee ever reads its Args window after this point
+   * (OP_VARARG is not emitted otherwise), so the EvalStack->Args copy is
+   * pure waste for the common fixed-arity call: those frames record an
+   * EMPTY window and their parameters load straight from the eval stack. */
+  if (proto->IsVararg) {
+    if (win + nargs > L->ArgsSize) {
+      L->ErrorMsg = "argument stack overflow";
+      return MLUA_ERRRUN;
+    }
+    for (i = 0; i < nargs; i++) {
+      L->Args[win + i] = L->EvalStack[funcPos + 1 + i];
+    }
+  } else {
+    nargs = 0; /* the recorded window is empty */
   }
 
   f = &L->Frames[L->FrameTop++];
@@ -671,13 +677,19 @@ static MLuaStatus PushFrame(MLuaState *L, Size funcPos, Size nargs) {
   f->ArgsBase = win;
   f->ArgsCount = nargs;
 
+  /* Initialize locals from the still-intact eval stack: parameters first,
+   * then nil. Extra args beyond NumLocals are discarded, missing ones
+   * nil-fill - identical to the old two-hop copy through Args. */
+  {
+    Size avail = L->EvalTop - (funcPos + 1);
+    for (i = 0; i < proto->NumLocals; i++) {
+      L->Locals[newBase + i] =
+          (i < avail) ? L->EvalStack[funcPos + 1 + i] : MLUA_NIL;
+    }
+  }
+
   /* Pop func+args; the callee's results will land at funcPos */
   L->EvalTop = funcPos;
-
-  /* Initialize locals: parameters first, then nil */
-  for (i = 0; i < proto->NumLocals; i++) {
-    L->Locals[newBase + i] = (i < nargs) ? L->Args[win + i] : MLUA_NIL;
-  }
 
   L->LocalsBase = newBase;
   L->LocalsTop = newBase + proto->NumLocals;
@@ -837,11 +849,17 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
   const U8 *pc;
   MLuaProto *proto;
   MLuaClosure *cl;
+  MLuaValue *locals;
+  const MLuaValue *consts;
 
   /* Load (or reload after resume) the top frame's execution registers
    * (shared out-of-line body: this runs at frame switches, not per
-   * instruction, and is expanded at many call sites) */
-#define RELOAD_FRAME() ReloadFrame(L, &pc, &proto, &cl)
+   * instruction, and is expanded at many call sites). locals/consts are
+   * derived caches: LocalsBase and proto only change at frame switches or
+   * a collection, and both events funnel through this reload. */
+#define RELOAD_FRAME()                                                         \
+  (ReloadFrame(L, &pc, &proto, &cl), locals = L->Locals + L->LocalsBase,       \
+   consts = proto->Constants)
 
 #if MLUA_VM_COMPUTED_GOTO
   /* Label-address table: opcodes not listed dispatch to the unknown-opcode
@@ -869,6 +887,15 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       [OP_GETGLOBAL] = &&L_OP_GETGLOBAL,
       [OP_SETGLOBAL] = &&L_OP_SETGLOBAL,
       [OP_GETGLOBAL_K] = &&L_OP_GETGLOBAL_K,
+      [OP_SETGLOBAL_K] = &&L_OP_SETGLOBAL_K,
+      [OP_GETFIELD_K] = &&L_OP_GETFIELD_K,
+      [OP_SETFIELD_K] = &&L_OP_SETFIELD_K,
+      [OP_SETFIELD_K_POP] = &&L_OP_SETFIELD_K_POP,
+      [OP_SELF_K] = &&L_OP_SELF_K,
+      [OP_JMPF_EQ] = &&L_OP_JMPF_EQ,
+      [OP_JMPF_NEQ] = &&L_OP_JMPF_NEQ,
+      [OP_JMPF_LT] = &&L_OP_JMPF_LT,
+      [OP_JMPF_LE] = &&L_OP_JMPF_LE,
       [OP_POP] = &&L_OP_POP,
       [OP_DUP] = &&L_OP_DUP,
       [OP_SWAP] = &&L_OP_SWAP,
@@ -901,7 +928,6 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       [OP_LOOP_S] = &&L_OP_LOOP_S,
       [OP_NLOOP_PREP] = &&L_OP_NLOOP_PREP,
       [OP_NLOOP_STEP] = &&L_OP_NLOOP_STEP,
-      [OP_GLOOP_SETUP] = &&L_OP_GLOOP_SETUP,
       [OP_GLOOP_CALL] = &&L_OP_GLOOP_CALL,
       [OP_GLOOP_STEP] = &&L_OP_GLOOP_STEP,
       [OP_CALL] = &&L_OP_CALL,
@@ -977,7 +1003,7 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
     VM_CASE(OP_LOADK): {
       U8 k = READ_BYTE();
       if (k < proto->ConstantsSize) {
-        STACK_PUSH(proto->Constants[k]);
+        STACK_PUSH(consts[k]);
       } else {
         STACK_PUSH(MLUA_NIL);
       }
@@ -1032,8 +1058,16 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
     VM_CASE(OP_GETGLOBAL_K): {
       /* Fused LOADK B; GETGLOBAL */
       U8 k = READ_BYTE();
-      MLuaValue val = MLuaTableGet(L, L->Globals, proto->Constants[k]);
+      MLuaValue val = MLuaTableGetField(L, L->Globals, consts[k]);
       STACK_PUSH(val);
+      VM_BREAK;
+    }
+
+    VM_CASE(OP_SETGLOBAL_K): {
+      /* Fused LOADK B; SWAP; SETGLOBAL */
+      U8 k = READ_BYTE();
+      MLuaValue val = STACK_POP();
+      MLuaTableSetField(L, L->Globals, consts[k], val);
       VM_BREAK;
     }
 
@@ -1127,37 +1161,71 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       VM_BREAK;
     }
 
+    VM_CASE(OP_GETFIELD_K): {
+      /* Fused LOADK B; GETTABLE */
+      U8 k = READ_BYTE();
+      MLuaValue tbl = STACK_POP();
+      MLuaValue result;
+      VM_TRY(MLuaTableGetSafe(L, tbl, consts[k], &result));
+      STACK_PUSH(result);
+      VM_BREAK;
+    }
+
+    VM_CASE(OP_SETFIELD_K): {
+      /* Fused LOADK B; SWAP; SETTABLE (keeps the table: constructors) */
+      U8 k = READ_BYTE();
+      MLuaValue val = STACK_POP();
+      MLuaValue tbl = STACK_TOP();
+      VM_TRY(MLuaTableSetSafe(L, tbl, consts[k], val));
+      VM_BREAK;
+    }
+
+    VM_CASE(OP_SETFIELD_K_POP): {
+      /* Fused LOADK B; SWAP; SETTABLE_POP (statement store: drops it) */
+      U8 k = READ_BYTE();
+      MLuaValue val = STACK_POP();
+      MLuaValue tbl = STACK_POP();
+      VM_TRY(MLuaTableSetSafe(L, tbl, consts[k], val));
+      VM_BREAK;
+    }
+
+    VM_CASE(OP_SELF_K): {
+      /* Fused DUP; LOADK B; GETTABLE; SWAP: [t] -> [method, t] */
+      U8 k = READ_BYTE();
+      MLuaValue tbl = STACK_POP();
+      MLuaValue method;
+      VM_TRY(MLuaTableGetSafe(L, tbl, consts[k], &method));
+      STACK_PUSH(method);
+      STACK_PUSH(tbl);
+      VM_BREAK;
+    }
+
     VM_CASE(OP_NOT): {
       MLuaValue v = STACK_POP();
       STACK_PUSH(IsTruthy(v) ? MLUA_FALSE : MLUA_TRUE);
       VM_BREAK;
     }
 
-    VM_CASE(OP_EQ): {
-      MLuaValue b = STACK_POP();
-      MLuaValue a = STACK_POP();
-      STACK_PUSH(MLuaCompare(L, OP_EQ, a, b) ? MLUA_TRUE : MLUA_FALSE);
-      VM_BREAK;
-    }
-
-    VM_CASE(OP_NEQ): {
-      MLuaValue b = STACK_POP();
-      MLuaValue a = STACK_POP();
-      STACK_PUSH(MLuaCompare(L, OP_NEQ, a, b) ? MLUA_TRUE : MLUA_FALSE);
-      VM_BREAK;
-    }
-
-    VM_CASE(OP_LT): {
-      MLuaValue b = STACK_POP();
-      MLuaValue a = STACK_POP();
-      STACK_PUSH(MLuaCompare(L, OP_LT, a, b) ? MLUA_TRUE : MLUA_FALSE);
-      VM_BREAK;
-    }
-
+    VM_CASE(OP_EQ):
+    VM_CASE(OP_NEQ):
+    VM_CASE(OP_LT):
     VM_CASE(OP_LE): {
       MLuaValue b = STACK_POP();
       MLuaValue a = STACK_POP();
-      STACK_PUSH(MLuaCompare(L, OP_LE, a, b) ? MLUA_TRUE : MLUA_FALSE);
+      Bool res;
+      /* Inline int-int fast path, mirroring MLuaCompare's integer branch
+       * exactly (same idiom as the arithmetic fast path above). */
+      if (IsInlineInt(a) && IsInlineInt(b)) {
+        I32 ia = GetInt(a);
+        I32 ib = GetInt(b);
+        res = (op == OP_EQ)    ? (ia == ib)
+              : (op == OP_NEQ) ? (ia != ib)
+              : (op == OP_LT)  ? (ia < ib)
+                               : (ia <= ib);
+      } else {
+        res = MLuaCompare(L, (MLuaOpCode)op, a, b);
+      }
+      STACK_PUSH(res ? MLUA_TRUE : MLUA_FALSE);
       VM_BREAK;
     }
 
@@ -1185,6 +1253,25 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
           VM_BREAK;
         }
       }
+#if MLUA_PTR_SIZE == 8
+      /* Inline double-double fast path (NaN-boxing only: floats live in
+       * the value word, so no allocation is possible here). The result is
+       * canonicalized exactly like MLuaMakeNumber: an integral value
+       * collapses back to an int, preserving 2.5+2.5 == 5 (integer). */
+      if (IsDouble(a) && IsDouble(b)) {
+        double da = GetDouble(a);
+        double db = GetDouble(b);
+        double r = (op == OP_ADD)   ? da + db
+                   : (op == OP_SUB) ? da - db
+                                    : da * db;
+        if (r == (double)(I32)r) {
+          STACK_PUSH(MakeInt((I32)r));
+        } else {
+          STACK_PUSH(MakeDouble(r));
+        }
+        VM_BREAK;
+      }
+#endif
       result = MLuaArith(L, (MLuaOpCode)op, a, b);
       VM_CHECK_NIL(result); /* Type error in arithmetic */
       STACK_PUSH(result);
@@ -1237,6 +1324,38 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       I8 offset = (I8)READ_BYTE();
       MLuaValue v = STACK_POP();
       if (!IsTruthy(v)) {
+        pc += offset;
+      }
+      VM_BREAK;
+    }
+
+    VM_CASE(OP_JMPF_EQ):
+    VM_CASE(OP_JMPF_NEQ):
+    VM_CASE(OP_JMPF_LT):
+    VM_CASE(OP_JMPF_LE): {
+      /* Fused compare+JMPF: the bool never crosses the stack. Comparison
+       * semantics (incl. the no-error mixed-type result) are exactly
+       * MLuaCompare's, same as the unfused opcodes. */
+      I8 offset = (I8)READ_BYTE();
+      MLuaValue b = STACK_POP();
+      MLuaValue a = STACK_POP();
+      Bool res;
+      if (IsInlineInt(a) && IsInlineInt(b)) {
+        /* Inline int-int fast path (see the compare opcodes) */
+        I32 ia = GetInt(a);
+        I32 ib = GetInt(b);
+        res = (op == OP_JMPF_EQ)    ? (ia == ib)
+              : (op == OP_JMPF_NEQ) ? (ia != ib)
+              : (op == OP_JMPF_LT)  ? (ia < ib)
+                                    : (ia <= ib);
+      } else {
+        MLuaOpCode cmp = (op == OP_JMPF_EQ)    ? OP_EQ
+                         : (op == OP_JMPF_NEQ) ? OP_NEQ
+                         : (op == OP_JMPF_LT)  ? OP_LT
+                                               : OP_LE;
+        res = MLuaCompare(L, cmp, a, b);
+      }
+      if (!res) {
         pc += offset;
       }
       VM_BREAK;
@@ -1359,35 +1478,6 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
         }
       }
       /* Else: loop ends, fallthrough */
-      VM_BREAK;
-    }
-
-    VM_CASE(OP_GLOOP_SETUP): {
-      /*
-       * GLOOP_SETUP: Generic for-loop setup (SPEC.FORLOOP.md).
-       * Format: [OP_GLOOP_SETUP] [u8 Base_Index] (2 Bytes)
-       * Stack: [Body_Target, Func, State, Control] (4 items, TOS first)
-       *
-       * 1. Pop 4 values from EvalStack
-       * 2. Store: Locals[Base]=Func, [Base+1]=State, [Base+2]=Control,
-       * [Base+3]=Body_Target
-       * 3. Fallthrough to loop head
-       */
-      U8 base = READ_BYTE();
-
-      /* Pop values from EvalStack (TOS first) */
-      MLuaValue bodyTarget = STACK_POP();
-      MLuaValue iterFunc = STACK_POP();
-      MLuaValue state = STACK_POP();
-      MLuaValue ctrl = STACK_POP();
-
-      /* Store to shadow locals */
-      LOCAL_SET(base, iterFunc);       /* Func */
-      LOCAL_SET(base + 1, state);      /* State */
-      LOCAL_SET(base + 2, ctrl);       /* Control */
-      LOCAL_SET(base + 3, bodyTarget); /* Body_Target */
-
-      /* Fallthrough to loop head */
       VM_BREAK;
     }
 
@@ -2168,7 +2258,7 @@ void MLuaSetRequirer(MLuaState *L, MLuaRequireFunc func) {
 static int BasePrint(MLuaState *L) {
   int top = MLuaGetTop(L);
   int i;
-  char buf[4096];
+  char buf[MLUA_PRINT_BUF_SIZE];
   Size bufpos = 0;
 
   MLuaDebugPrint("BasePrint called, top=%d, OutputFunc=%p\n", top,
@@ -2258,12 +2348,20 @@ void MLuaOpenLibs(MLuaState *L) {
     L->Globals = MLuaTableNewSized(L, 0, 32);
   }
 
-  /* Open all standard libraries */
+  /* Open all standard libraries (each behind its image knob) */
   MLuaOpenBase(L);
+#if MLUA_ENABLE_MATHLIB
   MLuaOpenMath(L);
+#endif
+#if MLUA_ENABLE_COROLIB
   MLuaOpenCoroutine(L);
+#endif
+#if MLUA_ENABLE_STRINGLIB
   MLuaOpenString(L);
+#endif
+#if MLUA_ENABLE_TABLELIB
   MLuaOpenTable(L);
+#endif
 
   /* Register print if output is available */
   if (L->OutputFunc) {

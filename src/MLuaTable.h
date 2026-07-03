@@ -64,6 +64,11 @@ typedef struct {
 /* Get table header from GC header */
 #define MLUA_TABLEHEADER(gch) ((MLuaTableHeader *)MLUA_OBJDATA(gch))
 
+/* Get GC header back from a table header (inverse of MLUA_TABLEHEADER) */
+static inline MLuaGCHeader *MLuaTableGCHeader(MLuaTableHeader *th) {
+  return (MLuaGCHeader *)((U8 *)th - sizeof(MLuaGCHeader));
+}
+
 /* Initial sizes */
 #define MLUA_TABLE_INITIAL_ARRAY_SIZE 4
 #define MLUA_TABLE_INITIAL_HASH_SIZE 4
@@ -98,10 +103,6 @@ static inline void MLuaTableSetNodeCount(MLuaTableHeader *th, Size count) {
 
 static inline void MLuaTableIncNodeCount(MLuaTableHeader *th) {
   MLuaTableSetNodeCount(th, MLuaTableNodeCount(th) + 1);
-}
-
-static inline void MLuaTableDecNodeCount(MLuaTableHeader *th) {
-  MLuaTableSetNodeCount(th, MLuaTableNodeCount(th) - 1);
 }
 
 static inline void MLuaTableSetArrayInline(MLuaTableHeader *th, Bool enabled) {
@@ -166,6 +167,12 @@ MLuaValue MLuaTableNew(MLuaState *L);
  */
 MLuaValue MLuaTableNewSized(MLuaState *L, Size arrayHint, Size hashHint);
 
+/* String-keyed fast paths (no array probe; get follows Forward). The key
+ * must not be a positive-integer value - name constants qualify. */
+MLuaValue MLuaTableGetField(MLuaState *L, MLuaValue tbl, MLuaValue key);
+Bool MLuaTableSetField(MLuaState *L, MLuaValue tbl, MLuaValue key,
+                       MLuaValue value);
+
 /*
  * Get a value from a table.
  * Follows forward chain if key not found.
@@ -188,6 +195,13 @@ MLuaValue MLuaTableGet(MLuaState *L, MLuaValue tbl, MLuaValue key);
  * @return      TRUE on success
  */
 Bool MLuaTableSet(MLuaState *L, MLuaValue tbl, MLuaValue key, MLuaValue value);
+
+/* Positional insert/remove with raw array-part shifting (table.insert /
+ * table.remove backends). Callers validate pos; FALSE = store failure. */
+Bool MLuaTableArrayInsert(MLuaState *L, MLuaValue tbl, Size pos,
+                          MLuaValue value);
+Bool MLuaTableArrayRemove(MLuaState *L, MLuaValue tbl, Size pos,
+                          MLuaValue *removed);
 
 /*
  * Get the length of the array part (# operator).

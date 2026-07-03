@@ -4,8 +4,8 @@ Two programs built with the [CE C/C++ Toolchain](https://github.com/CE-Programmi
 
 | Program | Directory | Contents |
 |---|---|---|
-| `MLUA.8xp` (~57 KB) | `repl/` | Full build: runs Lua **source or bytecode** appvars, on-calc **REPL** |
-| `MLUAR.8xp` (~44 KB) | `runner/` | Bytecode-only runner (no compiler); smallest footprint. Ships **typed float arrays** (`MLUA_TABLE_NUM_ARRAYS`): a table of floats retains ~4 bytes/element instead of ~20, so float-heavy workloads fit the 48 KB heap. The repl build skips this (~2.8 KB of image it can't spare). |
+| `MLUA.8xp` (~59 KB) | `repl/` | Full build: runs Lua **source or bytecode** appvars, on-calc **REPL** |
+| `MLUAR.8xp` (~47 KB) | `runner/` | Bytecode-only runner (no compiler); smallest footprint. Ships **typed float arrays** (`MLUA_TABLE_NUM_ARRAYS`): a table of floats retains ~4 bytes/element instead of ~20, so float-heavy workloads fit the 48 KB heap. The repl build skips this (~2.8 KB of image it can't spare). |
 
 Both include the `gfx` / `key` / `timer` calculator bindings and ship as a
 single compressed `.8xp` (zx0; the decompressed image is ~110-139 KB of
@@ -94,7 +94,9 @@ architecture says it should:
 | `bench_list` | 60 element-wise passes over 500-element lists | 20 s | 19.8 s | **MicroLua 1.01x** |
 | `bench_str` | build 1000-char string by 500 appends + scan | 11 s | 6.8 s | **MicroLua 1.6x** |
 
-MicroLua now wins every row. `bench_list` is TI-BASIC's best case --
+MicroLua now wins every row (re-verified 2026-07-03 after the follow-up
+perf pass via deterministic CEmu screen-CRC gates at these values +2%;
+recompile old `.mlu` appvars). `bench_list` is TI-BASIC's best case --
 `L1L2+L1` is one dispatch into vectorized OS assembly -- and the fused
 indexing opcodes (`GETTABLE_LL`/`SETTABLE_LL`), the array-window fast
 paths, and computed-goto dispatch bring per-element bytecode to parity
@@ -115,9 +117,11 @@ verifies the tokenization. The Lua side runs from source appvars via MLUA.
   hungriest residents (~24 bytes retained per integer element).
 - Program image: decompressed into user RAM at launch; the practical
   ceiling is ~137 KB once the VAT and the LibLoad library copies are
-  accounted for. The full build sits at ~132 KB after trading the
-  `string.pack` engine (`MLUA_ENABLE_PACK=0`) for computed-goto dispatch
-  (`MLUA_VM_COMPUTED_GOTO=1`), which is worth more per byte here. Measure
+  accounted for. The full build sits at ~136.4 KB after the 2026-07 perf
+  pass (fused opcodes, correctness fixes) - `MLUA_ENABLE_PACK=0` and
+  `MLUA_PARSE_FOLD_INT=0` keep it under the ceiling while
+  `MLUA_VM_COMPUTED_GOTO=1` and compare-branch fusion stay on, being
+  worth more per byte here. Measure
   with `python3 ../../tools/map_size.py bin/MLUA.map` (image size, largest
   symbols, and `--diff old.map new.map` for per-symbol deltas against a
   saved baseline map).

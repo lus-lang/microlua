@@ -11,11 +11,35 @@
 /* Hash Utilities                                                             */
 /* ========================================================================== */
 
+/* Hash-part capacities are powers of two by construction (inline cap 1,
+ * initial 4, growth doubles from the live count), so every probe uses
+ * `hash & (cap - 1)` - the eZ80 has no divider, and even hosted CPUs pay
+ * 20+ cycles for the integer modulo this replaces. */
+MLUA_STATIC_ASSERT((MLUA_TABLE_INITIAL_HASH_SIZE &
+                    (MLUA_TABLE_INITIAL_HASH_SIZE - 1)) == 0,
+                   "hash capacity must stay a power of two");
+MLUA_STATIC_ASSERT((MLUA_TABLE_INLINE_HASH_CAP &
+                    (MLUA_TABLE_INLINE_HASH_CAP - 1)) == 0,
+                   "inline hash capacity must stay a power of two");
+
+/* Word mixing for integer/pointer keys: Knuth multiplicative by default,
+ * a multiply-free xor-shift under MLUA_HASH_SHIFT_XOR (see MLuaConfig.h). */
+#if MLUA_HASH_SHIFT_XOR
+static U32 HashWord(U32 w) {
+  w ^= w >> 16;
+  w ^= (w << 7);
+  w ^= w >> 9;
+  return w;
+}
+#else
+static U32 HashWord(U32 w) { return w * 2654435761U; }
+#endif
+
 static U32 HashValue(MLuaValue key) {
   if (IsInt(key)) {
     /* Simple integer hash (by value, so a boxed int hashes like its I32) */
     I32 i = MLuaGetIntVal(key);
-    return (U32)((i * 2654435761U) & 0xFFFFFFFF);
+    return HashWord((U32)i);
   }
 
   if (IsShortStr(key)) {
@@ -39,7 +63,7 @@ static U32 HashValue(MLuaValue key) {
 
   if (IsPtr(key)) {
     /* Hash pointer value */
-    return (U32)((key * 2654435761U) & 0xFFFFFFFF);
+    return HashWord((U32)key);
   }
 
   /* For other types, use raw value */
@@ -104,8 +128,16 @@ MLuaValue MLuaTableNewSized(MLuaState *L, Size arrayHint, Size hashHint) {
     }
   }
 
-  /* Pre-allocate hash part if hint given */
+  /* Pre-allocate hash part if hint given. The capacity must be a power of
+   * two (probes mask with cap-1), so round any external hint up. */
   if (hashHint > 0) {
+    if (hashHint > MLUA_TABLE_INLINE_HASH_CAP) {
+      Size pow2 = MLUA_TABLE_INITIAL_HASH_SIZE;
+      while (pow2 < hashHint && pow2 <= ((Size)MLUA_TABLE_NODE_COUNT_MASK / 2)) {
+        pow2 *= 2;
+      }
+      hashHint = pow2;
+    }
     if (hashHint <= MLUA_TABLE_INLINE_HASH_CAP) {
       MLuaTableSetHashInline(th, TRUE);
       th->NodeCapacity = (U32)MLUA_TABLE_INLINE_HASH_CAP;
@@ -357,12 +389,13 @@ static Bool TypedArraySet(MLuaState *L, MLuaTableHeader *th, Size index,
   }
 
   if (index == len + 1) {
-    /* Append; grow with the generic policy (x2 below 1024, then +256) */
+    /* Append; grow with the generic policy (x2 below 1024, then x1.5 -
+     * see ArraySet for why flat growth is quadratic) */
     if (index > th->ArraySize) {
       Size newSize = th->ArraySize ? th->ArraySize
                                    : (Size)MLUA_TABLE_INITIAL_ARRAY_SIZE;
       while (newSize < index) {
-        newSize = (newSize >= 1024) ? newSize + 256 : newSize * 2;
+        newSize = (newSize >= 1024) ? newSize + (newSize >> 1) : newSize * 2;
       }
       if (!TypedArrayGrow(L, th, newSize)) {
         return FALSE;
@@ -464,7 +497,12 @@ static Bool ArraySet(MLuaState *L, MLuaTableHeader *th, Size index,
     }
     while (newSize < index) {
       if (newSize >= 1024) {
-        newSize += 256;
+        /* Grow geometrically (x1.5): the old flat +256 made large appends
+         * quadratic - filling n slots reallocated n/256 times and copied
+         * O(n^2/512) values (a 500k-element fill did ~1950 reallocations
+         * and constant GC on the abandoned buffers). x1.5 keeps worst-case
+         * overshoot at 50% of the array, gentler on tiny heaps than x2. */
+        newSize += newSize >> 1;
       } else {
         newSize *= 2;
       }
@@ -500,6 +538,7 @@ static Bool HashGrow(MLuaState *L, MLuaTableHeader *th) {
   MLuaTableNode *oldNodes = MLuaTableNodeData(th);
   MLuaTableNode inlineCopy[MLUA_TABLE_INLINE_HASH_CAP];
   Bool oldInline = MLuaTableHashIsInline(th);
+  Size live;
   Size newCap;
   Size newBytes;
   Size i;
@@ -511,12 +550,27 @@ static Bool HashGrow(MLuaState *L, MLuaTableHeader *th) {
     oldNodes = inlineCopy;
   }
 
+  /* Size the new table from the LIVE entry count, not the occupied count:
+   * NodeCount includes dead nodes (deletions), which the rebuild below
+   * drops. A delete-heavy table therefore rebuilds at the same or a smaller
+   * capacity instead of doubling forever. live*2+1 keeps the rebuilt table
+   * at most half full, so the insert that triggered the grow always fits. */
+  live = 0;
+  for (i = 0; i < oldCap; i++) {
+    if (oldNodes && !IsNil(oldNodes[i].Key) && !IsNil(oldNodes[i].Value)) {
+      live++;
+    }
+  }
+
   /* The node count lives in NodeState's low bits; capacity (and therefore
    * count) must stay within that mask. */
-  if (oldCap > ((Size)MLUA_TABLE_NODE_COUNT_MASK / 2)) {
+  if (live > ((Size)MLUA_TABLE_NODE_COUNT_MASK / 2)) {
     return FALSE;
   }
-  newCap = (oldCap == 0) ? MLUA_TABLE_INITIAL_HASH_SIZE : oldCap * 2;
+  newCap = MLUA_TABLE_INITIAL_HASH_SIZE;
+  while (newCap < live * 2 + 1) {
+    newCap *= 2;
+  }
   if (newCap > (Size)-1 / sizeof(MLuaTableNode)) {
     return FALSE;
   }
@@ -538,15 +592,15 @@ static Bool HashGrow(MLuaState *L, MLuaTableHeader *th) {
     newNodes[i].Value = MLUA_NIL;
   }
 
-  /* Reinsert old nodes */
+  /* Reinsert old nodes (live only - dead nodes are dropped here) */
   for (i = 0; i < oldCap; i++) {
-    if (oldNodes && !IsNil(oldNodes[i].Key)) {
+    if (oldNodes && !IsNil(oldNodes[i].Key) && !IsNil(oldNodes[i].Value)) {
       U32 hash = HashValue(oldNodes[i].Key);
-      Size slot = hash % newCap;
+      Size slot = hash & (newCap - 1);
       Size j;
 
       for (j = 0; j < newCap; j++) {
-        Size idx = (slot + j) % newCap;
+        Size idx = (slot + j) & (newCap - 1);
         if (IsNil(newNodes[idx].Key)) {
           newNodes[idx] = oldNodes[i];
           MLuaTableIncNodeCount(th);
@@ -556,9 +610,23 @@ static Bool HashGrow(MLuaState *L, MLuaTableHeader *th) {
     }
   }
 
+  /* Every entry was just re-slotted by its current HashValue, so any
+   * compaction-induced staleness is repaired as a side effect. */
+  MLuaTableGCHeader(th)->Flags &= (U8)~GCFLAG_HASHSTALE;
+
   return TRUE;
 }
 
+/* Find the node for key, live OR dead (a dead node has its Key preserved and
+ * Value nil - see HashSet's delete path). Callers read Value, so a dead node
+ * behaves as a miss; HashSet uses the returned dead node to resurrect in
+ * place. Probing stops only at a truly-empty slot (Key nil), which dead
+ * nodes never are - that is what keeps probe chains intact across deletes.
+ *
+ * A table flagged GCFLAG_HASHSTALE had pointer-hashed keys moved by the
+ * compactor, so slot positions no longer match HashValue order; until a
+ * rebuild clears the flag (HashRefresh), lookups fall back to scanning every
+ * slot, which is hash-order-independent and therefore always correct. */
 static MLuaTableNode *HashFind(MLuaTableHeader *th, MLuaValue key) {
   MLuaTableNode *nodes;
   U32 hash;
@@ -570,11 +638,21 @@ static MLuaTableNode *HashFind(MLuaTableHeader *th, MLuaValue key) {
   }
 
   nodes = MLuaTableNodeData(th);
+
+  if (MLuaTableGCHeader(th)->Flags & GCFLAG_HASHSTALE) {
+    for (i = 0; i < th->NodeCapacity; i++) {
+      if (!IsNil(nodes[i].Key) && MLuaRawEqual(nodes[i].Key, key)) {
+        return &nodes[i];
+      }
+    }
+    return NULL;
+  }
+
   hash = HashValue(key);
-  slot = hash % th->NodeCapacity;
+  slot = hash & (th->NodeCapacity - 1);
 
   for (i = 0; i < th->NodeCapacity; i++) {
-    Size idx = (slot + i) % th->NodeCapacity;
+    Size idx = (slot + i) & (th->NodeCapacity - 1);
     MLuaTableNode *node = &nodes[idx];
 
     if (IsNil(node->Key)) {
@@ -590,6 +668,16 @@ static MLuaTableNode *HashFind(MLuaTableHeader *th, MLuaValue key) {
   return NULL;
 }
 
+/* Rebuild a stale table's hash order (see HashFind). HashGrow re-slots every
+ * live entry by its current HashValue and clears the flag; on OOM the flag
+ * stays set and lookups keep using the linear fallback, so staleness is a
+ * performance state, never a correctness one. */
+static void HashRefresh(MLuaState *L, MLuaTableHeader *th) {
+  if (MLuaTableGCHeader(th)->Flags & GCFLAG_HASHSTALE) {
+    (void)HashGrow(L, th);
+  }
+}
+
 static Bool HashSet(MLuaState *L, MLuaTableHeader *th, MLuaValue key,
                     MLuaValue value) {
   U32 hash;
@@ -597,17 +685,23 @@ static Bool HashSet(MLuaState *L, MLuaTableHeader *th, MLuaValue key,
   Size i;
   Size threshold;
   MLuaTableNode *nodes;
+  MLuaTableNode *existing;
 
-  /* Find existing node */
-  MLuaTableNode *existing = HashFind(th, key);
+  /* Repair compaction-stale hash order first: the insert probe below places
+   * the new key by its current HashValue, which only lines up with lookups
+   * once the surviving entries are re-slotted too. */
+  HashRefresh(L, th);
+
+  /* Find existing node (live or dead - HashFind matches on Key) */
+  existing = HashFind(th, key);
   if (existing) {
+    /* Deleting keeps the Key in place as a dead node ({Key, Value=nil}):
+     * nilling the Key would terminate probe chains early and orphan every
+     * later same-chain entry. Dead nodes stay in NodeCount (they still
+     * lengthen chains, so they must keep driving the grow trigger) and are
+     * dropped wholesale when HashGrow rebuilds. Assigning a value to a dead
+     * node resurrects it in place. */
     existing->Value = value;
-    if (IsNil(value)) {
-      /* Mark as deleted - for simplicity, we just set key to nil */
-      /* A proper implementation would use tombstones */
-      existing->Key = MLUA_NIL;
-      MLuaTableDecNodeCount(th);
-    }
     return TRUE;
   }
 
@@ -634,17 +728,25 @@ static Bool HashSet(MLuaState *L, MLuaTableHeader *th, MLuaValue key,
     }
   }
 
-  /* Insert new node */
+  /* Insert new node. HashFind above proved the key absent (it probed the
+   * whole chain, dead nodes included), so the first dead node on the probe
+   * path can be reused without another absence check; reuse keeps NodeCount
+   * unchanged (the slot was already occupied). */
   nodes = MLuaTableNodeData(th);
   hash = HashValue(key);
-  slot = hash % th->NodeCapacity;
+  slot = hash & (th->NodeCapacity - 1);
 
   for (i = 0; i < th->NodeCapacity; i++) {
-    Size idx = (slot + i) % th->NodeCapacity;
+    Size idx = (slot + i) & (th->NodeCapacity - 1);
     if (IsNil(nodes[idx].Key)) {
       nodes[idx].Key = key;
       nodes[idx].Value = value;
       MLuaTableIncNodeCount(th);
+      return TRUE;
+    }
+    if (IsNil(nodes[idx].Value)) {
+      nodes[idx].Key = key;
+      nodes[idx].Value = value;
       return TRUE;
     }
   }
@@ -662,7 +764,6 @@ MLuaValue MLuaTableRawGet(MLuaState *L, MLuaValue tbl, MLuaValue key) {
   Size index;
   MLuaTableNode *node;
 
-  UNUSED(L);
   if (!IsTable(tbl)) {
     return MLUA_NIL;
   }
@@ -690,7 +791,9 @@ MLuaValue MLuaTableRawGet(MLuaState *L, MLuaValue tbl, MLuaValue key) {
     }
   }
 
-  /* Check hash part */
+  /* Check hash part (repairing compaction-stale hash order when possible;
+   * an OOM leaves the flag set and HashFind scans linearly instead) */
+  HashRefresh(L, th);
   node = HashFind(th, key);
   if (node) {
     return node->Value;
@@ -723,6 +826,40 @@ MLuaValue MLuaTableGet(MLuaState *L, MLuaValue tbl, MLuaValue key) {
   }
 
   return MLUA_NIL;
+}
+
+/* String-keyed (field/global) accessors: a name constant can never be a
+ * positive integer, so these skip the array-part probe and go straight to
+ * the hash chain. Get keeps full Forward-chain semantics, including the
+ * dead-node miss falling through to the forward table; set writes the
+ * table directly (assignments never delegate). The hot path under
+ * GETGLOBAL_K/SETGLOBAL_K. */
+MLuaValue MLuaTableGetField(MLuaState *L, MLuaValue tbl, MLuaValue key) {
+  MLuaValue current = tbl;
+  int depth = 0;
+  const int MAX_DEPTH = 100;
+
+  while (IsTable(current) && depth < MAX_DEPTH) {
+    MLuaTableHeader *th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(current));
+    MLuaTableNode *node;
+    HashRefresh(L, th);
+    node = HashFind(th, key);
+    if (node && !IsNil(node->Value)) {
+      return node->Value;
+    }
+    current = th->Forward;
+    depth++;
+  }
+  return MLUA_NIL;
+}
+
+Bool MLuaTableSetField(MLuaState *L, MLuaValue tbl, MLuaValue key,
+                       MLuaValue value) {
+  if (!IsTable(tbl) || IsNil(key)) {
+    return FALSE;
+  }
+  return HashSet(L, MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl)), key,
+                 value);
 }
 
 Bool MLuaTableSet(MLuaState *L, MLuaValue tbl, MLuaValue key, MLuaValue value) {
@@ -793,6 +930,86 @@ Size MLuaTableLen(MLuaValue tbl) {
   }
 #endif
   return th->ArrayLen;
+}
+
+/* Positional insert/remove over the array part: one grow/append through
+ * the normal store path (so capacity, length bookkeeping, and typed-array
+ * promotion/demotion rules all apply), then a raw MemMove of the slots -
+ * replacing the per-element boxed-key get/set loops table.insert/remove
+ * used, which cost a full generic table dispatch per shifted element.
+ * pos is 1-based and must satisfy 1 <= pos <= len(+1 for insert); callers
+ * validate. Returns FALSE on store failure (OOM / hole error). */
+Bool MLuaTableArrayInsert(MLuaState *L, MLuaValue tbl, Size pos,
+                          MLuaValue value) {
+  MLuaTableHeader *th;
+  Size len;
+
+  if (!IsTable(tbl)) {
+    return FALSE;
+  }
+  th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl));
+  len = MLuaTableLen(tbl);
+
+  /* Append through the normal path: handles growth and, for NUM arrays,
+   * acceptance/demotion. The appended value is the final element; the
+   * shift below rotates it into place. */
+  if (!MLuaTableSet(L, tbl, MakeInt((I32)(len + 1)), value)) {
+    return FALSE;
+  }
+  if (pos == len + 1) {
+    return TRUE;
+  }
+
+#if MLUA_TABLE_NUM_ARRAYS
+  if (MLuaTableArrayKind(th) == MLUA_TABLE_ARRAY_NUM) {
+    MLuaTableNumArray *buf = TypedArray(th);
+    MLUA_FLOAT f = buf->Data[len]; /* the just-appended value */
+    MemMove(&buf->Data[pos], &buf->Data[pos - 1],
+            (len + 1 - pos) * sizeof(MLUA_FLOAT));
+    buf->Data[pos - 1] = f;
+    return TRUE;
+  }
+#endif
+  {
+    MLuaValue *a = MLuaTableArrayData(th);
+    MemMove(&a[pos], &a[pos - 1], (len + 1 - pos) * sizeof(MLuaValue));
+    a[pos - 1] = value;
+  }
+  return TRUE;
+}
+
+Bool MLuaTableArrayRemove(MLuaState *L, MLuaValue tbl, Size pos,
+                          MLuaValue *removed) {
+  MLuaTableHeader *th;
+  Size len;
+
+  if (!IsTable(tbl)) {
+    return FALSE;
+  }
+  th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl));
+  len = MLuaTableLen(tbl);
+  if (len == 0 || pos < 1 || pos > len) {
+    return FALSE;
+  }
+
+  *removed = MLuaTableGet(L, tbl, MakeInt((I32)pos));
+
+#if MLUA_TABLE_NUM_ARRAYS
+  if (MLuaTableArrayKind(th) == MLUA_TABLE_ARRAY_NUM) {
+    MLuaTableNumArray *buf = TypedArray(th);
+    MemMove(&buf->Data[pos - 1], &buf->Data[pos],
+            (len - pos) * sizeof(MLUA_FLOAT));
+    buf->Len--;
+    return TRUE;
+  }
+#endif
+  {
+    MLuaValue *a = MLuaTableArrayData(th);
+    MemMove(&a[pos - 1], &a[pos], (len - pos) * sizeof(MLuaValue));
+    a[len - 1] = MLUA_NIL;
+    th->ArrayLen--;
+  }
+  return TRUE;
 }
 
 Bool MLuaTableAppend(MLuaState *L, MLuaValue tbl, MLuaValue value) {
@@ -901,7 +1118,10 @@ MLuaValue MLuaTableNext(MLuaState *L, MLuaValue tbl, MLuaValue key,
     }
   }
 
-  /* Then iterate hash part */
+  /* Then iterate hash part. Dead nodes (Value nil, deleted) are never
+   * yielded, but their preserved Key still matches the resume scan - so
+   * deleting the current key during a pairs() traversal keeps iterating
+   * from the right position instead of ending early. */
   nodes = MLuaTableNodeData(th);
   for (i = 0; i < th->NodeCapacity; i++) {
     MLuaTableNode *node = &nodes[i];
@@ -911,8 +1131,10 @@ MLuaValue MLuaTableNext(MLuaState *L, MLuaValue tbl, MLuaValue key,
     }
 
     if (foundCurrent) {
-      *value = node->Value;
-      return node->Key;
+      if (!IsNil(node->Value)) {
+        *value = node->Value;
+        return node->Key;
+      }
     } else if (MLuaRawEqual(node->Key, key)) {
       foundCurrent = TRUE;
     }

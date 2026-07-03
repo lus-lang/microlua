@@ -578,8 +578,23 @@ static void UpdateReferences(MLuaState *L) {
           }
         }
         for (i = 0; i < th->NodeCapacity; i++) {
-          nodes[i].Key = UpdateValue(L, nodes[i].Key);
+          MLuaValue oldKey = nodes[i].Key;
+          nodes[i].Key = UpdateValue(L, oldKey);
           nodes[i].Value = UpdateValue(L, nodes[i].Value);
+          /* A key that hashes by ADDRESS (tables, closures, threads, heap
+           * floats - anything but content-hashed strings and value-hashed
+           * int boxes) lands in a slot chosen from its pre-move address;
+           * once the compactor relocates it, lookups probe the wrong chain.
+           * Flag the table so it re-slots (or scans linearly) on next use.
+           * Classify via the OLD pointer: it is still intact during this
+           * phase, whereas the new value points at the post-compact address
+           * whose memory is not populated yet. */
+          if (nodes[i].Key != oldKey && IsPtr(oldKey)) {
+            U8 keyType = MLUA_OBJTYPE((MLuaGCHeader *)GetPtr(oldKey));
+            if (keyType != OBJTYPE_STRING && keyType != OBJTYPE_INT) {
+              obj->Flags |= GCFLAG_HASHSTALE;
+            }
+          }
         }
         th->Forward = UpdateValue(L, th->Forward);
         if (!MLuaTableArrayIsInline(th) && th->ArraySize > 0) {
@@ -891,13 +906,13 @@ GC_TRACE("[gc] done (top=%lu)\n", (unsigned long)L->HeapTop);
   MLuaGCVerifyHeap(L, "collect-end");
 #endif
 
-  /* A weak string table can be mostly tombstones after update/compact. If a
-   * smaller backing array is installed, run one cleanup collection so the old
-   * backing raw buffer does not remain retained until the next cycle. */
-  if (MLuaStringTableShrink(L)) {
-    MLuaGCCollect(L);
-    return;
-  }
+  /* A weak string table can be mostly tombstones after update/compact;
+   * install a smaller backing array when so. The abandoned old array is
+   * ordinary unreachable garbage: leaving it for the next allocation-driven
+   * cycle costs a bounded, table-sized sliver of heap for a while, whereas
+   * recursing into a second full collection here doubled the worst-case GC
+   * pause (mark + three heap walks, twice) just to reclaim that one buffer. */
+  (void)MLuaStringTableShrink(L);
 
   /* Update GC threshold based on live growth, not total heap capacity. */
   L->GCThreshold = MLuaNextGCThreshold(L, L->HeapTop);

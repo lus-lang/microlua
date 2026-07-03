@@ -19,7 +19,16 @@
  * @param buf    Output buffer (must be at least 32 bytes)
  * @return       Number of characters written (not including null terminator)
  */
-Size MLuaIntToStr(I64 n, char *buf);
+/* Formatting integer type (see MLUA_FORMAT_INT64 in MLuaConfig.h) */
+#if MLUA_FORMAT_INT64
+typedef I64 MLuaFmtInt;
+typedef U64 MLuaFmtUint;
+#else
+typedef I32 MLuaFmtInt;
+typedef U32 MLuaFmtUint;
+#endif
+
+Size MLuaIntToStr(MLuaFmtInt n, char *buf);
 
 /*
  * Convert a double to a string.
