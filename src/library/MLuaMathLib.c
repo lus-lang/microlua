@@ -23,34 +23,38 @@ static double GetArg(MLuaState *L, int idx) {
 static I64 GetIntArg(MLuaState *L, int idx) { return (I64)GetArg(L, idx); }
 
 /* ========================================================================== */
-/* math.abs                                                                   */
+/* Unary double->double entries                                               */
 /* ========================================================================== */
 
-static int MathAbs(MLuaState *L) {
-  double x = GetArg(L, 1);
-  MLuaPush(L, MLuaMakeNumber(L, MathFabs(x)));
+/* One shared body carries the whole arg/convert/push protocol; each entry
+ * reduces to an addressable thunk around its (macro) math builtin plus a
+ * tail call passing the thunk. This replaces 16 copies of the protocol -
+ * a measurable image saving on the size-constrained ports. */
+static int Math1(MLuaState *L, double (*fn)(double)) {
+  MLuaPush(L, MLuaMakeNumber(L, fn(GetArg(L, 1))));
   return 1;
 }
 
-/* ========================================================================== */
-/* math.acos                                                                  */
-/* ========================================================================== */
+#define MATH1_ENTRY(NAME, EXPR)                                                \
+  static double NAME##Thunk(double x) { return (EXPR); }                      \
+  static int NAME(MLuaState *L) { return Math1(L, NAME##Thunk); }
 
-static int MathAcosF(MLuaState *L) {
-  double x = GetArg(L, 1);
-  MLuaPush(L, MLuaMakeNumber(L, MathAcos(x)));
-  return 1;
-}
-
-/* ========================================================================== */
-/* math.asin                                                                  */
-/* ========================================================================== */
-
-static int MathAsinF(MLuaState *L) {
-  double x = GetArg(L, 1);
-  MLuaPush(L, MLuaMakeNumber(L, MathAsin(x)));
-  return 1;
-}
+MATH1_ENTRY(MathAbs, MathFabs(x))
+MATH1_ENTRY(MathAcosF, MathAcos(x))
+MATH1_ENTRY(MathAsinF, MathAsin(x))
+MATH1_ENTRY(MathCeilF, MathCeil(x))
+MATH1_ENTRY(MathCosF, MathCos(x))
+MATH1_ENTRY(MathDeg, x * (180.0 / MLUA_PI))
+MATH1_ENTRY(MathExpF, MathExp(x))
+MATH1_ENTRY(MathFloorF, MathFloor(x))
+MATH1_ENTRY(MathRad, x * (MLUA_PI / 180.0))
+MATH1_ENTRY(MathSinF, MathSin(x))
+MATH1_ENTRY(MathSqrtF, MathSqrt(x))
+MATH1_ENTRY(MathTanF, MathTan(x))
+MATH1_ENTRY(MathCoshF, MathCosh(x))
+MATH1_ENTRY(MathSinhF, MathSinh(x))
+MATH1_ENTRY(MathTanhF, MathTanh(x))
+MATH1_ENTRY(MathLog10F, MathLog10(x))
 
 /* ========================================================================== */
 /* math.atan                                                                  */
@@ -65,56 +69,6 @@ static int MathAtanF(MLuaState *L) {
   } else {
     MLuaPush(L, MLuaMakeNumber(L, MathAtan(y)));
   }
-  return 1;
-}
-
-/* ========================================================================== */
-/* math.ceil                                                                  */
-/* ========================================================================== */
-
-static int MathCeilF(MLuaState *L) {
-  double x = GetArg(L, 1);
-  MLuaPush(L, MLuaMakeNumber(L, MathCeil(x)));
-  return 1;
-}
-
-/* ========================================================================== */
-/* math.cos                                                                   */
-/* ========================================================================== */
-
-static int MathCosF(MLuaState *L) {
-  double x = GetArg(L, 1);
-  MLuaPush(L, MLuaMakeNumber(L, MathCos(x)));
-  return 1;
-}
-
-/* ========================================================================== */
-/* math.deg                                                                   */
-/* ========================================================================== */
-
-static int MathDeg(MLuaState *L) {
-  double x = GetArg(L, 1);
-  MLuaPush(L, MLuaMakeNumber(L, x * (180.0 / MLUA_PI)));
-  return 1;
-}
-
-/* ========================================================================== */
-/* math.exp                                                                   */
-/* ========================================================================== */
-
-static int MathExpF(MLuaState *L) {
-  double x = GetArg(L, 1);
-  MLuaPush(L, MLuaMakeNumber(L, MathExp(x)));
-  return 1;
-}
-
-/* ========================================================================== */
-/* math.floor                                                                 */
-/* ========================================================================== */
-
-static int MathFloorF(MLuaState *L) {
-  double x = GetArg(L, 1);
-  MLuaPush(L, MLuaMakeNumber(L, MathFloor(x)));
   return 1;
 }
 
@@ -241,16 +195,6 @@ static int MathModfF(MLuaState *L) {
 }
 
 /* ========================================================================== */
-/* math.rad                                                                   */
-/* ========================================================================== */
-
-static int MathRad(MLuaState *L) {
-  double x = GetArg(L, 1);
-  MLuaPush(L, MLuaMakeNumber(L, x * (MLUA_PI / 180.0)));
-  return 1;
-}
-
-/* ========================================================================== */
 /* math.random                                                                */
 /* ========================================================================== */
 
@@ -300,67 +244,7 @@ static int MathRandomseed(MLuaState *L) {
   return 0;
 }
 
-/* ========================================================================== */
-/* math.sin                                                                   */
-/* ========================================================================== */
 
-static int MathSinF(MLuaState *L) {
-  double x = GetArg(L, 1);
-  MLuaPush(L, MLuaMakeNumber(L, MathSin(x)));
-  return 1;
-}
-
-/* ========================================================================== */
-/* math.sqrt                                                                  */
-/* ========================================================================== */
-
-static int MathSqrtF(MLuaState *L) {
-  double x = GetArg(L, 1);
-  MLuaPush(L, MLuaMakeNumber(L, MathSqrt(x)));
-  return 1;
-}
-
-/* ========================================================================== */
-/* math.tan                                                                   */
-/* ========================================================================== */
-
-static int MathTanF(MLuaState *L) {
-  double x = GetArg(L, 1);
-  MLuaPush(L, MLuaMakeNumber(L, MathTan(x)));
-  return 1;
-}
-
-/* ========================================================================== */
-/* math.cosh / math.sinh / math.tanh (Lua 5.1)                                */
-/* ========================================================================== */
-
-static int MathCoshF(MLuaState *L) {
-  double x = GetArg(L, 1);
-  MLuaPush(L, MLuaMakeNumber(L, MathCosh(x)));
-  return 1;
-}
-
-static int MathSinhF(MLuaState *L) {
-  double x = GetArg(L, 1);
-  MLuaPush(L, MLuaMakeNumber(L, MathSinh(x)));
-  return 1;
-}
-
-static int MathTanhF(MLuaState *L) {
-  double x = GetArg(L, 1);
-  MLuaPush(L, MLuaMakeNumber(L, MathTanh(x)));
-  return 1;
-}
-
-/* ========================================================================== */
-/* math.log10 (Lua 5.1)                                                       */
-/* ========================================================================== */
-
-static int MathLog10F(MLuaState *L) {
-  double x = GetArg(L, 1);
-  MLuaPush(L, MLuaMakeNumber(L, MathLog10(x)));
-  return 1;
-}
 
 /* ========================================================================== */
 /* math.tointeger                                                             */
