@@ -475,7 +475,10 @@ MLuaValue MLuaConcat(MLuaState *L, int count) {
     return MLuaStringNew(L, "", 0);
   }
 
-  /* First pass: Type check and calculate total length */
+  /* First pass: type check and compute the EXACT total length. Numbers
+   * render through the same MLuaValueToStr as table.concat/tostring, so
+   * every numeric type concatenates consistently (floats used to be
+   * dropped outright here, and INT_MIN's negation corrupted digits). */
   for (i = 0; i < count; i++) {
     MLuaValue v = L->EvalStack[L->EvalTop - count + i];
     if (IsString(v)) {
@@ -483,8 +486,8 @@ MLuaValue MLuaConcat(MLuaState *L, int count) {
     } else if (IsShortStr(v)) {
       totalLen += MLuaShortStrLen(v);
     } else if (IsInt(v) || MLuaIsNumber(v)) {
-      /* Estimate max digits for number */
-      totalLen += 24;
+      char numBuf[40];
+      totalLen += MLuaValueToStr(L, v, numBuf, sizeof(numBuf));
       allStrings = FALSE;
     } else {
       /* Invalid type for concatenation */
@@ -528,26 +531,11 @@ MLuaValue MLuaConcat(MLuaState *L, int count) {
       Size len = MLuaShortStrLen(v);
       MemCpy(p, s, len);
       p += len;
-    } else if (IsInt(v)) {
-      /* Simple integer to string */
-      I32 n = MLuaGetIntVal(v);
-      char numBuf[16];
-      char *np = numBuf + sizeof(numBuf) - 1;
-      Bool neg = FALSE;
-      Size numLen;
-      if (n < 0) {
-        neg = TRUE;
-        n = -n;
-      }
-      *np = '\0';
-      do {
-        *--np = '0' + (n % 10);
-        n /= 10;
-      } while (n > 0);
-      if (neg)
-        *--np = '-';
-      numLen = (numBuf + sizeof(numBuf) - 1) - np;
-      MemCpy(p, np, numLen);
+    } else {
+      /* Number (int or float): same renderer as the length pass */
+      char numBuf[40];
+      Size numLen = MLuaValueToStr(L, v, numBuf, sizeof(numBuf));
+      MemCpy(p, numBuf, numLen);
       p += numLen;
     }
   }
