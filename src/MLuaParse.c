@@ -1892,11 +1892,11 @@ static void ParseFor(MLuaParser *p) {
      *     JMP to loop head
      */
 
-    /* Loop head position */
-    Size loopHead = MLuaCodePos(fs);
-
-    /* Store body target PC in the local slot. Pushed through a placeholder
-     * constant (patched below) so positions beyond 127 work. */
+    /* Store body target PC in the local slot, ONCE, before the loop head:
+     * the slot is invariant across iterations, and re-storing it per
+     * iteration cost two dispatches (LOADK+SETLOCAL) in every generic-for.
+     * Pushed through a placeholder constant (patched below) so positions
+     * beyond 127 work. */
     int bodyK = MLuaAddConstantRaw(fs, MakeInt(0));
     if (bodyK < 0 || bodyK > 255) {
       Error(p, "too many constants in function");
@@ -1906,6 +1906,9 @@ static void ParseFor(MLuaParser *p) {
     StackPush(p, 1);
     MLuaEmitOpB(fs, OP_SETLOCAL, (U8)bodyTargetSlot);
     StackPop(p, 1);
+
+    /* Loop head position: the back-jump lands on GLOOP_CALL */
+    Size loopHead = MLuaCodePos(fs);
 
     /* GLOOP_CALL: Push Func, State, Control for iterator call */
     MLuaEmitOpB(fs, OP_GLOOP_CALL, (U8)iterSlot);

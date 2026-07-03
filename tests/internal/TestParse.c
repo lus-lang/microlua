@@ -156,6 +156,36 @@ TEST(AssignmentRetractsDeadRead) {
   }
 }
 
+/* Find the code offset of an opcode's first occurrence (whole-instruction
+ * walk), or (Size)-1. */
+static Size FindOp(const MLuaProto *proto, U8 op) {
+  Size i = 0;
+  while (i < proto->CodeSize) {
+    if (proto->Code[i] == op) {
+      return i;
+    }
+    i += MLuaOpSize((MLuaOpCode)proto->Code[i]);
+  }
+  return (Size)-1;
+}
+
+/* The generic-for body-target store (LOADK+SETLOCAL) is loop-invariant and
+ * must sit BEFORE the loop head, not re-execute every iteration. */
+TEST(GenericForHoistsBodyTarget) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  const char *src = "for k in pairs(t) do end";
+  MLuaProto *proto = MLuaParse(L, src, StrLen(src), "test");
+  Size loadk;
+  Size gloopCall;
+
+  ASSERT_NE(proto, NULL);
+  loadk = FindOp(proto, (U8)OP_LOADK);
+  gloopCall = FindOp(proto, (U8)OP_GLOOP_CALL);
+  ASSERT_NE(loadk, (Size)-1);
+  ASSERT_NE(gloopCall, (Size)-1);
+  ASSERT(loadk < gloopCall); /* hoisted above the back-jump target */
+}
+
 TEST(Arithmetic) {
   MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
   const char *src = "local x = 1 + 2 * 3";
@@ -277,6 +307,7 @@ int main(void) {
   RUN_TEST(LocalMultiple);
   RUN_TEST(Assignment);
   RUN_TEST(AssignmentRetractsDeadRead);
+  RUN_TEST(GenericForHoistsBodyTarget);
   RUN_TEST(Arithmetic);
 
   printf("\nControl Flow:\n");
