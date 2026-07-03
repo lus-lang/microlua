@@ -15,9 +15,22 @@ MicroLua (`mlua`) is a tiny, reasonably complete Lua runtime. It is good for emb
  *   -v, --version         Print version
 ```
 
-In a local macOS size build with similar build flags, MicroLua's compiler/parser-less runtime artifacts total 218 KiB (259 KiB with the parser), around 2.8x smaller than Lua 5.5.0's runtime artifacts at 612 KiB. Re-run `python3 bench/bench.py` to regenerate local comparison results.
+## At a glance
+
+- Provides most of Lua within a tiny footprint.
+- The core static library has no dependence on the C standard library.
+- The core can run from a caller-provided pre-allocated heap without dynamic memory allocation[^1].
+- The interpreter is a compact stack machine whose instructions are always one or two bytes.
+- The parser is a single-pass Pratt compiler that emits bytecode directly and can be compiled out for bytecode-only embedded targets.
+- Port configuration covers value representation, fixed-width C types, native float width, optional dump/pack engines, computed-goto dispatch, and opcode profiling.
+- The garbage collector compacts the heap at safepoints to reclaim memory and remove fragmentation.
+- Table arrays reject holes at runtime to keep dense sequences compact.
+- Strings and scripts are UTF-8, with codepoint-aware core string operations and deliberately byte/ASCII-oriented pattern matching and case conversion.
+- The `math`, `table`, `string`, and `coroutine` libraries include the expected core APIs plus conveniences such as `table.pack`, `table.unpack`, integer math helpers, binary string packing, and coroutine close/yieldability support.
 
 ## Memory benchmarks
+
+In a local macOS size build with similar build flags, MicroLua's compiler/parser-less runtime artifacts total 218 KiB (259 KiB with the parser), around 2.8x smaller than Lua 5.5.0's runtime artifacts at 612 KiB. Re-run `python3 bench/bench.py` to regenerate local comparison results.
 
 `python3 bench/benchmarksgame/bench.py` compares MicroLua with Lua 5.5 on
 small standalone ports of relevant Lua examples, scaled down for local runs and
@@ -32,27 +45,6 @@ exact constrained-heap high-water from a high-limit `--dump` run.
 | knucleotide  | `knucleotide-lua-2`  | substring table pressure |       76.9 KiB |            71.8 KiB |           0.93x |
 | revcomp      | `revcomp-lua-5`      | string builder pressure  |      115.4 KiB |           104.5 KiB |           0.91x |
 | spectralnorm | `spectralnorm-lua-1` | numeric arrays           |       25.9 KiB |            25.6 KiB |           0.99x |
-
-## At a glance
-
-- Provides most of Lua within a tiny footprint.
-- The core static library has no dependence on the C standard library.
-- The core can run without dynamic memory allocation: pass your own pre-allocated heap to the interpreter[^1].
-- Interpreter is implemented as a stack machine, with every instruction encoded
-  as one or two bytes. Bytecode format v4 adds fused opcodes for common global
-  and table-indexing patterns.
-- Single-pass Pratt parsing and code generation with minimal resource cost. The parser/compiler can also be compiled out for bytecode-only embedded targets.
-- Port configuration supports 64-bit NaN-boxing, 32-bit alignment tagging with boxed full-width integers, compiler-derived fixed-width C types, optional single-precision heap floats for targets whose `double` is not binary64, optional dump/pack engines, computed-goto dispatch, and opcode profiling.
-- Garbage collection that reclaims and defragments the heap to conserve memory.
-- Holes in table arrays are runtime errors to ensure heap compactness.
-- Strings and scripts are encoded as UTF-8.
-  - `string.len`, `string.sub`, `string.byte`, `string.char`, and `string.reverse` operate on codepoints.
-  - `upper`/`lower` are ASCII-only and pattern matching positions/classes are byte-based.
-- `math`, `table`, `string`, and `coroutine` libraries are available, with the following supported features:
-  - Everything from Lua 5.1 **except** `coroutine.wrap`, `string.gsub`, and `string.gmatch`.
-  - **Lua 5.2**: `table.pack` and `table.unpack`.
-  - **Lua 5.3**: `string.pack`, `string.packsize`, `string.unpack` (when the default pack engine is enabled), `math.maxinteger`, `math.mininteger`, `math.tointeger`, `math.type`, and `math.ult`. Numeric literals follow the 5.3 integer/float distinction.
-  - **Lua 5.4**: `coroutine.isyieldable` and `coroutine.close`.
 
 ### Limitations
 
@@ -90,11 +82,11 @@ ninja -C build-bytecode
 
 When `-Dcompiler=false`, `libmicrolua.a` omits the lexer and parser and exposes
 `MLuaLoadBytecode`/`MLuaDoBytecode` for embedded callers.
-MicroLua bytecode v4 has a versioned header, records endianness, serializes
+MicroLua bytecode has a compatibility header, records endianness, serializes
 execution-critical fields with fixed widths, and stores numeric constants as
 canonical IEEE-754 binary64 values. A target may use a narrower native
-`MLUA_FLOAT`, but bytecode remains tied to the MicroLua bytecode version and
-supported numeric formats.
+`MLUA_FLOAT`, with numeric values narrowed or widened at the bytecode boundary
+when the configured format supports it.
 
 Port-specific settings are centralized in `src/MLuaConfig.h`. A board port can
 override pointer size, heap alignment, default stack/frame sizes, GC threshold,

@@ -39,7 +39,7 @@ ninja -C builddir
   compiler-enabled workflows only.
 - MicroLua bytecode uses fixed-width serialized fields and an explicit
   endianness byte. It is portable across supported endian/pointer-size targets
-  with a compatible MicroLua bytecode version. Numeric constants are serialized
+  with a compatible MicroLua bytecode header. Numeric constants are serialized
   as canonical IEEE-754 binary64 values and narrowed/widened at the boundary
   when `MLUA_FLOAT_BITS` is 32; unsupported headers must be rejected
   deterministically by `MLuaUndump`.
@@ -208,11 +208,11 @@ size into `bench/RESULTS.md`. It auto-detects a local `lua5.5`/`lua` (verified `
 All build-variant suites are green locally: debug, freestanding release,
 generic32, bytecode-only, true 32-bit (`cross/x86-multilib.ini`), and the
 narrow-config variants (packed GC header, U16 line/index types, line info
-off, typed numeric arrays on). Bytecode is at v5 (dead opcodes retired,
-line-info section dropped; v4 added the fused
-GETTABLE_LL/SETTABLE_LL/SETTABLE_POP/GETGLOBAL_K); older .mlu chunks must be
-recompiled. The GC marks iteratively (gray list through header Forward
-fields, no C-stack recursion) and the per-object header is a port knob
+off, typed numeric arrays on). Current bytecode retires dead opcodes, omits
+the unused line-info section, and includes fused global/table-indexing
+opcodes; older `.mlu` chunks may need to be recompiled. The GC marks
+iteratively (gray list through header Forward fields, no C-stack recursion)
+and the per-object header is a port knob
 (`MLUA_GC_HEADER_ALIGN`: 8 bytes on the CE, so float/int boxes cost 16 not
 24). `table.concat` renders numeric elements (it used to drop them). The
 TI-84 CE runner ships typed float arrays (`MLUA_TABLE_NUM_ARRAYS`, ~4 B
