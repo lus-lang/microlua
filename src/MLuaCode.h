@@ -111,7 +111,8 @@ typedef enum {
       0x66, /* 2B: B body exit step limit start → : Init numeric for */
   OP_NLOOP_STEP =
       0x67, /* 2B: B → idx? : Step numeric loop, push idx if continue */
-  OP_GLOOP_SETUP = 0x68, /* 2B: B body func state ctrl → : Init generic for */
+  /* 0x68 free (was OP_GLOOP_SETUP, defined but never emitted; retired in
+   * bytecode v6) */
   OP_GLOOP_CALL =
       0x69, /* 2B: B → func state ctrl : Push iterator args for CALL */
   OP_GLOOP_STEP =

@@ -901,7 +901,6 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       [OP_LOOP_S] = &&L_OP_LOOP_S,
       [OP_NLOOP_PREP] = &&L_OP_NLOOP_PREP,
       [OP_NLOOP_STEP] = &&L_OP_NLOOP_STEP,
-      [OP_GLOOP_SETUP] = &&L_OP_GLOOP_SETUP,
       [OP_GLOOP_CALL] = &&L_OP_GLOOP_CALL,
       [OP_GLOOP_STEP] = &&L_OP_GLOOP_STEP,
       [OP_CALL] = &&L_OP_CALL,
@@ -1359,35 +1358,6 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
         }
       }
       /* Else: loop ends, fallthrough */
-      VM_BREAK;
-    }
-
-    VM_CASE(OP_GLOOP_SETUP): {
-      /*
-       * GLOOP_SETUP: Generic for-loop setup (SPEC.FORLOOP.md).
-       * Format: [OP_GLOOP_SETUP] [u8 Base_Index] (2 Bytes)
-       * Stack: [Body_Target, Func, State, Control] (4 items, TOS first)
-       *
-       * 1. Pop 4 values from EvalStack
-       * 2. Store: Locals[Base]=Func, [Base+1]=State, [Base+2]=Control,
-       * [Base+3]=Body_Target
-       * 3. Fallthrough to loop head
-       */
-      U8 base = READ_BYTE();
-
-      /* Pop values from EvalStack (TOS first) */
-      MLuaValue bodyTarget = STACK_POP();
-      MLuaValue iterFunc = STACK_POP();
-      MLuaValue state = STACK_POP();
-      MLuaValue ctrl = STACK_POP();
-
-      /* Store to shadow locals */
-      LOCAL_SET(base, iterFunc);       /* Func */
-      LOCAL_SET(base + 1, state);      /* State */
-      LOCAL_SET(base + 2, ctrl);       /* Control */
-      LOCAL_SET(base + 3, bodyTarget); /* Body_Target */
-
-      /* Fallthrough to loop head */
       VM_BREAK;
     }
 
