@@ -232,11 +232,11 @@ size into `bench/RESULTS.md`. It auto-detects a local `lua5.5`/`lua` (verified `
 All supported build-variant suites are green locally: debug, freestanding
 release, generic32, bytecode-only, true 32-bit (`cross/x86-multilib.ini`),
 the narrow-config variants, and the new knob variants (folding/fusion off,
-shift-xor hashing, 32-bit formatting). Bytecode is at v6: the dead
-OP_GLOOP_SETUP slot was retired and five fused opcodes appended
-(SETGLOBAL_K, GETFIELD_K, SETFIELD_K, SETFIELD_K_POP, SELF_K) plus four
-compare+branch opcodes (JMPF_EQ/NEQ/LT/LE); older .mlu chunks must be
-recompiled and the runner's SMOKE.8xv fixture was regenerated.
+shift-xor hashing, 32-bit formatting). Current bytecode retires the dead
+OP_GLOOP_SETUP slot and includes five fused opcodes (SETGLOBAL_K, GETFIELD_K,
+SETFIELD_K, SETFIELD_K_POP, SELF_K) plus four compare+branch opcodes
+(JMPF_EQ/NEQ/LT/LE); older `.mlu` chunks must be recompiled and the runner's
+SMOKE.8xv fixture was regenerated.
 
 Host bench (bench/bench.py vs Lua 5.5): geomean 3.24x, from 7.05x at the
 pass baseline; `sort` (0.94x) and `tableconcat` (0.76x) now beat reference

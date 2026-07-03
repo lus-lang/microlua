@@ -96,7 +96,7 @@ architecture says it should:
 
 MicroLua now wins every row (re-verified 2026-07-03 after the follow-up
 perf pass via deterministic CEmu screen-CRC gates at these values +2%;
-bytecode is v6 - recompile old .mlu appvars). `bench_list` is TI-BASIC's best case --
+recompile old `.mlu` appvars). `bench_list` is TI-BASIC's best case --
 `L1L2+L1` is one dispatch into vectorized OS assembly -- and the fused
 indexing opcodes (`GETTABLE_LL`/`SETTABLE_LL`), the array-window fast
 paths, and computed-goto dispatch bring per-element bytecode to parity
