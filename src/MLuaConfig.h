@@ -203,6 +203,17 @@
 #define MLUA_DEFAULT_GC_THRESHOLD_PERCENT 75
 #endif
 
+/* Multiply-free hashing. The default string hash is FNV-1a (one 32-bit
+ * multiply per byte) and table keys mix with a Knuth multiplicative
+ * constant - fine wherever 32-bit multiply is a single instruction, a
+ * called routine per byte on the eZ80 and any 8/16-bit core. When 1, both
+ * switch to shift-xor mixes (PUC Lua's own string hash shape). Hashes are
+ * never serialized (the bytecode loader re-interns from bytes), so this
+ * changes distribution only, never compatibility. */
+#ifndef MLUA_HASH_SHIFT_XOR
+#define MLUA_HASH_SHIFT_XOR 0
+#endif
+
 /* Static buffer for the stack trace built on runtime errors. The builder
  * clamps every write to the buffer and NUL-terminates, so a smaller buffer
  * just truncates deep traces (one frame line runs ~20-40 bytes). Permanent

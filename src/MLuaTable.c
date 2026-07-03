@@ -22,11 +22,24 @@ MLUA_STATIC_ASSERT((MLUA_TABLE_INLINE_HASH_CAP &
                     (MLUA_TABLE_INLINE_HASH_CAP - 1)) == 0,
                    "inline hash capacity must stay a power of two");
 
+/* Word mixing for integer/pointer keys: Knuth multiplicative by default,
+ * a multiply-free xor-shift under MLUA_HASH_SHIFT_XOR (see MLuaConfig.h). */
+#if MLUA_HASH_SHIFT_XOR
+static U32 HashWord(U32 w) {
+  w ^= w >> 16;
+  w ^= (w << 7);
+  w ^= w >> 9;
+  return w;
+}
+#else
+static U32 HashWord(U32 w) { return w * 2654435761U; }
+#endif
+
 static U32 HashValue(MLuaValue key) {
   if (IsInt(key)) {
     /* Simple integer hash (by value, so a boxed int hashes like its I32) */
     I32 i = MLuaGetIntVal(key);
-    return (U32)((i * 2654435761U) & 0xFFFFFFFF);
+    return HashWord((U32)i);
   }
 
   if (IsShortStr(key)) {
@@ -50,7 +63,7 @@ static U32 HashValue(MLuaValue key) {
 
   if (IsPtr(key)) {
     /* Hash pointer value */
-    return (U32)((key * 2654435761U) & 0xFFFFFFFF);
+    return HashWord((U32)key);
   }
 
   /* For other types, use raw value */
