@@ -47,6 +47,13 @@
  * compiled - any v6 runtime runs any v6 bytecode - so this knob only
  * trades the emitter's code size against fused output on ports whose
  * image cannot afford it. */
+/* Parse-time integer constant folding (60*60*24, -5, ...). Pure emitter
+ * feature with exact runtime-identical semantics; the knob exists for
+ * ports whose image cannot afford the folding code. */
+#ifndef MLUA_PARSE_FOLD_INT
+#define MLUA_PARSE_FOLD_INT 1
+#endif
+
 #ifndef MLUA_PARSE_FUSE_COMPARE
 #define MLUA_PARSE_FUSE_COMPARE 1
 #endif

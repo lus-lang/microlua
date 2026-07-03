@@ -790,6 +790,7 @@ typedef enum {
   PREC_POW      /* ^ */
 } Precedence;
 
+#if MLUA_PARSE_FOLD_INT
 /* ---- Parse-time integer constant folding ---------------------------------
  * Only integers fold, and only for ops whose integer semantics are exact and
  * width-independent (ADD/SUB/MUL wrap two's-complement like the VM's I32
@@ -904,6 +905,10 @@ static Bool TryFoldUnaryMinus(MLuaParser *p) {
   EmitIntLiteral(p, (I32)(0U - (U32)v));
   return TRUE;
 }
+#else
+#define TryFoldBinaryInt(p, binOp) (FALSE)
+#define TryFoldUnaryMinus(p) (FALSE)
+#endif /* MLUA_PARSE_FOLD_INT */
 
 static MLuaOpCode BinaryOp(MLuaTokenType t) {
   switch (t) {

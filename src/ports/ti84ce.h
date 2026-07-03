@@ -70,6 +70,14 @@
  * so the runner - where large precompiled workloads actually run - takes
  * the trade; the repl keeps the image bytes. */
 
+/* The on-calc compiler drops parse-time integer constant folding: it costs
+ * ~1 KB of eZ80 image and calculator-typed sources rarely contain foldable
+ * constant expressions. Compare-branch fusion stays ON - loops dominate
+ * calculator workloads and the fused opcodes win at run time. Bytecode
+ * compiled on-calc stays valid v6 either way. (The runner has no compiler,
+ * so this knob costs it nothing.) */
+#define MLUA_PARSE_FOLD_INT 0
+
 /* Math backend: the MLuaCore.h defaults follow MLUA_FLOAT_BITS, so this
  * port automatically gets the f-suffixed builtins (sinf, powf, ...). */
 
