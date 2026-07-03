@@ -105,7 +105,11 @@ typedef UPtr MLuaValue;
 
 #define TAG_MASK 7 /* Low 3 bits */
 #define TAG_BITS 3
-#define MLUA_SHORTSTR_MAX 3
+/* Inline string capacity is derived from the value word: whole bytes that
+ * fit above the tag (3 on a 32-bit word; a 16-bit-word experiment would
+ * inherit 1 instead of a silently-wrong hardcoded 3). MLUA_PTR_SIZE rather
+ * than sizeof so the tests' preprocessor checks can read it. */
+#define MLUA_SHORTSTR_MAX ((MLUA_PTR_SIZE * 8 - TAG_BITS) / 8)
 
 #endif /* MLUA_PTR_SIZE */
 
@@ -295,8 +299,15 @@ static inline double GetDouble(MLuaValue v) {
 #define MLUA_INLINE_INT_MAX MLUA_INT_MAX
 #define MLUA_INLINE_INT_MIN MLUA_INT_MIN
 #else
-#define MLUA_INLINE_INT_MAX ((I32)0x0FFFFFFF)
-#define MLUA_INLINE_INT_MIN ((I32)(-0x0FFFFFFF - 1))
+/* Derived from the value word: a tagging word of W bits holds W-TAG_BITS
+ * payload bits, one of them the sign. Today's 32-bit word gives the same
+ * 29-bit range the old hardcoded 0x0FFFFFFF literal did; a future narrower
+ * word (a 16-bit port experimenting with 16-bit values) inherits the right
+ * range instead of silently truncating behind a stale constant. */
+#define MLUA_VALUE_BITS (MLUA_PTR_SIZE * 8)
+#define MLUA_INLINE_INT_MAX                                                    \
+  ((I32)((U32)1 << (MLUA_VALUE_BITS - TAG_BITS - 1)) - 1)
+#define MLUA_INLINE_INT_MIN (-MLUA_INLINE_INT_MAX - 1)
 #endif
 
 /* Backward compatibility alias */
