@@ -276,6 +276,78 @@ TEST(GC_HeapShrinksAfterChurn) {
   ASSERT(after < before);
 }
 
+/*
+ * Non-zeroed allocations (MLuaAllocNC / MLuaAllocObjectNC) under real GC
+ * pressure: accumulator concat and array growth allocate through the NC
+ * paths, the 96 KB heap forces collections mid-loop, and the compactor
+ * relocates freshly NC-allocated objects (including their uninitialized
+ * padding tails). Exact final contents pin that no byte the runtime reads
+ * was left to garbage.
+ */
+TEST(GC_NoClearAllocSurvivesCompaction) {
+  MLuaState *L = NewState();
+  ASSERT_NE(L, NULL);
+
+  /* Accumulator concat: every step allocates the result via the NC path;
+   * dead predecessors force repeated compaction in 96 KB. 400 iterations
+   * of "xy" -> 800 chars + digits interleaved for content variety. */
+  const char *concat = "local s = ''\n"
+                       "for i = 1, 400 do s = s .. (i % 10) .. 'y' end\n"
+                       "result = #s\n";
+  ASSERT(RunAndCheckInt(L, concat, 800));
+
+  /* Array + hash growth through the NC paths, with churn so collections
+   * interleave; verify content integrity element by element. */
+  const char *tables = "local t = {}\n"
+                       "for i = 1, 2000 do t[i] = i * 3 end\n"
+                       "local h = {}\n"
+                       "for i = 1, 300 do h['k' .. i] = i end\n"
+                       "local sum = 0\n"
+                       "for i = 1, 2000 do sum = sum + (t[i] - i * 3) end\n"
+                       "for i = 1, 300 do sum = sum + (h['k' .. i] - i) end\n"
+                       "result = sum\n";
+  ASSERT(RunAndCheckInt(L, tables, 0));
+
+  /* string.rep / reverse / upper build through MLuaAllocNC scratch */
+  const char *strfns = "local r = string.rep('ab', 200)\n"
+                       "local v = string.reverse(r)\n"
+                       "local u = string.upper(r)\n"
+                       "result = #v + #u + (string.sub(v, 1, 2) == 'ba' and 1 or 0)\n"
+                       "         + (string.sub(u, 1, 2) == 'AB' and 1 or 0)\n";
+  ASSERT(RunAndCheckInt(L, strfns, 802));
+}
+
+/*
+ * Pins the intern-table OOM fallback: when the heap is too full of
+ * collectable garbage for the intern table to resize (allocations never
+ * collect), new strings must still intern into the not-yet-grown table --
+ * NEVER escape un-interned. The historical failure returned textually
+ * equal strings as distinct values, so `('k'..i) == ('k'..i)` went false
+ * and table lookups by rebuilt keys silently missed (seen on generic32 at
+ * a 96 KB limit; this workload recreates that pressure).
+ */
+TEST(GC_InternSurvivesResizeOOM) {
+  MLuaState *L = NewState();
+  ASSERT_NE(L, NULL);
+
+  const char *src = "local s = ''\n"
+                    "for i = 1, 400 do s = s .. (i % 10) .. 'y' end\n"
+                    "local t = {}\n"
+                    "for i = 1, 2000 do t[i] = i * 3 end\n"
+                    "local h = {}\n"
+                    "local badeq, badhit = 0, 0\n"
+                    "for i = 1, 300 do\n"
+                    "  h['k' .. i] = i\n"
+                    "  if ('k' .. i) ~= ('k' .. i) then badeq = badeq + 1 end\n"
+                    "  if h['k' .. i] ~= i then badhit = badhit + 1 end\n"
+                    "end\n"
+                    "for i = 1, 300 do\n"
+                    "  if h['k' .. i] ~= i then badhit = badhit + 1 end\n"
+                    "end\n"
+                    "result = badeq * 1000 + badhit\n";
+  ASSERT(RunAndCheckInt(L, src, 0));
+}
+
 /* ========================================================================== */
 /* Main                                                                       */
 /* ========================================================================== */
@@ -296,6 +368,8 @@ int main(void) {
   RUN_TEST(GC_SuspendedCoroutineSurvivesCompaction);
   RUN_TEST(GC_ExplicitCollectWithGCRef);
   RUN_TEST(GC_HeapShrinksAfterChurn);
+  RUN_TEST(GC_NoClearAllocSurvivesCompaction);
+  RUN_TEST(GC_InternSurvivesResizeOOM);
 
   printf("Results: %d passed, %d failed\n", TestsPassed, TestsFailed);
   return TestsFailed > 0 ? 1 : 0;

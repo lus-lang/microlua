@@ -111,7 +111,7 @@ MLuaValue MLuaMakeIntSafe(MLuaState *L, I32 value) {
   return MakeInt(value);
 #else
   {
-    MLuaGCHeader *gch = MLuaAllocObject(L, OBJTYPE_INT, sizeof(I32));
+    MLuaGCHeader *gch = MLuaAllocObjectNC(L, OBJTYPE_INT, sizeof(I32));
     if (!gch) {
       /* Nil sentinel + ErrorMsg so the VM raises instead of computing with
        * a silently wrong value. */
@@ -284,7 +284,7 @@ MLuaValue MLuaMakeNumber(MLuaState *L, double n) {
    * Must heap-allocate. This is unavoidable with 32-bit values.
    */
   {
-    MLuaGCHeader *gch = MLuaAllocObject(L, OBJTYPE_NUMBER, sizeof(MLUA_FLOAT));
+    MLuaGCHeader *gch = MLuaAllocObjectNC(L, OBJTYPE_NUMBER, sizeof(MLUA_FLOAT));
     MLuaNumber *num;
     if (!gch) {
       L->ErrorMsg = "out of memory";
@@ -302,7 +302,7 @@ MLuaValue MLuaMakeFloat(MLuaState *L, double n) {
   UNUSED(L);
   return MakeDouble(n);
 #else
-  MLuaGCHeader *gch = MLuaAllocObject(L, OBJTYPE_NUMBER, sizeof(MLUA_FLOAT));
+  MLuaGCHeader *gch = MLuaAllocObjectNC(L, OBJTYPE_NUMBER, sizeof(MLUA_FLOAT));
   MLuaNumber *num;
   if (!gch) {
     L->ErrorMsg = "out of memory";

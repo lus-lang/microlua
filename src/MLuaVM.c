@@ -514,7 +514,7 @@ MLuaValue MLuaConcat(MLuaState *L, int count) {
   if (totalLen + 1 <= sizeof(scratch)) {
     buffer = (U8 *)scratch;
   } else {
-    buffer = (U8 *)MLuaAlloc(L, totalLen + 1);
+    buffer = (U8 *)MLuaAllocNC(L, totalLen + 1);
     if (!buffer) {
       /* The nil sentinel only raises when ErrorMsg is set; a bare nil
        * would flow onward as a value (e.g. silently deleting the target

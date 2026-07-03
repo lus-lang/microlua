@@ -117,7 +117,7 @@ MLuaValue MLuaTableNewSized(MLuaState *L, Size arrayHint, Size hashHint) {
         return MakePtr(gch);
       }
       Size arrayBytes = arrayHint * sizeof(MLuaValue);
-      MLuaValue *array = (MLuaValue *)MLuaAlloc(L, arrayBytes);
+      MLuaValue *array = (MLuaValue *)MLuaAllocNC(L, arrayBytes);
       if (array) {
         MLuaTableSetArrayData(th, array);
         th->ArraySize = (U32)arrayHint;
@@ -153,7 +153,7 @@ MLuaValue MLuaTableNewSized(MLuaState *L, Size arrayHint, Size hashHint) {
         return MakePtr(gch);
       }
       Size hashBytes = hashHint * sizeof(MLuaTableNode);
-      MLuaTableNode *nodes = (MLuaTableNode *)MLuaAlloc(L, hashBytes);
+      MLuaTableNode *nodes = (MLuaTableNode *)MLuaAllocNC(L, hashBytes);
       if (nodes) {
         MLuaTableSetNodeData(th, nodes);
         th->NodeCapacity = (U32)hashHint;
@@ -207,7 +207,7 @@ static Bool ArrayGrow(MLuaState *L, MLuaTableHeader *th, Size newSize) {
   }
   newBytes = newSize * sizeof(MLuaValue);
 
-  newArray = (MLuaValue *)MLuaAlloc(L, newBytes);
+  newArray = (MLuaValue *)MLuaAllocNC(L, newBytes);
   if (!newArray) {
     return FALSE;
   }
@@ -280,7 +280,7 @@ static Bool TypedArrayGrow(MLuaState *L, MLuaTableHeader *th, Size newSize) {
       newSize > ((Size)-1 - sizeof(MLuaTableNumArray)) / sizeof(MLUA_FLOAT)) {
     return FALSE;
   }
-  newBuf = (MLuaTableNumArray *)MLuaAlloc(
+  newBuf = (MLuaTableNumArray *)MLuaAllocNC(
       L, sizeof(MLuaTableNumArray) + newSize * sizeof(MLUA_FLOAT));
   if (!newBuf) {
     return FALSE;
@@ -306,7 +306,7 @@ static Bool TypedArrayDemote(MLuaState *L, MLuaTableHeader *th) {
   if (cap < len) {
     cap = len; /* defensive; capacity always covers the length */
   }
-  newArray = (MLuaValue *)MLuaAlloc(L, cap * sizeof(MLuaValue));
+  newArray = (MLuaValue *)MLuaAllocNC(L, cap * sizeof(MLuaValue));
   if (!newArray) {
     return FALSE;
   }
@@ -418,7 +418,7 @@ static Bool TypedArrayPromote(MLuaState *L, MLuaTableHeader *th,
                               MLuaValue value) {
   MLuaTableNumArray *buf;
 
-  buf = (MLuaTableNumArray *)MLuaAlloc(
+  buf = (MLuaTableNumArray *)MLuaAllocNC(
       L, sizeof(MLuaTableNumArray) +
              MLUA_TABLE_INITIAL_ARRAY_SIZE * sizeof(MLUA_FLOAT));
   if (!buf) {
@@ -576,7 +576,7 @@ static Bool HashGrow(MLuaState *L, MLuaTableHeader *th) {
   }
   newBytes = newCap * sizeof(MLuaTableNode);
 
-  MLuaTableNode *newNodes = (MLuaTableNode *)MLuaAlloc(L, newBytes);
+  MLuaTableNode *newNodes = (MLuaTableNode *)MLuaAllocNC(L, newBytes);
   if (!newNodes) {
     return FALSE;
   }

@@ -114,7 +114,7 @@ static int TableConcat(MLuaState *L) {
     }
   }
 
-  buf = (char *)MLuaAlloc(L, totalLen);
+  buf = (char *)MLuaAllocNC(L, totalLen);
   if (!buf) {
     L->ErrorMsg = "out of memory";
     return -1;

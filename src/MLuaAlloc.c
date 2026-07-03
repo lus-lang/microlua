@@ -442,7 +442,7 @@ void MLuaGetMemoryStats(MLuaState *L, MLuaMemoryStats *out) {
  * Every constrained-mode allocation is header-prefixed by the callers
  * below, so the GC's linear heap walk always lands on valid headers.
  */
-static void *CoreAlloc(MLuaState *L, Size size) {
+static void *CoreAlloc(MLuaState *L, Size size, Bool clear) {
   Size aligned;
   Size newTop;
   void *ptr;
@@ -454,7 +454,7 @@ static void *CoreAlloc(MLuaState *L, Size size) {
   /* Vector mode: use custom allocator */
   if (L->AllocFunc) {
     ptr = L->AllocFunc(L, L->AllocCtx, size);
-    if (ptr) {
+    if (ptr && clear) {
       MemSet(ptr, 0, size);
     }
     return ptr;
@@ -496,13 +496,26 @@ static void *CoreAlloc(MLuaState *L, Size size) {
     L->HeapPeak = L->HeapTop;
   }
 
-  /* Zero-initialize the allocation */
-  MemSet(ptr, 0, aligned);
+  /* Zero-initialize the allocation (skipped for the NC entry points --
+   * their callers overwrite the payload; padding tail bytes are never
+   * read, the heap walk steps header to header by CachedSize) */
+  if (clear) {
+    MemSet(ptr, 0, aligned);
+  }
+#ifdef MLUA_MEMORY_DIAGNOSTICS
+  else {
+    /* Poison NC allocations in diagnostic builds: any caller that reads
+     * before writing (i.e. silently relied on the zero fill) sees 0xAB
+     * garbage and fails its tests deterministically instead of passing
+     * by accident on a zeroed heap. */
+    MemSet(ptr, 0xAB, aligned);
+  }
+#endif
 
   return ptr;
 }
 
-void *MLuaAlloc(MLuaState *L, Size size) {
+static void *AllocRaw(MLuaState *L, Size size, Bool clear) {
   MLuaGCHeader *header;
   Size totalSize;
 
@@ -525,7 +538,7 @@ void *MLuaAlloc(MLuaState *L, Size size) {
   if (ALIGN_UP(totalSize, MLUA_ALIGNMENT) > (Size)0xFFFFFFFFU) {
     return NULL;
   }
-  header = (MLuaGCHeader *)CoreAlloc(L, totalSize);
+  header = (MLuaGCHeader *)CoreAlloc(L, totalSize, clear);
   if (!header) {
     return NULL;
   }
@@ -537,11 +550,18 @@ void *MLuaAlloc(MLuaState *L, Size size) {
   return MLUA_OBJDATA(header);
 }
 
+void *MLuaAlloc(MLuaState *L, Size size) { return AllocRaw(L, size, TRUE); }
+
+void *MLuaAllocNC(MLuaState *L, Size size) {
+  return AllocRaw(L, size, FALSE);
+}
+
 /* ========================================================================== */
 /* GC-Managed Object Allocation                                               */
 /* ========================================================================== */
 
-MLuaGCHeader *MLuaAllocObject(MLuaState *L, U8 objType, Size dataSize) {
+static MLuaGCHeader *AllocObject(MLuaState *L, U8 objType, Size dataSize,
+                                 Bool clear) {
   Size totalSize;
   MLuaGCHeader *header;
 
@@ -554,7 +574,7 @@ MLuaGCHeader *MLuaAllocObject(MLuaState *L, U8 objType, Size dataSize) {
     return NULL;
   }
 
-  header = (MLuaGCHeader *)CoreAlloc(L, totalSize);
+  header = (MLuaGCHeader *)CoreAlloc(L, totalSize, clear);
   if (!header) {
     return NULL;
   }
@@ -566,6 +586,14 @@ MLuaGCHeader *MLuaAllocObject(MLuaState *L, U8 objType, Size dataSize) {
   header->Forward = NULL;
 
   return header;
+}
+
+MLuaGCHeader *MLuaAllocObject(MLuaState *L, U8 objType, Size dataSize) {
+  return AllocObject(L, objType, dataSize, TRUE);
+}
+
+MLuaGCHeader *MLuaAllocObjectNC(MLuaState *L, U8 objType, Size dataSize) {
+  return AllocObject(L, objType, dataSize, FALSE);
 }
 
 /* ========================================================================== */

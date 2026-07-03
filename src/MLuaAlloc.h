@@ -120,6 +120,16 @@ void MLuaGetMemoryStats(MLuaState *L, MLuaMemoryStats *out);
 void *MLuaAlloc(MLuaState *L, Size size);
 
 /*
+ * MLuaAlloc without the zero fill. For payloads the caller fully
+ * initializes before anything can read them (string bytes, grown buffers
+ * that copy-then-fill): skipping the MemSet removes an O(size) pass per
+ * allocation. Contract: the caller must overwrite every byte the GC or any
+ * reader can reach; only the alignment padding tail may stay garbage (the
+ * heap walk reads headers, never padding).
+ */
+void *MLuaAllocNC(MLuaState *L, Size size);
+
+/*
  * Allocate a GC-managed object with header.
  * The returned pointer points to the header, not the data.
  *
@@ -129,6 +139,12 @@ void *MLuaAlloc(MLuaState *L, Size size);
  * @return          Pointer to MLuaGCHeader, or NULL
  */
 MLuaGCHeader *MLuaAllocObject(MLuaState *L, U8 objType, Size dataSize);
+
+/*
+ * MLuaAllocObject without the payload zero fill (the header is still fully
+ * written). Same caller contract as MLuaAllocNC.
+ */
+MLuaGCHeader *MLuaAllocObjectNC(MLuaState *L, U8 objType, Size dataSize);
 
 /*
  * Get header from object data pointer.

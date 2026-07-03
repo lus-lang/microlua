@@ -152,7 +152,7 @@ static int StringDump(MLuaState *L) {
     return 2;
   }
 
-  buf = (char *)MLuaAlloc(L, size);
+  buf = (char *)MLuaAllocNC(L, size);
   if (!buf) {
     MLuaPush(L, MLUA_NIL);
     MLuaPush(L, MLuaStringNew(L, "out of memory", 13));
@@ -598,7 +598,7 @@ static int StringLower(MLuaState *L) {
   /* Heap scratch (no silent truncation); ASCII-only case mapping — full
    * Unicode case tables are out of budget for a tiny runtime. UTF-8
    * continuation bytes are > 0x7F and pass through untouched. */
-  buf = (char *)MLuaAlloc(L, len);
+  buf = (char *)MLuaAllocNC(L, len);
   if (!buf) {
     L->ErrorMsg = "out of memory";
     return -1;
@@ -944,7 +944,7 @@ static int StringRep(MLuaState *L) {
     return -1;
   }
   total = len * (Size)n;
-  buf = (char *)MLuaAlloc(L, total);
+  buf = (char *)MLuaAllocNC(L, total);
   if (!buf) {
     L->ErrorMsg = "out of memory";
     return -1;
@@ -977,7 +977,7 @@ static int StringReverse(MLuaState *L) {
 
   /* Unicode-aware: reverse the CODEPOINT sequence (multibyte sequences
    * stay intact). Transient heap scratch; reclaimed at the next collect. */
-  buf = (char *)MLuaAlloc(L, len);
+  buf = (char *)MLuaAllocNC(L, len);
   if (!buf) {
     L->ErrorMsg = "out of memory";
     return -1;
@@ -1231,7 +1231,7 @@ static int StringUpper(MLuaState *L) {
   /* Heap scratch (no silent truncation); ASCII-only case mapping — full
    * Unicode case tables are out of budget for a tiny runtime. UTF-8
    * continuation bytes are > 0x7F and pass through untouched. */
-  buf = (char *)MLuaAlloc(L, len);
+  buf = (char *)MLuaAllocNC(L, len);
   if (!buf) {
     L->ErrorMsg = "out of memory";
     return -1;
