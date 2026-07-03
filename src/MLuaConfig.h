@@ -203,6 +203,17 @@
 #define MLUA_DEFAULT_GC_THRESHOLD_PERCENT 75
 #endif
 
+/* Integer width of the number-FORMATTING digit emitters (MLuaIntToStr and
+ * string.format's %d/%u/%x paths). The default I64 renders any integral
+ * binary64 exactly; targets whose runtime int is 32-bit and whose float
+ * cannot hold more than ~7 digits anyway (binary32 ports, 8/16-bit cores
+ * where 64-bit division is a library call) can set 0 to emit through
+ * 32-bit arithmetic. Number PARSING (MLuaStrToInt) keeps I64 either way -
+ * literal-range decisions need it. */
+#ifndef MLUA_FORMAT_INT64
+#define MLUA_FORMAT_INT64 1
+#endif
+
 /* Multiply-free hashing. The default string hash is FNV-1a (one 32-bit
  * multiply per byte) and table keys mix with a Knuth multiplicative
  * constant - fine wherever 32-bit multiply is a single instruction, a

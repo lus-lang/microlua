@@ -10,28 +10,33 @@
 /* Integer to String                                                          */
 /* ========================================================================== */
 
-Size MLuaIntToStr(I64 n, char *buf) {
+Size MLuaIntToStr(MLuaFmtInt n, char *buf) {
   char tmp[32];
   int i = 0;
   Size len = 0;
   Bool neg = FALSE;
+  MLuaFmtUint u;
 
+  /* Negate through unsigned so the most-negative value is exact (its
+   * signed negation would overflow, visibly so once MLuaFmtInt is I32). */
   if (n < 0) {
     neg = TRUE;
-    n = -n;
+    u = (MLuaFmtUint)0 - (MLuaFmtUint)n;
+  } else {
+    u = (MLuaFmtUint)n;
   }
 
   /* Handle zero */
-  if (n == 0) {
+  if (u == 0) {
     buf[0] = '0';
     buf[1] = '\0';
     return 1;
   }
 
   /* Build digits in reverse */
-  while (n > 0) {
-    tmp[i++] = '0' + (int)(n % 10);
-    n /= 10;
+  while (u > 0) {
+    tmp[i++] = '0' + (int)(u % 10);
+    u /= 10;
   }
 
   /* Add sign */
@@ -594,7 +599,7 @@ Bool MLuaStrToInt(const char *s, Size len, int base, I64 *out) {
  * Helper: Format unsigned integer to buffer in given base.
  * Returns number of characters written.
  */
-static Size FmtUnsigned(U64 n, char *buf, Size bufLen, int base, Bool upper) {
+static Size FmtUnsigned(MLuaFmtUint n, char *buf, Size bufLen, int base, Bool upper) {
   const char *hexL = "0123456789abcdef";
   const char *hexU = "0123456789ABCDEF";
   const char *digits = upper ? hexU : hexL;
@@ -703,7 +708,8 @@ Size MLuaFormat(MLuaState *L, const char *fmt, Size fmtLen, MLuaValue *args,
       case 'i': {
         if (argIdx < nargs) {
           MLuaValue v = args[argIdx++];
-          I64 n = IsInt(v) ? MLuaGetIntVal(v) : (I64)MLuaToNumber(v);
+          MLuaFmtInt n =
+              IsInt(v) ? MLuaGetIntVal(v) : (MLuaFmtInt)MLuaToNumber(v);
           tmpLen = MLuaIntToStr(n, tmp);
         }
         break;
@@ -712,7 +718,8 @@ Size MLuaFormat(MLuaState *L, const char *fmt, Size fmtLen, MLuaValue *args,
       case 'u': {
         if (argIdx < nargs) {
           MLuaValue v = args[argIdx++];
-          U64 n = IsInt(v) ? (U64)(U32)MLuaGetIntVal(v) : (U64)MLuaToNumber(v);
+          MLuaFmtUint n = IsInt(v) ? (MLuaFmtUint)(U32)MLuaGetIntVal(v)
+                                    : (MLuaFmtUint)MLuaToNumber(v);
           tmpLen = FmtUnsigned(n, tmp, sizeof(tmp), 10, FALSE);
         }
         break;
@@ -722,7 +729,8 @@ Size MLuaFormat(MLuaState *L, const char *fmt, Size fmtLen, MLuaValue *args,
       case 'X': {
         if (argIdx < nargs) {
           MLuaValue v = args[argIdx++];
-          U64 n = IsInt(v) ? (U64)(U32)MLuaGetIntVal(v) : (U64)MLuaToNumber(v);
+          MLuaFmtUint n = IsInt(v) ? (MLuaFmtUint)(U32)MLuaGetIntVal(v)
+                                    : (MLuaFmtUint)MLuaToNumber(v);
           tmpLen = FmtUnsigned(n, tmp, sizeof(tmp), 16, spec == 'X');
         }
         break;
@@ -731,7 +739,8 @@ Size MLuaFormat(MLuaState *L, const char *fmt, Size fmtLen, MLuaValue *args,
       case 'o': {
         if (argIdx < nargs) {
           MLuaValue v = args[argIdx++];
-          U64 n = IsInt(v) ? (U64)(U32)MLuaGetIntVal(v) : (U64)MLuaToNumber(v);
+          MLuaFmtUint n = IsInt(v) ? (MLuaFmtUint)(U32)MLuaGetIntVal(v)
+                                    : (MLuaFmtUint)MLuaToNumber(v);
           tmpLen = FmtUnsigned(n, tmp, sizeof(tmp), 8, FALSE);
         }
         break;
@@ -858,19 +867,19 @@ Size MLuaFormatVA(char *buf, Size bufLen, const char *fmt, va_list args) {
       case 'd':
       case 'i': {
         int n = va_arg(args, int);
-        tmpLen = MLuaIntToStr((I64)n, tmp);
+        tmpLen = MLuaIntToStr((MLuaFmtInt)n, tmp);
         break;
       }
 
       case 'u': {
         unsigned int n = va_arg(args, unsigned int);
-        tmpLen = FmtUnsigned((U64)n, tmp, sizeof(tmp), 10, FALSE);
+        tmpLen = FmtUnsigned((MLuaFmtUint)n, tmp, sizeof(tmp), 10, FALSE);
         break;
       }
 
       case 'x': {
         unsigned int n = va_arg(args, unsigned int);
-        tmpLen = FmtUnsigned((U64)n, tmp, sizeof(tmp), 16, FALSE);
+        tmpLen = FmtUnsigned((MLuaFmtUint)n, tmp, sizeof(tmp), 16, FALSE);
         break;
       }
 

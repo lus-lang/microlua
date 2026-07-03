@@ -216,7 +216,7 @@ static char *TraceAppendLine(char *p, char *end, const char *src, Size srcLen,
     numBuf[0] = '?';
     numLen = 1;
   } else {
-    numLen = MLuaIntToStr((I64)line, numBuf);
+    numLen = MLuaIntToStr((MLuaFmtInt)line, numBuf);
   }
 
   p = TraceAppend(p, end, "\t", 1);
@@ -583,7 +583,7 @@ void MLuaDumpOpProfile(MLuaState *L) {
     MemCpy(buf, name, nameLen);
     pos = nameLen;
     buf[pos++] = '\t';
-    pos += MLuaIntToStr((I64)OpProfileCounts[i], buf + pos);
+    pos += MLuaIntToStr((MLuaFmtInt)OpProfileCounts[i], buf + pos);
     buf[pos++] = '\n';
     L->OutputFunc(L, MLUA_OUTPUT_PRINT, buf, pos);
   }
