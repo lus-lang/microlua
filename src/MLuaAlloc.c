@@ -38,6 +38,16 @@ Size MLuaNextGCThreshold(MLuaState *L, Size used) {
   if (growth < MLUA_GC_GROWTH_FLOOR) {
     growth = MLUA_GC_GROWTH_FLOOR;
   }
+#if MLUA_GC_HEADROOM_DIV
+  /* Headroom term (see MLuaConfig.h): with lots of free heap, allow more
+   * garbage per cycle -- compaction cost scales with live bytes, not
+   * garbage, so fewer collections do strictly less total work. Tight
+   * heaps take the classic live-growth allowance above unchanged. */
+  if (L->HeapSize > used &&
+      growth < (L->HeapSize - used) / MLUA_GC_HEADROOM_DIV) {
+    growth = (L->HeapSize - used) / MLUA_GC_HEADROOM_DIV;
+  }
+#endif
   threshold = used + growth;
   if (threshold > ceiling) {
     threshold = ceiling;
@@ -113,12 +123,13 @@ static void InitStateCommon(MLuaState *L, Size heapSize) {
 }
 
 Size MLuaFirstObjOffset(MLuaState *L) {
-  Size off = ALIGN_UP(sizeof(MLuaState), MLUA_ALIGNMENT);
-  off += ALIGN_UP(L->EvalStackSize * sizeof(MLuaValue), MLUA_ALIGNMENT);
-  off += ALIGN_UP(L->LocalsSize * sizeof(MLuaValue), MLUA_ALIGNMENT);
-  off += ALIGN_UP(L->ArgsSize * sizeof(MLuaValue), MLUA_ALIGNMENT);
-  off += ALIGN_UP(L->FrameCap * sizeof(MLuaFrame), MLUA_ALIGNMENT);
-  return off;
+  /* The carve boundary is fixed at state creation. It must NOT be derived
+   * from L->EvalStackSize/LocalsSize/ArgsSize/FrameCap: while a coroutine
+   * runs, LoadCtx installs the COROUTINE's (differently sized) buffers in
+   * those registers, and a GC inside the coroutine would then walk the
+   * heap from a bogus start -- reading garbage "headers", computing no
+   * forwarding addresses, and wiping the live heap on compact. */
+  return L->CarveEnd;
 }
 
 MLuaState *MLuaNewConstrainedState(void *memory, Size size) {
@@ -198,6 +209,7 @@ MLuaState *MLuaNewConstrainedState(void *memory, Size size) {
   L->FrameCap = MLUA_DEFAULT_FRAMES_SIZE;
   L->FrameTop = 0;
   L->HeapTop += framesBytes;
+  L->CarveEnd = L->HeapTop; /* first heap object starts here, forever */
   L->HeapPeak = L->HeapTop;
 #ifdef MLUA_MEMORY_DIAGNOSTICS
   L->AllocCount = 0;

@@ -305,9 +305,18 @@ static void MarkRoots(MLuaState *L) {
   }
 
   /* When a coroutine is running, the main thread's context is parked in
-   * MainCtx and the resume chain is only reachable through it: mark both. */
+   * MainCtx and the resume chain is only reachable through it: mark both.
+   * The RUNNING coroutine's Eval/Locals/Args/Frames arrays are ITS heap
+   * raws installed in L's registers, and nothing else marks them -- the
+   * THREAD scan case skips the running thread (its Ctx snapshot is
+   * stale). Without these MarkRaw calls a collection at a safepoint
+   * INSIDE a running coroutine frees the very buffers it executes on. */
   if (L->CurrentThread) {
     struct MLuaThread *t;
+    MarkRaw(L, L->EvalStack);
+    MarkRaw(L, L->Locals);
+    MarkRaw(L, L->Args);
+    MarkRaw(L, L->Frames);
     for (i = 0; i < L->MainCtx.EvalTop; i++) {
       MLuaGCMark(L, L->MainCtx.EvalStack[i]);
     }

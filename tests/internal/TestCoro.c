@@ -348,6 +348,71 @@ TEST(GC_InternSurvivesResizeOOM) {
   ASSERT(RunAndCheckInt(L, src, 0));
 }
 
+/*
+ * Behavioral pin for headroom-proportional GC pacing: the same accumulator
+ * loop must collect at most a handful of times in a roomy 1 MB heap (the
+ * headroom term hands out MBs of allowance per cycle) while still
+ * collecting -- repeatedly -- in the tight 96 KB heap. Guards against the
+ * headroom term silently regressing to per-50KB collections in big heaps,
+ * and against it suppressing collections where they are load-bearing.
+ */
+#define ROOMY_HEAP_SIZE (1024 * 1024)
+static U8 RoomyHeap[ROOMY_HEAP_SIZE] MLUA_ALIGNAS(MLUA_ALIGNMENT);
+
+TEST(GC_HeadroomPacing) {
+  const char *churn = "local s = ''\n"
+                      "for i = 1, 2000 do s = s .. (i % 10) .. 'y' end\n"
+                      "result = #s\n";
+
+  {
+    MLuaState *L = MLuaStateInit(RoomyHeap, ROOMY_HEAP_SIZE);
+    ASSERT_NE(L, NULL);
+    MLuaOpenLibs(L);
+    ASSERT(RunAndCheckInt(L, churn, 4000));
+#if MLUA_GC_HEADROOM_DIV
+    /* ~4 MB of transient allocation through a 1 MB heap: the headroom
+     * allowance (~250 KB/cycle at DIV=4) bounds collections to ~20;
+     * classic live-growth pacing (~3 KB/cycle here) needed hundreds. */
+    ASSERT(L->GCCycleCount < 50);
+#endif
+    ASSERT(L->GCCycleCount > 0);
+  }
+
+  {
+    MLuaState *L = NewState(); /* tight 96 KB heap */
+    ASSERT_NE(L, NULL);
+    ASSERT(RunAndCheckInt(L, churn, 4000));
+    /* Tight heaps must still collect aggressively */
+    ASSERT(L->GCCycleCount > 5);
+  }
+}
+
+/*
+ * Collections at safepoints INSIDE a running coroutine. Historically fatal
+ * twice over: MLuaFirstObjOffset derived the carve boundary from L's
+ * context-switched array sizes (so the heap walk started at a bogus
+ * offset, computed no forwarding addresses, and compact wiped the live
+ * heap), and MarkRoots never marked the running coroutine's own
+ * Eval/Locals/Args/Frames heap buffers (so they were collected out from
+ * under the executing VM). Either way the next RELOAD_FRAME dereferenced
+ * garbage. The accumulator loop below allocates enough inside the
+ * coroutine to force several collections while it is the current thread.
+ */
+TEST(GC_CollectInsideRunningCoroutine) {
+  MLuaState *L = NewState();
+  ASSERT_NE(L, NULL);
+
+  const char *src = "local co = coroutine.create(function()\n"
+                    "  local s = ''\n"
+                    "  for i = 1, 1500 do s = s .. (i % 10) .. 'z' end\n"
+                    "  return #s\n"
+                    "end)\n"
+                    "local ok, len = coroutine.resume(co)\n"
+                    "result = (ok and 1 or 0) * len\n";
+  ASSERT(RunAndCheckInt(L, src, 3000));
+  ASSERT(L->GCCycleCount > 0); /* the loop must actually have collected */
+}
+
 /* ========================================================================== */
 /* Main                                                                       */
 /* ========================================================================== */
@@ -370,6 +435,8 @@ int main(void) {
   RUN_TEST(GC_HeapShrinksAfterChurn);
   RUN_TEST(GC_NoClearAllocSurvivesCompaction);
   RUN_TEST(GC_InternSurvivesResizeOOM);
+  RUN_TEST(GC_HeadroomPacing);
+  RUN_TEST(GC_CollectInsideRunningCoroutine);
 
   printf("Results: %d passed, %d failed\n", TestsPassed, TestsFailed);
   return TestsFailed > 0 ? 1 : 0;

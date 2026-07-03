@@ -68,6 +68,63 @@ TEST(GCThreshold) {
   ASSERT_EQ(L->GCThreshold, 1000);
 }
 
+/*
+ * Pins MLuaNextGCThreshold across its three regimes: tight heap (the
+ * classic live-growth allowance; the headroom term must degenerate --
+ * this is what keeps bench min-heap numbers stable), roomy heap (the
+ * headroom term dominates), and near-full heap (geometric half-remaining
+ * batch). Synthetic `used` figures against the state's real HeapSize.
+ */
+TEST(GCThreshold_Pacing) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  ASSERT_NE(L, NULL);
+
+  Size heap = L->HeapSize;
+  Size reserve = heap / 8;
+  if (reserve < MLUA_GC_RESERVE_MIN) {
+    reserve = MLUA_GC_RESERVE_MIN;
+  }
+  if (reserve > MLUA_GC_RESERVE_MAX) {
+    reserve = MLUA_GC_RESERVE_MAX;
+  }
+
+  {
+    /* Tight regime: at 75% used the live-growth term dominates any
+     * headroom term (free/DIV < live*0.75), so the result must equal the
+     * classic pre-headroom formula exactly. */
+    Size used = (heap * 3) / 4;
+    Size classic = used + (used * MLUA_DEFAULT_GC_THRESHOLD_PERCENT) / 100;
+    if (classic > heap - reserve) {
+      classic = heap - reserve;
+    }
+    ASSERT_EQ(MLuaNextGCThreshold(L, used), classic);
+  }
+
+#if MLUA_GC_HEADROOM_DIV
+  {
+    /* Roomy regime: tiny live set -> allowance is free/DIV, above both
+     * the live-growth percentage and the growth floor */
+    Size used = heap / 64;
+    Size expect = used + (heap - used) / MLUA_GC_HEADROOM_DIV;
+    if (expect > heap - reserve) {
+      expect = heap - reserve;
+    }
+    ASSERT_EQ(MLuaNextGCThreshold(L, used), expect);
+  }
+#endif
+
+  {
+    /* Near-full regime: live above the ceiling -> geometric batch of
+     * half the remaining space (floored at 256) */
+    Size used = heap - reserve / 2;
+    Size batch = (heap - used) / 2;
+    if (batch < 256) {
+      batch = 256;
+    }
+    ASSERT_EQ(MLuaNextGCThreshold(L, used), used + batch);
+  }
+}
+
 /* ========================================================================== */
 /* GCRef Tests                                                                */
 /* ========================================================================== */
@@ -396,6 +453,7 @@ int main(void) {
   RUN_TEST(GCEnable);
   RUN_TEST(GCHeaderPackedWalk);
   RUN_TEST(GCThreshold);
+  RUN_TEST(GCThreshold_Pacing);
 
   printf("\nGCRef:\n");
   RUN_TEST(GCRef_PushPop);

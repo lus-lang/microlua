@@ -69,6 +69,12 @@
  * via MLUA_PORT_MEMFUNCS) are the right shape for this machine. */
 #define MLUA_MEM_WORDWISE 0
 
+/* Keep the classic live-growth-only GC pacing: with a few tens of KB of
+ * heap the headroom term would only widen transient peaks that this
+ * device cannot afford, for collections that are already cheap at this
+ * scale. Revisit with CEmu timings if bench_str ever shows GC dominance. */
+#define MLUA_GC_HEADROOM_DIV 0
+
 /* MLUA_TABLE_NUM_ARRAYS is NOT set here: the typed-array code measures
  * ~2.8 KB of eZ80 image, which fits the runner target (its makefile opts
  * in) but would leave the full repl build under 1.3 KB of launch headroom.

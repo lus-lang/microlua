@@ -241,6 +241,11 @@ struct MLuaState {
   Size HeapSize; /* Total heap size (for constrained mode) */
   Size HeapTop;  /* Current bump pointer offset */
   Size HeapPeak; /* Highest HeapTop reached since state creation */
+  Size CarveEnd; /* End of the carved region (state struct + main's
+                  * exec arrays) = offset of the first heap OBJECT.
+                  * Fixed at creation: the GC heap walks must not derive
+                  * it from the Eval/Locals/Args/Frames sizes in L, which
+                  * a running coroutine's LoadCtx swaps out. */
 #ifdef MLUA_MEMORY_DIAGNOSTICS
   Size AllocCount;
   Size AllocRequestedBytes;

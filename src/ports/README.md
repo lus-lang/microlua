@@ -39,6 +39,7 @@ in this directory), or `-Dport_header=path/to/board.h` — or define
 | `MLUA_THREAD_ARGS_SIZE` | `32` | Per-coroutine argument slots. |
 | `MLUA_THREAD_FRAMES_SIZE` | `16` | Per-coroutine frame depth. |
 | `MLUA_DEFAULT_GC_THRESHOLD_PERCENT` | `75` | Heap-fill percent that triggers a collection. |
+| `MLUA_GC_HEADROOM_DIV` | `4` | Headroom-proportional pacing: the per-cycle garbage allowance is at least free-heap/DIV on top of the live-growth percentage. Collapses accumulator-loop collection counts in roomy heaps; degenerates to the classic formula in tight ones. `0` compiles the term out (the TI-84 CE keeps its exact historical pacing). |
 | `MLUA_PARSE_MAX_DEPTH` | `256` | Parser recursion bound (C-stack depth, roughly one `ParseExpr` frame per level). Lower it on targets with a small C stack. |
 | `MLUA_STACKTRACE_BUF_SIZE` | `2048` | Static BSS buffer the runtime-error stack trace is built into. Writes are clamped and the result is always NUL-terminated, so smaller buffers just truncate deep traces (one frame line runs ~20–40 bytes). |
 | `MLUA_STRING_TABLE_INITIAL_SIZE` | `64` | Initial intern-table capacity in slots (one `MLuaValue` each); also the floor the post-GC shrink pass rehashes down to. Power of two. |

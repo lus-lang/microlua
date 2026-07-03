@@ -197,6 +197,19 @@
 #define MLUA_GC_RESERVE_MAX 8192
 #endif
 
+/* Headroom-proportional GC pacing: the garbage allowance per cycle is at
+ * least (free heap) / MLUA_GC_HEADROOM_DIV in addition to the live-growth
+ * percentage above. In a roomy heap (host default 16 MB) this collapses
+ * accumulator loops from thousands of full mark-compacts to a handful --
+ * compaction cost scales with LIVE bytes, so letting garbage pile up in
+ * space nobody else can use is strictly cheaper. In a tight heap the term
+ * degenerates below the live-growth allowance and pacing is bit-identical
+ * to the classic formula. 0 disables the term entirely (compiles out;
+ * ports with tens-of-KB heaps keep their exact historical pacing). */
+#ifndef MLUA_GC_HEADROOM_DIV
+#define MLUA_GC_HEADROOM_DIV 4
+#endif
+
 #ifndef MLUA_DEFAULT_ARGS_SIZE
 #define MLUA_DEFAULT_ARGS_SIZE 64
 #endif
