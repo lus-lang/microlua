@@ -42,6 +42,15 @@
  * code. Costs ~1-2 KB of label table + duplicated dispatch tails, so
  * size-constrained ports should measure before opting in. Off by default;
  * requires GCC or Clang. */
+/* Parse-time fusion of compare+branch pairs (a < b in if/while/repeat
+ * conditions) into the OP_JMPF_* opcodes. The VM handlers are always
+ * compiled - any v6 runtime runs any v6 bytecode - so this knob only
+ * trades the emitter's code size against fused output on ports whose
+ * image cannot afford it. */
+#ifndef MLUA_PARSE_FUSE_COMPARE
+#define MLUA_PARSE_FUSE_COMPARE 1
+#endif
+
 #ifndef MLUA_VM_COMPUTED_GOTO
 #define MLUA_VM_COMPUTED_GOTO 0
 #endif

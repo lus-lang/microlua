@@ -874,6 +874,10 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       [OP_SETFIELD_K] = &&L_OP_SETFIELD_K,
       [OP_SETFIELD_K_POP] = &&L_OP_SETFIELD_K_POP,
       [OP_SELF_K] = &&L_OP_SELF_K,
+      [OP_JMPF_EQ] = &&L_OP_JMPF_EQ,
+      [OP_JMPF_NEQ] = &&L_OP_JMPF_NEQ,
+      [OP_JMPF_LT] = &&L_OP_JMPF_LT,
+      [OP_JMPF_LE] = &&L_OP_JMPF_LE,
       [OP_POP] = &&L_OP_POP,
       [OP_DUP] = &&L_OP_DUP,
       [OP_SWAP] = &&L_OP_SWAP,
@@ -1288,6 +1292,26 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       I8 offset = (I8)READ_BYTE();
       MLuaValue v = STACK_POP();
       if (!IsTruthy(v)) {
+        pc += offset;
+      }
+      VM_BREAK;
+    }
+
+    VM_CASE(OP_JMPF_EQ):
+    VM_CASE(OP_JMPF_NEQ):
+    VM_CASE(OP_JMPF_LT):
+    VM_CASE(OP_JMPF_LE): {
+      /* Fused compare+JMPF: the bool never crosses the stack. Comparison
+       * semantics (incl. the no-error mixed-type result) are exactly
+       * MLuaCompare's, same as the unfused opcodes. */
+      I8 offset = (I8)READ_BYTE();
+      MLuaValue b = STACK_POP();
+      MLuaValue a = STACK_POP();
+      MLuaOpCode cmp = (op == OP_JMPF_EQ)    ? OP_EQ
+                       : (op == OP_JMPF_NEQ) ? OP_NEQ
+                       : (op == OP_JMPF_LT)  ? OP_LT
+                                             : OP_LE;
+      if (!MLuaCompare(L, cmp, a, b)) {
         pc += offset;
       }
       VM_BREAK;

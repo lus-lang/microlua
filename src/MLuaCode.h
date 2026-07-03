@@ -91,6 +91,16 @@ typedef enum {
    * stack; this replaces DUP; LOADK m; GETTABLE; SWAP. */
   OP_SELF_K = 0x2B, /* 2B: t → f t : f = t[constants[B]] */
 
+  /* Fused compare+branch: pop two operands, branch when the comparison is
+   * FALSE (the shape every if/while/repeat condition compiles to). Same
+   * I8 offset and backpatch mechanics as OP_JMPF. Emitted only in short
+   * jump form; the long-jump re-parse keeps the unfused compare (its
+   * inversion trick would need JMPT variants, deliberately not added). */
+  OP_JMPF_EQ = 0x2C,  /* 2B: B a b → : if not (a == b): PC += (I8)B */
+  OP_JMPF_NEQ = 0x2D, /* 2B: B a b → : if not (a ~= b): PC += (I8)B */
+  OP_JMPF_LT = 0x2E,  /* 2B: B a b → : if not (a < b):  PC += (I8)B */
+  OP_JMPF_LE = 0x2F,  /* 2B: B a b → : if not (a <= b): PC += (I8)B */
+
   /* ===== Logic (0x30-0x34) ===== */
   OP_NOT = 0x30, /* 1B: v → bool   : Push true if v is nil/false */
   OP_EQ = 0x31,  /* 1B: a b → bool : Push a == b */
@@ -243,6 +253,10 @@ struct MLuaFuncState {
   MLuaFuncState *Prev; /* Enclosing function state */
   MLuaState *L;        /* Runtime state */
   MLuaProto *Proto;    /* Function being compiled */
+
+  /* Highest jump target resolved so far (compile-time; guards the
+   * compare-branch fusion's retraction against patched boundaries). */
+  Size MaxPatchTarget;
 
   /* Grow capacities of the proto's Code/Constants/LineMap buffers. These
    * exist only while compiling - the finished proto keeps just its sizes

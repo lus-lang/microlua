@@ -394,11 +394,58 @@ static int ResolveVar(MLuaParser *p, MLuaFuncState *fs, const char *name,
  * form immediately and never trigger a re-parse.
  */
 
+#if MLUA_PARSE_FUSE_COMPARE
+/* If a bare 1-byte compare ends the code buffer, retract it and return the
+ * corresponding fused JMPF_* opcode; else return OP_JMPF unchanged. Only
+ * statement conditions can present this shape: and/or, assignments and
+ * not() always emit something between the compare and the branch. */
+static MLuaOpCode FuseCompareBranch(MLuaFuncState *fs) {
+  MLuaProto *proto = fs->Proto;
+  Size last = fs->LastInstrPos;
+  MLuaOpCode fused;
+
+  if (last == (Size)-1 || proto->CodeSize != last + 1) {
+    return OP_JMPF;
+  }
+  if (fs->MaxPatchTarget >= proto->CodeSize) {
+    /* Some jump already lands exactly after this compare (and/or chains
+     * jump over their RHS to the branch). Retracting would leave that
+     * target pointing into the fused instruction's operand byte. */
+    return OP_JMPF;
+  }
+  switch (proto->Code[last]) {
+  case OP_EQ:
+    fused = OP_JMPF_EQ;
+    break;
+  case OP_NEQ:
+    fused = OP_JMPF_NEQ;
+    break;
+  case OP_LT:
+    fused = OP_JMPF_LT;
+    break;
+  case OP_LE:
+    fused = OP_JMPF_LE;
+    break;
+  default:
+    return OP_JMPF;
+  }
+  proto->CodeSize = last;
+  fs->LastInstrPos = (Size)-1;
+  fs->PrevInstrPos = (Size)-1;
+  return fused;
+}
+#endif
+
 static MLuaFwdJump EmitFwdJump(MLuaParser *p, MLuaOpCode op) {
   MLuaFuncState *fs = p->FS;
   MLuaFwdJump j;
 
   if (!p->LongJumps) {
+#if MLUA_PARSE_FUSE_COMPARE
+    if (op == OP_JMPF) {
+      op = FuseCompareBranch(fs);
+    }
+#endif
     j.Pos = MLuaEmitOpB(fs, op, 0);
     j.K = -1;
     return j;
@@ -425,6 +472,13 @@ static MLuaFwdJump EmitFwdJump(MLuaParser *p, MLuaOpCode op) {
 static void PatchFwdJump(MLuaParser *p, MLuaFwdJump j, Size target) {
   MLuaFuncState *fs = p->FS;
 
+  /* Record the highest resolved jump target: compare-branch fusion must
+   * not retract an instruction some already-patched jump lands after
+   * (an and/or jump over its RHS targets exactly that boundary). */
+  if (target > fs->MaxPatchTarget) {
+    fs->MaxPatchTarget = target;
+  }
+
   if (j.K < 0) {
     MLuaPatchJump(fs, j.Pos, target);
   } else {
@@ -437,6 +491,16 @@ static void EmitBackJump(MLuaParser *p, MLuaOpCode op, Size target) {
   int shortOff = (int)target - ((int)MLuaCodePos(fs) + 2);
 
   if (shortOff >= -128) {
+#if MLUA_PARSE_FUSE_COMPARE
+    if (op == OP_JMPF) {
+      MLuaOpCode fusedOp = FuseCompareBranch(fs);
+      if (fusedOp != OP_JMPF) {
+        /* The retracted compare moved the code end; recompute. */
+        shortOff = (int)target - ((int)MLuaCodePos(fs) + 2);
+        op = fusedOp;
+      }
+    }
+#endif
     MLuaEmitOpB(fs, op, (U8)(I8)shortOff);
     return;
   }
@@ -599,7 +663,9 @@ static void OptimizeLastLocalUses(MLuaFuncState *fs) {
     if (size == 0 || pc + size > proto->CodeSize) {
       return;
     }
-    if ((op == OP_JMP || op == OP_JMPF || op == OP_JMPT) && size == 2) {
+    if ((op == OP_JMP || op == OP_JMPF || op == OP_JMPT || op == OP_JMPF_EQ ||
+         op == OP_JMPF_NEQ || op == OP_JMPF_LT || op == OP_JMPF_LE) &&
+        size == 2) {
       I8 off = (I8)proto->Code[pc + 1];
       if (off < 0) {
         Size target = (Size)((IPtr)(pc + 2) + (IPtr)off);
