@@ -94,10 +94,13 @@ architecture says it should:
 | `bench_list` | 60 element-wise passes over 500-element lists | 20 s | 18.8 s | **MicroLua 1.06x** |
 | `bench_str` | build 1000-char string by 500 appends + scan | 11 s | 5.2 s | **MicroLua 2.1x** |
 
-MicroLua wins every row (re-verified 2026-07-03 after perf pass 4 -- the
-no-clear allocator, append fast arm, and v7 fused-locals opcodes each land
-on-calc too; screens carry exact checksums, gate is these values +2%;
-bytecode is v7 - recompile old .mlu appvars). `bench_list` is TI-BASIC's best case --
+MicroLua wins every row. BOTH columns were re-measured 2026-07-03 on the
+same CEmu ROM: the TI-BASIC times came back identical to the previous
+recordings (the OS interpreter is unchanged, which also validates the
+measurement setup), while the MicroLua side improved across the board
+from perf pass 4 (no-clear allocator, append fast arm, v7 fused-locals
+opcodes). Screens carry exact checksums on both sides; the regression
+gate is these values +2%; bytecode is v7 - recompile old .mlu appvars. `bench_list` is TI-BASIC's best case --
 `L1L2+L1` is one dispatch into vectorized OS assembly -- and the fused
 indexing opcodes (`GETTABLE_LL`/`SETTABLE_LL`), the array-window fast
 paths, and computed-goto dispatch bring per-element bytecode to parity
@@ -118,11 +121,15 @@ verifies the tokenization. The Lua side runs from source appvars via MLUA.
   hungriest residents (~24 bytes retained per integer element).
 - Program image: decompressed into user RAM at launch; the practical
   ceiling is ~137 KB once the VAT and the LibLoad library copies are
-  accounted for. The full build sits at ~136.4 KB after the 2026-07 perf
-  pass (fused opcodes, correctness fixes) - `MLUA_ENABLE_PACK=0` and
-  `MLUA_PARSE_FOLD_INT=0` keep it under the ceiling while
-  `MLUA_VM_COMPUTED_GOTO=1` and compare-branch fusion stay on, being
-  worth more per byte here. Measure
+  accounted for, though the exact limit depends on what else occupies RAM
+  (the pass-4 build launches at 137.2 KB via Cesium in CEmu). The full
+  build sits at ~137.2 KB after perf pass 4 (v7 fused-opcode handlers,
+  correctness fixes) - `MLUA_ENABLE_PACK=0`, `MLUA_PARSE_FOLD_INT=0` and
+  `MLUA_PARSE_FUSE_LOCALS=0` buy the room while `MLUA_VM_COMPUTED_GOTO=1`,
+  compare-branch fusion, and the fused-locals HANDLERS stay on, being
+  worth more per byte here. Note: on OS 5.5+ the direct `Asm(` launch is
+  refused at ANY size (use Cesium/arTIfiCE); only the Cesium autotests
+  are a valid launch check on such ROMs. Measure
   with `python3 ../../tools/map_size.py bin/MLUA.map` (image size, largest
   symbols, and `--diff old.map new.map` for per-symbol deltas against a
   saved baseline map).

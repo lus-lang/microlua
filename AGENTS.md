@@ -280,7 +280,9 @@ refuses Asm( at any size, which is NOT a size-ceiling signal. All four CE
 benchmarks re-verified in CEmu with exact checksums and land FASTER than
 the previous recordings: bench_int 16.0s (was 19.9), bench_list 18.8s
 (19.8), bench_str 5.2s (6.8), mandel compute 39.8s (52.7) + draw 1.3s
-(1.7); platform/ti84ce/README.md carries the new table. The CEmu wrapper
+(1.7); platform/ti84ce/README.md carries the new table. The TI-BASIC
+column was re-run the same day on the same ROM and came back identical
+(161/121+5/20/11 s, checksums exact) -- the comparison baseline is stable. The CEmu wrapper
 lives in platform/ti84ce/tools/ (runbench.py + *_run.json + fixtures/).
 CE size/perf regressions are checked with `tools/map_size.py` against
 .baselines-pass4/*.map.
