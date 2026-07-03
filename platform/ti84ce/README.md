@@ -4,11 +4,11 @@ Two programs built with the [CE C/C++ Toolchain](https://github.com/CE-Programmi
 
 | Program | Directory | Contents |
 |---|---|---|
-| `MLUA.8xp` (~59 KB) | `repl/` | Full build: runs Lua **source or bytecode** appvars, on-calc **REPL** |
+| `MLUA.8xp` (~60 KB) | `repl/` | Full build: runs Lua **source or bytecode** appvars, on-calc **REPL** |
 | `MLUAR.8xp` (~47 KB) | `runner/` | Bytecode-only runner (no compiler); smallest footprint. Ships **typed float arrays** (`MLUA_TABLE_NUM_ARRAYS`): a table of floats retains ~4 bytes/element instead of ~20, so float-heavy workloads fit the 48 KB heap. The repl build skips this (~2.8 KB of image it can't spare). |
 
 Both include the `gfx` / `key` / `timer` calculator bindings and ship as a
-single compressed `.8xp` (zx0; the decompressed image is ~110-139 KB of
+single compressed `.8xp` (zx0; the decompressed image is ~108-141 KB of
 eZ80 code).
 
 ## Building
@@ -88,15 +88,16 @@ architecture says it should:
 
 | benchmark | workload | TI-BASIC | MicroLua | winner |
 |---|---|---|---|---|
-| `bench_int` | scalar integer loop, 20k iterations | 161 s | 19.9 s | **MicroLua 8.1x** |
-| `mandel` | 32x24 Mandelbrot floats, compute | 121 s | 52.7 s | **MicroLua 2.3x** |
-| `mandel` | draw phase (one pixel/cell) | 5 s | 1.7 s | **MicroLua 2.9x** |
-| `bench_list` | 60 element-wise passes over 500-element lists | 20 s | 19.8 s | **MicroLua 1.01x** |
-| `bench_str` | build 1000-char string by 500 appends + scan | 11 s | 6.8 s | **MicroLua 1.6x** |
+| `bench_int` | scalar integer loop, 20k iterations | 161 s | 16.0 s | **MicroLua 10.1x** |
+| `mandel` | 32x24 Mandelbrot floats, compute | 121 s | 39.8 s | **MicroLua 3.0x** |
+| `mandel` | draw phase (one pixel/cell) | 5 s | 1.3 s | **MicroLua 3.8x** |
+| `bench_list` | 60 element-wise passes over 500-element lists | 20 s | 18.8 s | **MicroLua 1.06x** |
+| `bench_str` | build 1000-char string by 500 appends + scan | 11 s | 5.2 s | **MicroLua 2.1x** |
 
-MicroLua now wins every row (re-verified 2026-07-03 after the follow-up
-perf pass via deterministic CEmu screen-CRC gates at these values +2%;
-bytecode is v6 - recompile old .mlu appvars). `bench_list` is TI-BASIC's best case --
+MicroLua wins every row (re-verified 2026-07-03 after perf pass 4 -- the
+no-clear allocator, append fast arm, and v7 fused-locals opcodes each land
+on-calc too; screens carry exact checksums, gate is these values +2%;
+bytecode is v7 - recompile old .mlu appvars). `bench_list` is TI-BASIC's best case --
 `L1L2+L1` is one dispatch into vectorized OS assembly -- and the fused
 indexing opcodes (`GETTABLE_LL`/`SETTABLE_LL`), the array-window fast
 paths, and computed-goto dispatch bring per-element bytecode to parity

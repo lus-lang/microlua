@@ -192,31 +192,40 @@ CAVEATS = """\
 OPTIMIZATIONS = """\
 ## Optimizations applied (driven by these findings)
 
-1. **Operator-precedence fix** (correctness). The Pratt parser recursed at the
-   wrong binding power for left-associative operators, so `2 + 3 * 4` parsed as
-   `(2 + 3) * 4`. Surfaced because `sort`'s checksum overflowed. Fixed in
-   `MLuaParse.c`; regression suite `test_operators.lua`.
+Pass 4 (2026-07-03) took the geomean from 3.24x to ~1.4x with algorithmic
+changes only (the -Oz build stays the benchmarked artifact):
 
-2. **Incremental concat hashing** (`strbuild` 14.5x -> 0.9x; min-heap
-   272 -> 112 KB). `s = s .. x` rehashed the whole accumulated string each step
-   (O(n^2)). MicroLua interns every string, but FNV-1a is composable --
-   `hash(a..b)` continues from `hash(a)` over only `b`'s bytes -- so the
-   all-string concat path now builds the result directly (no temp buffer) and
-   hashes incrementally. Generalizes to `strjoin`/`tableconcat`.
+1. **Word-wise MemCpy/MemMove/MemSet** (geomean 3.23x -> 2.01x). The
+   freestanding byte loops moved one byte per iteration and dominate the
+   string workloads (concat copy, GC compaction, alloc zeroing); the word
+   paths copy pointer-width blocks when co-aligned. `MLUA_MEM_WORDWISE`.
+2. **No-clear allocation** for fully-overwritten payloads plus intern-table
+   OOM fixes (2.01x -> 1.91x). Diagnostic builds poison non-cleared memory.
+3. **Headroom-proportional GC pacing** (1.91x -> 1.46x). The garbage
+   allowance also scales with free heap (`MLUA_GC_HEADROOM_DIV`), so
+   accumulator loops stop mark-compacting every few tens of KB in a roomy
+   heap; tight heaps keep the classic formula bit-for-bit (min-heap column
+   unchanged). En route this exposed and fixed two latent
+   GC-inside-running-coroutine crashes (carve-boundary miscompute, unmarked
+   live coroutine exec buffers).
+4. **Inline int fast paths for % and /** mirroring ADD's, and the
+   **array-append fast arm** for sequential fills (1.46x -> 1.42x); also
+   fixed the real INT_MIN % -1 hardware trap.
+5. **Bytecode v7 superinstructions** GETLOCAL2 + ADD_SET, parser-fused
+   local pair reads and accumulator stores (1.42x -> ~1.37x; `loop`
+   2.54x -> 1.94x).
 
-3. **table.concat truncation fix** (correctness). It assembled into a fixed 4 KB
-   stack buffer and silently dropped the overflow (and mis-placed separators on
-   sub-ranges). Rewritten to size an exact heap buffer. Found by the anti-overfit
-   `tableconcat` workload; tests in `test_table.lua`.
+Earlier passes: operator-precedence fix, incremental concat hashing,
+table.concat truncation fix.
 
-4. **Code hygiene** (flash / C99): removed dead statics and duplicate forward
-   typedefs (a C99 conformance issue).
-
-Residual gaps reported honestly, not closed: `fib`/`loop`/`sieve` stay ~2.3-2.4x
-on raw bytecode dispatch and table access -- the cost of a tiny switch-dispatch
-VM versus Lua 5.5's optimized register VM. The `sieve` min-heap (8.5 vs 4.5 MB)
-reflects array-growth doubling plus the 75% GC threshold's transient peak;
-shrinking it is entangled with the safepoint-GC design and left as future work.
+Residual gaps reported honestly, not closed: `fib` (~2.3x) is bounded by
+call-frame setup vs Lua 5.5's register-window reuse -- the measured cheap
+tricks (direct callee entry) bought ~2%, below this pass's 10%-per-row
+acceptance bar, and a frame-window redesign is EvalTop-class risk. `sieve`
+(~2.4x) and `matrix` (~2.1x) are raw dispatch density; a MOD_SET sibling of
+ADD_SET projected only ~8% on matrix and was likewise left out. The `sieve`
+min-heap (9 vs 4.5 MB) reflects geometric array growth plus the GC
+threshold's transient peak, unchanged by design.
 """
 
 
