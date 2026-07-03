@@ -2258,7 +2258,7 @@ void MLuaSetRequirer(MLuaState *L, MLuaRequireFunc func) {
 static int BasePrint(MLuaState *L) {
   int top = MLuaGetTop(L);
   int i;
-  char buf[4096];
+  char buf[MLUA_PRINT_BUF_SIZE];
   Size bufpos = 0;
 
   MLuaDebugPrint("BasePrint called, top=%d, OutputFunc=%p\n", top,

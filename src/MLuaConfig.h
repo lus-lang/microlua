@@ -36,6 +36,21 @@
 #define MLUA_PROFILE_OPS 0
 #endif
 
+/* C-stack buffer ceilings for the assembly paths of print and
+ * string.format (and format's argument capture). The defaults suit hosted
+ * and multi-KB-stack targets; ports with tiny C stacks (a 6502's 256-byte
+ * hardware stack, small 8086 memory models) lower them - output beyond
+ * the ceiling truncates, which is the pre-existing behavior at 4096. */
+#ifndef MLUA_PRINT_BUF_SIZE
+#define MLUA_PRINT_BUF_SIZE 4096
+#endif
+#ifndef MLUA_FORMAT_BUF_SIZE
+#define MLUA_FORMAT_BUF_SIZE 4096
+#endif
+#ifndef MLUA_FORMAT_MAX_ARGS
+#define MLUA_FORMAT_MAX_ARGS 32
+#endif
+
 /* Parse-time integer constant folding (60*60*24, -5, ...). Pure emitter
  * feature with exact runtime-identical semantics; the knob exists for
  * ports whose image cannot afford the folding code. */

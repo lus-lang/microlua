@@ -540,9 +540,9 @@ static int StringFind(MLuaState *L) {
 static int StringFormat(MLuaState *L) {
   Size fmtlen;
   const char *fmt = GetStrArg(L, 1, &fmtlen);
-  char buf[4096];
+  char buf[MLUA_FORMAT_BUF_SIZE];
   int top = MLuaGetTop(L);
-  MLuaValue args[32];
+  MLuaValue args[MLUA_FORMAT_MAX_ARGS];
   int nargs = 0;
   int i;
 
@@ -552,7 +552,7 @@ static int StringFormat(MLuaState *L) {
   }
 
   /* Gather arguments */
-  for (i = 2; i <= top && nargs < 32; i++) {
+  for (i = 2; i <= top && nargs < MLUA_FORMAT_MAX_ARGS; i++) {
     args[nargs++] = MLuaGetStack(L, i);
   }
 
