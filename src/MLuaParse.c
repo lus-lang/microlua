@@ -1571,9 +1571,7 @@ static void ParseAssignment(MLuaParser *p, const char *name, Size len) {
     break;
   default: {
     int k = MLuaAddStringK(fs, name, len);
-    MLuaEmitOpB(fs, OP_LOADK, (U8)k);
-    MLuaEmitOp(fs, OP_SWAP);
-    MLuaEmitOp(fs, OP_SETGLOBAL);
+    MLuaEmitOpB(fs, OP_SETGLOBAL_K, (U8)k);
     break;
   }
   }
@@ -2175,9 +2173,7 @@ static void ParseFunction(MLuaParser *p) {
     StackPush(p, 1);
 
     /* Assign closure to global */
-    MLuaEmitOpB(fs, OP_LOADK, (U8)baseK);
-    MLuaEmitOp(fs, OP_SWAP);
-    MLuaEmitOp(fs, OP_SETGLOBAL);
+    MLuaEmitOpB(fs, OP_SETGLOBAL_K, (U8)baseK);
     StackPop(p, 1);
   }
 }
@@ -2528,9 +2524,7 @@ static void ParseMultiAssign(MLuaParser *p, AccessInfo firstInfo,
       MLuaEmitOpB(fs, OP_SETUPVAL, targets[i].Idx);
       break;
     case T_GLOBAL:
-      MLuaEmitOpB(fs, OP_LOADK, (U8)targets[i].NameK);
-      MLuaEmitOp(fs, OP_SWAP);
-      MLuaEmitOp(fs, OP_SETGLOBAL);
+      MLuaEmitOpB(fs, OP_SETGLOBAL_K, (U8)targets[i].NameK);
       break;
     case T_INDEX:
       /* Stack: [..., t, k, v]; SETTABLE_POP also drops t */

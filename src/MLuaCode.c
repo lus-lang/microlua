@@ -78,6 +78,7 @@ static const U8 OpSizes[OP_COUNT] = {
     [OP_TAILCALL] = 2,
     [OP_CONCAT] = 2,
     [OP_GETGLOBAL_K] = 2,
+    [OP_SETGLOBAL_K] = 2,
     [OP_GETTABLE_LL] = 2,
     [OP_SETTABLE_LL] = 2,
 };

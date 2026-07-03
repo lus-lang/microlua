@@ -156,6 +156,35 @@ TEST(AssignmentRetractsDeadRead) {
   }
 }
 
+/* Global stores fuse to SETGLOBAL_K: `g = 5` is LOADINT; SETGLOBAL_K with
+ * no residual LOADK/SWAP/SETGLOBAL triple (and, with the dead-read
+ * retraction, no GETGLOBAL_K either). */
+TEST(GlobalStoreFusesToSetGlobalK) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  MLuaProto *proto = MLuaParse(L, "g = 5", 5, "test");
+
+  ASSERT_NE(proto, NULL);
+  ASSERT_EQ(CountOp(proto, (U8)OP_SETGLOBAL_K), 1);
+  ASSERT_EQ(CountOp(proto, (U8)OP_SETGLOBAL), 0);
+  ASSERT_EQ(CountOp(proto, (U8)OP_SWAP), 0);
+
+  { /* function statement assigns through the same fused store */
+    const char *src = "function gf() end";
+    proto = MLuaParse(L, src, StrLen(src), "test");
+    ASSERT_NE(proto, NULL);
+    ASSERT_EQ(CountOp(proto, (U8)OP_SETGLOBAL_K), 1);
+    ASSERT_EQ(CountOp(proto, (U8)OP_SETGLOBAL), 0);
+  }
+
+  { /* multi-assign global targets fuse too */
+    const char *src = "ga, gb = 1, 2";
+    proto = MLuaParse(L, src, StrLen(src), "test");
+    ASSERT_NE(proto, NULL);
+    ASSERT_EQ(CountOp(proto, (U8)OP_SETGLOBAL_K), 2);
+    ASSERT_EQ(CountOp(proto, (U8)OP_SETGLOBAL), 0);
+  }
+}
+
 /* Find the code offset of an opcode's first occurrence (whole-instruction
  * walk), or (Size)-1. */
 static Size FindOp(const MLuaProto *proto, U8 op) {
@@ -308,6 +337,7 @@ int main(void) {
   RUN_TEST(Assignment);
   RUN_TEST(AssignmentRetractsDeadRead);
   RUN_TEST(GenericForHoistsBodyTarget);
+  RUN_TEST(GlobalStoreFusesToSetGlobalK);
   RUN_TEST(Arithmetic);
 
   printf("\nControl Flow:\n");
