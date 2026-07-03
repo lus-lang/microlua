@@ -98,9 +98,10 @@ MicroLua wins every row. BOTH columns were re-measured 2026-07-03 on the
 same CEmu ROM: the TI-BASIC times came back identical to the previous
 recordings (the OS interpreter is unchanged, which also validates the
 measurement setup), while the MicroLua side improved across the board
-from perf pass 4 (no-clear allocator, append fast arm, v7 fused-locals
+from perf pass 4 (no-clear allocator, append fast arm, fused-locals
 opcodes). Screens carry exact checksums on both sides; the regression
-gate is these values +2%; bytecode is v7 - recompile old .mlu appvars. `bench_list` is TI-BASIC's best case --
+gate is these values +2%; recompile old `.mlu` appvars after the pass
+(the bytecode format changed). `bench_list` is TI-BASIC's best case --
 `L1L2+L1` is one dispatch into vectorized OS assembly -- and the fused
 indexing opcodes (`GETTABLE_LL`/`SETTABLE_LL`), the array-window fast
 paths, and computed-goto dispatch bring per-element bytecode to parity
@@ -123,7 +124,7 @@ verifies the tokenization. The Lua side runs from source appvars via MLUA.
   ceiling is ~137 KB once the VAT and the LibLoad library copies are
   accounted for, though the exact limit depends on what else occupies RAM
   (the pass-4 build launches at 137.2 KB via Cesium in CEmu). The full
-  build sits at ~137.2 KB after perf pass 4 (v7 fused-opcode handlers,
+  build sits at ~137.2 KB after perf pass 4 (fused-opcode handlers,
   correctness fixes) - `MLUA_ENABLE_PACK=0`, `MLUA_PARSE_FOLD_INT=0` and
   `MLUA_PARSE_FUSE_LOCALS=0` buy the room while `MLUA_VM_COMPUTED_GOTO=1`,
   compare-branch fusion, and the fused-locals HANDLERS stay on, being

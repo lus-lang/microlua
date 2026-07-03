@@ -243,8 +243,8 @@ size into `bench/RESULTS.md`. It auto-detects a local `lua5.5`/`lua` (verified `
 All build-variant suites are green: debug, freestanding release, generic32,
 bytecode-only, true 32-bit (`cross/x86-multilib.ini`), the knob variants
 (folding/fusion off, shift-xor hashing, 32-bit formatting, byte-wise Mem*,
-locals-fusion + handlers off). Bytecode is at v7: GETLOCAL2 and ADD_SET
-appended (parser-fused local pair reads / accumulator stores); older .mlu
+locals-fusion + handlers off). The bytecode format gained GETLOCAL2 and
+ADD_SET (parser-fused local pair reads / accumulator stores); older `.mlu`
 chunks must be recompiled, and the CE SMOKE.8xv + benchmark fixtures were
 regenerated. A port may compile the fused handlers out
 (MLUA_VM_FUSED_LOCALS_OPS=0); MLuaUndump then rejects fused chunks
@@ -257,7 +257,7 @@ geomean 1.37x from 3.24x. Wins: tableconcat 0.61x, sort 0.82x, strbuild
 density); the measured-and-rejected next steps are documented above. The
 pass ladder: word-wise Mem* (3.23->2.01), no-clear alloc (->1.91),
 headroom GC pacing (->1.46, min-heap column unchanged), int %-/ fast path
-+ append arm (->1.42), v7 superinstructions (->1.37).
++ append arm (->1.42), fused-locals superinstructions (->1.37).
 
 Four correctness bugs were found by the pass's new stress tests and fixed
 with pinned regressions, all pre-existing: (1) the intern table could hand
