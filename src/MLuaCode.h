@@ -161,15 +161,15 @@ typedef struct MLuaProto MLuaProto;
 struct MLuaProto {
   /* Code (variable-length bytecode). Sizes are MLuaIdx: the emitter flags
    * "function too large" and the loader rejects oversized section counts,
-   * so these never exceed MLUA_IDX_MAX. */
+   * so these never exceed MLUA_IDX_MAX. Buffer CAPACITIES live in
+   * MLuaFuncState: only the emitter grows these arrays, so keeping the cap
+   * here would store dead bytes in every proto for the program's lifetime. */
   U8 *Code;         /* Bytecode bytes */
   MLuaIdx CodeSize; /* Number of bytes */
-  MLuaIdx CodeCap;  /* Allocated capacity */
 
   /* Constants */
   MLuaValue *Constants;  /* Constant pool (k) */
   MLuaIdx ConstantsSize; /* Number of constants */
-  MLuaIdx ConstantsCap;  /* Allocated capacity */
 
   /* Nested prototypes */
   MLuaProto **Protos; /* Nested function prototypes */
@@ -199,8 +199,7 @@ struct MLuaProto {
     MLUA_LINE_T PC;
     MLUA_LINE_T Line;
   } *LineMap;
-  MLuaIdx LineMapSize; /* Number of entries */
-  MLuaIdx LineMapCap;  /* Allocated capacity */
+  MLuaIdx LineMapSize; /* Number of entries (capacity lives in MLuaFuncState) */
 #endif
 };
 
@@ -231,6 +230,15 @@ struct MLuaFuncState {
   MLuaFuncState *Prev; /* Enclosing function state */
   MLuaState *L;        /* Runtime state */
   MLuaProto *Proto;    /* Function being compiled */
+
+  /* Grow capacities of the proto's Code/Constants/LineMap buffers. These
+   * exist only while compiling - the finished proto keeps just its sizes
+   * (undump allocates exact-size buffers and never grows them). */
+  MLuaIdx CodeCap;
+  MLuaIdx ConstantsCap;
+#if MLUA_ENABLE_LINEINFO
+  MLuaIdx LineMapCap;
+#endif
 
   /* Stack tracking */
   int StackLevel; /* Current stack depth (compile time) */

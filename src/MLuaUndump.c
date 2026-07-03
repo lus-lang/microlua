@@ -280,7 +280,6 @@ static MLuaProto *ReadProto(BCReader *r) {
     return NULL;
   }
   p->CodeSize = (Size)count;
-  p->CodeCap = p->CodeSize;
   if (!AllocArray(r, (void **)&p->Code, count, sizeof(U8),
                   "bytecode code section too large") ||
       !ReadBytes(r, p->Code, p->CodeSize)) {
@@ -289,7 +288,6 @@ static MLuaProto *ReadProto(BCReader *r) {
 
   count = ReadU32(r);
   p->ConstantsSize = (Size)count;
-  p->ConstantsCap = p->ConstantsSize;
   if (!AllocArray(r, (void **)&p->Constants, count, sizeof(MLuaValue),
                   "bytecode constant table too large")) {
     return NULL;
@@ -341,7 +339,6 @@ static MLuaProto *ReadProto(BCReader *r) {
                     "bytecode line map too large")) {
       return NULL;
     }
-    p->LineMapCap = (Size)count;
     for (i = 0; i < count; i++) {
       U32 pcVal = ReadU32(r);
       U32 lineVal = ReadU32(r);

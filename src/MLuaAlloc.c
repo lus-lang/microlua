@@ -414,12 +414,12 @@ void MLuaGetMemoryStats(MLuaState *L, MLuaMemoryStats *out) {
     }
     case OBJTYPE_PROTO: {
       MLuaProto *proto = MLUA_PROTOHEADER(obj);
-      out->ProtoCodeBytes += proto->CodeCap * sizeof(U8);
-      out->ProtoConstantsBytes += proto->ConstantsCap * sizeof(MLuaValue);
+      out->ProtoCodeBytes += proto->CodeSize * sizeof(U8);
+      out->ProtoConstantsBytes += proto->ConstantsSize * sizeof(MLuaValue);
       out->ProtoProtosBytes += proto->ProtosSize * sizeof(MLuaProto *);
       out->ProtoUpvaluesBytes += proto->UpvaluesSize * sizeof(MLuaUpvalDesc);
 #if MLUA_ENABLE_LINEINFO
-      out->ProtoLineMapBytes += proto->LineMapCap * sizeof(proto->LineMap[0]);
+      out->ProtoLineMapBytes += proto->LineMapSize * sizeof(proto->LineMap[0]);
 #endif
       break;
     }
