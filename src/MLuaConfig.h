@@ -142,6 +142,39 @@
 #define MLUA_DEFAULT_STACK_SIZE 256
 #endif
 
+/* Locals arena size, historically welded to the eval-stack size. Separate
+ * so RAM-floor ports can shrink one without the other (each slot is one
+ * MLuaValue). */
+#ifndef MLUA_DEFAULT_LOCALS_SIZE
+#define MLUA_DEFAULT_LOCALS_SIZE MLUA_DEFAULT_STACK_SIZE
+#endif
+
+/* Smallest heap a state may be created in, and the arena/bookkeeping slack
+ * demanded beyond sizeof(MLuaState). The defaults match the historical
+ * hard-coded floor; sub-8 KB targets (NES-class WRAM) lower both together
+ * with the arena sizes above. */
+#ifndef MLUA_MIN_HEAP_SIZE
+#define MLUA_MIN_HEAP_SIZE 4096
+#endif
+#ifndef MLUA_MIN_HEAP_SLACK
+#define MLUA_MIN_HEAP_SLACK 2048
+#endif
+
+/* GC pacing floors. GROWTH_FLOOR is the smallest allocation budget granted
+ * between collections when the heap has room; RESERVE_MIN/MAX clamp the
+ * safepoint reserve (see MLuaNextGCThreshold). The defaults assume tens of
+ * KB of heap - an 8 KB port lowers GROWTH_FLOOR or every cycle's budget is
+ * half its RAM. */
+#ifndef MLUA_GC_GROWTH_FLOOR
+#define MLUA_GC_GROWTH_FLOOR 4096
+#endif
+#ifndef MLUA_GC_RESERVE_MIN
+#define MLUA_GC_RESERVE_MIN 512
+#endif
+#ifndef MLUA_GC_RESERVE_MAX
+#define MLUA_GC_RESERVE_MAX 8192
+#endif
+
 #ifndef MLUA_DEFAULT_ARGS_SIZE
 #define MLUA_DEFAULT_ARGS_SIZE 64
 #endif
