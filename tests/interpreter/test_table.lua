@@ -251,4 +251,96 @@ test.describe("integer arithmetic and comparison edges", function()
     end)
 end)
 
+test.describe("hash deletion", function()
+    test.it("keeps other keys reachable after a delete", function()
+        -- Regression: nilling a deleted node's Key terminated probe chains
+        -- early and orphaned every later same-chain entry.
+        local t = {}
+        for i = 1, 200 do t["a" .. i] = i end
+        for i = 1, 200, 2 do t["a" .. i] = nil end
+        for i = 2, 200, 2 do
+            test.expect(t["a" .. i]).toBe(i)
+        end
+        for i = 1, 200, 2 do
+            test.expect(t["a" .. i]).toBe(nil)
+        end
+    end)
+
+    test.it("reinserting a deleted key resurrects it", function()
+        local t = {}
+        for i = 1, 50 do t["k" .. i] = i end
+        for i = 1, 50 do t["k" .. i] = nil end
+        for i = 1, 50 do t["k" .. i] = i * 10 end
+        for i = 1, 50 do
+            test.expect(t["k" .. i]).toBe(i * 10)
+        end
+    end)
+
+    test.it("delete/reinsert cycles do not balloon the table", function()
+        -- Dead nodes must be reclaimed on rebuild, not accumulate forever.
+        local t = {}
+        for cycle = 1, 100 do
+            for i = 1, 20 do t["c" .. i] = cycle end
+            for i = 1, 20 do t["c" .. i] = nil end
+        end
+        local n = 0
+        for _ in pairs(t) do n = n + 1 end
+        test.expect(n).toBe(0)
+    end)
+
+    test.it("next() sees exactly the live keys after deletes", function()
+        local t = {}
+        for i = 1, 60 do t["n" .. i] = i end
+        for i = 1, 60, 3 do t["n" .. i] = nil end
+        local count, sum = 0, 0
+        for k, v in pairs(t) do
+            count = count + 1
+            sum = sum + v
+        end
+        local expectCount, expectSum = 0, 0
+        for i = 1, 60 do
+            if i % 3 ~= 1 then
+                expectCount = expectCount + 1
+                expectSum = expectSum + i
+            end
+        end
+        test.expect(count).toBe(expectCount)
+        test.expect(sum).toBe(expectSum)
+    end)
+
+    test.it("deleting the current key during pairs keeps iterating", function()
+        local t = {}
+        for i = 1, 40 do t["p" .. i] = i end
+        local seen = 0
+        for k in pairs(t) do
+            seen = seen + 1
+            t[k] = nil -- delete the key we are standing on
+        end
+        test.expect(seen).toBe(40)
+        for i = 1, 40 do
+            test.expect(t["p" .. i]).toBe(nil)
+        end
+    end)
+
+    test.it("erased key falls through to the forward table", function()
+        local base = { shadowed = "base" }
+        local t = { shadowed = "own" }
+        table.forward(t, base)
+        test.expect(t.shadowed).toBe("own")
+        t.shadowed = nil
+        test.expect(t.shadowed).toBe("base")
+    end)
+
+    test.it("integer hash keys survive same-chain deletes", function()
+        -- Positive int keys live in the array part (holes are rejected), so
+        -- negative keys exercise the hash part's integer chains instead.
+        local t = {}
+        for i = 1000, 1512 do t[-i * 7] = i end
+        for i = 1000, 1512, 2 do t[-i * 7] = nil end
+        for i = 1001, 1512, 2 do
+            test.expect(t[-i * 7]).toBe(i)
+        end
+    end)
+end)
+
 assert(test.run())

@@ -500,6 +500,7 @@ static Bool HashGrow(MLuaState *L, MLuaTableHeader *th) {
   MLuaTableNode *oldNodes = MLuaTableNodeData(th);
   MLuaTableNode inlineCopy[MLUA_TABLE_INLINE_HASH_CAP];
   Bool oldInline = MLuaTableHashIsInline(th);
+  Size live;
   Size newCap;
   Size newBytes;
   Size i;
@@ -511,12 +512,27 @@ static Bool HashGrow(MLuaState *L, MLuaTableHeader *th) {
     oldNodes = inlineCopy;
   }
 
+  /* Size the new table from the LIVE entry count, not the occupied count:
+   * NodeCount includes dead nodes (deletions), which the rebuild below
+   * drops. A delete-heavy table therefore rebuilds at the same or a smaller
+   * capacity instead of doubling forever. live*2+1 keeps the rebuilt table
+   * at most half full, so the insert that triggered the grow always fits. */
+  live = 0;
+  for (i = 0; i < oldCap; i++) {
+    if (oldNodes && !IsNil(oldNodes[i].Key) && !IsNil(oldNodes[i].Value)) {
+      live++;
+    }
+  }
+
   /* The node count lives in NodeState's low bits; capacity (and therefore
    * count) must stay within that mask. */
-  if (oldCap > ((Size)MLUA_TABLE_NODE_COUNT_MASK / 2)) {
+  if (live > ((Size)MLUA_TABLE_NODE_COUNT_MASK / 2)) {
     return FALSE;
   }
-  newCap = (oldCap == 0) ? MLUA_TABLE_INITIAL_HASH_SIZE : oldCap * 2;
+  newCap = MLUA_TABLE_INITIAL_HASH_SIZE;
+  while (newCap < live * 2 + 1) {
+    newCap *= 2;
+  }
   if (newCap > (Size)-1 / sizeof(MLuaTableNode)) {
     return FALSE;
   }
@@ -538,9 +554,9 @@ static Bool HashGrow(MLuaState *L, MLuaTableHeader *th) {
     newNodes[i].Value = MLUA_NIL;
   }
 
-  /* Reinsert old nodes */
+  /* Reinsert old nodes (live only - dead nodes are dropped here) */
   for (i = 0; i < oldCap; i++) {
-    if (oldNodes && !IsNil(oldNodes[i].Key)) {
+    if (oldNodes && !IsNil(oldNodes[i].Key) && !IsNil(oldNodes[i].Value)) {
       U32 hash = HashValue(oldNodes[i].Key);
       Size slot = hash % newCap;
       Size j;
@@ -559,6 +575,11 @@ static Bool HashGrow(MLuaState *L, MLuaTableHeader *th) {
   return TRUE;
 }
 
+/* Find the node for key, live OR dead (a dead node has its Key preserved and
+ * Value nil - see HashSet's delete path). Callers read Value, so a dead node
+ * behaves as a miss; HashSet uses the returned dead node to resurrect in
+ * place. Probing stops only at a truly-empty slot (Key nil), which dead
+ * nodes never are - that is what keeps probe chains intact across deletes. */
 static MLuaTableNode *HashFind(MLuaTableHeader *th, MLuaValue key) {
   MLuaTableNode *nodes;
   U32 hash;
@@ -598,16 +619,16 @@ static Bool HashSet(MLuaState *L, MLuaTableHeader *th, MLuaValue key,
   Size threshold;
   MLuaTableNode *nodes;
 
-  /* Find existing node */
+  /* Find existing node (live or dead - HashFind matches on Key) */
   MLuaTableNode *existing = HashFind(th, key);
   if (existing) {
+    /* Deleting keeps the Key in place as a dead node ({Key, Value=nil}):
+     * nilling the Key would terminate probe chains early and orphan every
+     * later same-chain entry. Dead nodes stay in NodeCount (they still
+     * lengthen chains, so they must keep driving the grow trigger) and are
+     * dropped wholesale when HashGrow rebuilds. Assigning a value to a dead
+     * node resurrects it in place. */
     existing->Value = value;
-    if (IsNil(value)) {
-      /* Mark as deleted - for simplicity, we just set key to nil */
-      /* A proper implementation would use tombstones */
-      existing->Key = MLUA_NIL;
-      MLuaTableDecNodeCount(th);
-    }
     return TRUE;
   }
 
@@ -634,7 +655,10 @@ static Bool HashSet(MLuaState *L, MLuaTableHeader *th, MLuaValue key,
     }
   }
 
-  /* Insert new node */
+  /* Insert new node. HashFind above proved the key absent (it probed the
+   * whole chain, dead nodes included), so the first dead node on the probe
+   * path can be reused without another absence check; reuse keeps NodeCount
+   * unchanged (the slot was already occupied). */
   nodes = MLuaTableNodeData(th);
   hash = HashValue(key);
   slot = hash % th->NodeCapacity;
@@ -645,6 +669,11 @@ static Bool HashSet(MLuaState *L, MLuaTableHeader *th, MLuaValue key,
       nodes[idx].Key = key;
       nodes[idx].Value = value;
       MLuaTableIncNodeCount(th);
+      return TRUE;
+    }
+    if (IsNil(nodes[idx].Value)) {
+      nodes[idx].Key = key;
+      nodes[idx].Value = value;
       return TRUE;
     }
   }
@@ -901,7 +930,10 @@ MLuaValue MLuaTableNext(MLuaState *L, MLuaValue tbl, MLuaValue key,
     }
   }
 
-  /* Then iterate hash part */
+  /* Then iterate hash part. Dead nodes (Value nil, deleted) are never
+   * yielded, but their preserved Key still matches the resume scan - so
+   * deleting the current key during a pairs() traversal keeps iterating
+   * from the right position instead of ending early. */
   nodes = MLuaTableNodeData(th);
   for (i = 0; i < th->NodeCapacity; i++) {
     MLuaTableNode *node = &nodes[i];
@@ -911,8 +943,10 @@ MLuaValue MLuaTableNext(MLuaState *L, MLuaValue tbl, MLuaValue key,
     }
 
     if (foundCurrent) {
-      *value = node->Value;
-      return node->Key;
+      if (!IsNil(node->Value)) {
+        *value = node->Value;
+        return node->Key;
+      }
     } else if (MLuaRawEqual(node->Key, key)) {
       foundCurrent = TRUE;
     }

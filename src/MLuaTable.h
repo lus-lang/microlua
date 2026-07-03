@@ -100,10 +100,6 @@ static inline void MLuaTableIncNodeCount(MLuaTableHeader *th) {
   MLuaTableSetNodeCount(th, MLuaTableNodeCount(th) + 1);
 }
 
-static inline void MLuaTableDecNodeCount(MLuaTableHeader *th) {
-  MLuaTableSetNodeCount(th, MLuaTableNodeCount(th) - 1);
-}
-
 static inline void MLuaTableSetArrayInline(MLuaTableHeader *th, Bool enabled) {
   if (enabled) {
     th->NodeState |= MLUA_TABLE_ARRAY_INLINE;
