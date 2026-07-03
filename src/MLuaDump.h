@@ -12,7 +12,9 @@
 /* v4: fused opcodes GETGLOBAL_K, GETTABLE_LL, SETTABLE_LL, SETTABLE_POP
  * v5: dead opcodes retired and the (always-empty) Exp-Golomb line-info
  *     section removed from the proto record */
-#define MLUA_BYTECODE_VERSION 6
+/* v7: appended OP_GETLOCAL2 and OP_ADD_SET (fused local reads /
+ * accumulator stores). Chunks are not backward compatible: recompile. */
+#define MLUA_BYTECODE_VERSION 7
 #define MLUA_BYTECODE_ENDIAN_LITTLE 0
 #define MLUA_BYTECODE_ENDIAN_BIG 1
 #define MLUA_BYTECODE_FLOAT_IEEE754 1

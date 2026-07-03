@@ -938,6 +938,10 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       [OP_UNM] = &&L_OP_UNM,
       [OP_LEN] = &&L_OP_LEN,
       [OP_CONCAT] = &&L_OP_CONCAT,
+#if MLUA_VM_FUSED_LOCALS_OPS
+      [OP_GETLOCAL2] = &&L_OP_GETLOCAL2,
+      [OP_ADD_SET] = &&L_OP_ADD_SET,
+#endif
       [OP_JMP] = &&L_OP_JMP,
       [OP_JMPF] = &&L_OP_JMPF,
       [OP_JMPT] = &&L_OP_JMPT,
@@ -1055,6 +1059,48 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       LOCAL_SET(slot, MLUA_NIL);
       VM_BREAK;
     }
+
+#if MLUA_VM_FUSED_LOCALS_OPS
+    VM_CASE(OP_GETLOCAL2): {
+      /* Parser-fused pair of adjacent local reads (slots nibble-packed) */
+      U8 slots = READ_BYTE();
+      STACK_PUSH(LOCAL_GET(slots >> 4));
+      STACK_PUSH(LOCAL_GET(slots & 0x0F));
+      VM_BREAK;
+    }
+
+    VM_CASE(OP_ADD_SET): {
+      /* Parser-fused ADD;SETLOCAL tail (accumulator assignments). Same
+       * fast paths as OP_ADD; the result lands in a local, not the
+       * stack. */
+      U8 slot = READ_BYTE();
+      MLuaValue b = STACK_POP();
+      MLuaValue a = STACK_POP();
+      MLuaValue result;
+      if (IsInlineInt(a) && IsInlineInt(b)) {
+        I32 r = GetInt(a) + GetInt(b);
+        if (r >= MLUA_INLINE_INT_MIN && r <= MLUA_INLINE_INT_MAX) {
+          LOCAL_SET(slot, MakeInt(r));
+          VM_BREAK;
+        }
+      }
+#if MLUA_PTR_SIZE == 8
+      if (IsDouble(a) && IsDouble(b)) {
+        double r = GetDouble(a) + GetDouble(b);
+        if (r == (double)(I32)r) {
+          LOCAL_SET(slot, MakeInt((I32)r));
+        } else {
+          LOCAL_SET(slot, MakeDouble(r));
+        }
+        VM_BREAK;
+      }
+#endif
+      result = MLuaArith(L, OP_ADD, a, b);
+      VM_CHECK_NIL(result); /* Type error in arithmetic */
+      LOCAL_SET(slot, result);
+      VM_BREAK;
+    }
+#endif /* MLUA_VM_FUSED_LOCALS_OPS */
 
     VM_CASE(OP_GETGLOBAL): {
       /* Stack-based: pops key, pushes _G[key] */

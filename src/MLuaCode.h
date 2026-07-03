@@ -157,6 +157,12 @@ typedef enum {
   /* ===== String (0x80) ===== */
   OP_CONCAT = 0x80, /* 2B: B strs → str : Concatenate top B strings */
 
+  /* ===== Fused locals (0x81, bytecode v7) ===== */
+  OP_GETLOCAL2 = 0x81, /* 2B: B → a b : Push locals[B>>4] then locals[B&15]
+                          (parser-fused adjacent local reads) */
+  OP_ADD_SET = 0x82,   /* 2B: B a b → : locals[B] = a + b (parser-fused
+                          ADD;SETLOCAL tail of accumulator assignments) */
+
   OP_COUNT
 } MLuaOpCode;
 

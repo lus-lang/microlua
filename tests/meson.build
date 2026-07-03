@@ -64,6 +64,12 @@ if compiler_enabled
         timeout: 120,
     )
 
+    test('fused_ops_fence', python_prog,
+        args: [files('fused_ops_fence.py'), meson.project_source_root(), mlua_exe],
+        suite: ['cli', 'bytecode'],
+        timeout: 120,
+    )
+
     test('security_regressions', python_prog,
         args: [files('security_regressions.py'), mlua_exe],
         suite: ['cli', 'security'],

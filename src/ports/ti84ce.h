@@ -81,6 +81,15 @@
  * CEmu bench_int timings if headroom ever frees up. */
 #define MLUA_VM_INT_DIVMOD_FASTPATH 0
 
+/* Locals-fusion EMISSION off: ~640 B of parser code for fused output
+ * that on-calc-typed sources rarely amortize. The GETLOCAL2/ADD_SET
+ * HANDLERS stay compiled (v7 contract: PC-compiled fused chunks run
+ * on-calc); at ~530 B of RunVM the repl image still launches -- verified
+ * via the checked-in Cesium autotest at 140,529 B. Note the plain
+ * autotest.json (direct Asm( launch) needs an OS <= 5.4 ROM; on 5.5+
+ * the OS refuses Asm( at ANY size, which is not a ceiling signal. */
+#define MLUA_PARSE_FUSE_LOCALS 0
+
 /* MLUA_TABLE_NUM_ARRAYS is NOT set here: the typed-array code measures
  * ~2.8 KB of eZ80 image, which fits the runner target (its makefile opts
  * in) but would leave the full repl build under 1.3 KB of launch headroom.

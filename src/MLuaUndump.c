@@ -202,6 +202,31 @@ static Bool ValidateCode(BCReader *r, MLuaProto *p) {
         return FALSE;
       }
       break;
+    case OP_ADD_SET:
+#if MLUA_VM_FUSED_LOCALS_OPS
+      if (operand >= p->NumLocals) {
+        Fail(r, "bytecode local index out of range");
+        return FALSE;
+      }
+      break;
+#endif
+      /* fall through to the fence when the handlers are compiled out */
+    case OP_GETLOCAL2:
+#if MLUA_VM_FUSED_LOCALS_OPS
+      if (op == OP_GETLOCAL2 && ((operand >> 4) >= p->NumLocals ||
+                                 (operand & 0x0F) >= p->NumLocals)) {
+        Fail(r, "bytecode local index out of range");
+        return FALSE;
+      }
+      break;
+#else
+      /* This build omits the fused-locals handlers
+       * (MLUA_VM_FUSED_LOCALS_OPS=0): reject at load, deterministically,
+       * instead of hitting an unknown opcode mid-run. Recompile the chunk
+       * with MLUA_PARSE_FUSE_LOCALS=0. */
+      Fail(r, "bytecode uses fused-locals opcodes this build omits");
+      return FALSE;
+#endif
     case OP_LOADK:
     case OP_GETGLOBAL_K:
       if ((Size)operand >= p->ConstantsSize) {

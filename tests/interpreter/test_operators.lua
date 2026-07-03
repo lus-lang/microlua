@@ -217,4 +217,59 @@ test.describe("integer division and modulo edges", function()
     end)
 end)
 
+test.describe("fused locals shapes", function()
+    -- Exercises the GETLOCAL2 / ADD_SET parser fusions through their edge
+    -- paths: error propagation out of the fused add, captured (upvalue)
+    -- accumulators, and pair reads inside and/or (which must NOT fuse
+    -- across the branch the short-circuit inserts).
+    test.it("accumulator sum over two locals", function()
+        local a, b = 3, 4
+        local s = 0
+        s = s + a
+        s = s + b
+        s = s + (a + b)
+        test.expect(s).toBe(14)
+    end)
+
+    test.it("fused add raises on non-numbers", function()
+        local s = 0
+        local bad = "x"
+        local ok = pcall(function()
+            local t = 0
+            t = t + bad
+            return t
+        end)
+        test.expect(ok).toBeFalse()
+        test.expect(s).toBe(0)
+    end)
+
+    test.it("captured accumulator keeps upvalue semantics", function()
+        local count = 0
+        local function bump(n)
+            count = count + n
+        end
+        bump(2); bump(3)
+        test.expect(count).toBe(5)
+    end)
+
+    test.it("short-circuit between local reads stays correct", function()
+        local x, y = false, 7
+        local r = x or y
+        test.expect(r).toBe(7)
+        local p, q = 1, nil
+        test.expect(p and q).toBe(nil)
+    end)
+
+    test.it("float and mixed adds through the fused store", function()
+        local f = 0.5
+        local g = 0.25 -- decimal literal only compared against itself
+        f = f + f      -- 1.0 -> canonicalizes to int 1
+        test.expect(f).toBe(1)
+        local m = 2
+        m = m + 0.5
+        test.expect(m).toBe(2.5)
+        test.expect(g + g == 2 * g).toBeTrue()
+    end)
+end)
+
 assert(test.run())

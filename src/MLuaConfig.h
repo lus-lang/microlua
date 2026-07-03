@@ -67,6 +67,23 @@
 #define MLUA_PARSE_FUSE_COMPARE 1
 #endif
 
+/* Parse-time fusion of adjacent local reads (GETLOCAL2) and accumulator
+ * stores (ADD_SET, the ADD;SETLOCAL tail of `x = x + expr`). Cuts 2-3
+ * dispatches from the hottest loop shapes. Emission-only knob; whether
+ * the HANDLERS exist is MLUA_VM_FUSED_LOCALS_OPS below. */
+#ifndef MLUA_PARSE_FUSE_LOCALS
+#define MLUA_PARSE_FUSE_LOCALS 1
+#endif
+
+/* Compile the GETLOCAL2/ADD_SET handlers themselves. Default on: any v7
+ * runtime then runs any v7 chunk. An image-tight port may set 0 to drop
+ * the handlers (and usually MLUA_PARSE_FUSE_LOCALS with them); chunks
+ * that CONTAIN the fused opcodes are then rejected deterministically at
+ * load by MLuaUndump, never at run time. */
+#ifndef MLUA_VM_FUSED_LOCALS_OPS
+#define MLUA_VM_FUSED_LOCALS_OPS 1
+#endif
+
 #ifndef MLUA_PTR_SIZE
 #if defined(__LP64__) || defined(_WIN64)
 #define MLUA_PTR_SIZE 8
