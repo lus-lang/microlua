@@ -119,6 +119,85 @@ TEST(RejectTruncatedChunk) {
   ASSERT_EQ(MLuaLoadBytecode(L, buf, size - 1, "bad"), MLUA_ERRRUN);
 }
 
+TEST(RejectPriorVersion) {
+  /* v4 chunks (and older) must be rejected deterministically: v5 removed
+   * the line-info section, so a v4 body cannot be parsed as v5. */
+  const char *src = "return 1";
+  char buf[512];
+  Size size = CompileDump(src, buf, sizeof(buf), MLUA_BYTECODE_ENDIAN_LITTLE);
+  MLuaState *L;
+
+  ASSERT(size > 5);
+  ASSERT_EQ((U8)buf[4], MLUA_BYTECODE_VERSION);
+  buf[4] = MLUA_BYTECODE_VERSION - 1;
+
+  L = MLuaStateInit(TestHeapB, TEST_HEAP_SIZE);
+  ASSERT_EQ(MLuaLoadBytecode(L, buf, size, "bad"), MLUA_ERRRUN);
+}
+
+/* Little-endian u32 at buf[pos] (the header written by CompileDump below
+ * always uses MLUA_BYTECODE_ENDIAN_LITTLE). */
+static U32 ReadLE32(const char *buf, Size pos) {
+  return (U32)(U8)buf[pos] | ((U32)(U8)buf[pos + 1] << 8) |
+         ((U32)(U8)buf[pos + 2] << 16) | ((U32)(U8)buf[pos + 3] << 24);
+}
+
+TEST(RejectRetiredOpcode) {
+  /* Bytes in the retired opcode slots (0x50 was OP_BAND) must fail
+   * ValidateCode at load time instead of reaching the dispatch loop. */
+  const char *src = "return 1";
+  char buf[512];
+  Size size = CompileDump(src, buf, sizeof(buf), MLUA_BYTECODE_ENDIAN_LITTLE);
+  MLuaState *L;
+  Size pos = 13; /* fixed-size header */
+  U32 codeSize;
+
+  ASSERT(size > 32);
+  /* Walk the proto record to its code section: Source string value
+   * (tag byte 5 + u32 length + bytes), LineDefined u32, four U8 flags,
+   * then the u32 code size immediately before the code bytes. */
+  ASSERT_EQ((U8)buf[pos], 5);
+  pos += 1;
+  pos += 4 + ReadLE32(buf, pos);
+  pos += 4 + 4;
+  codeSize = ReadLE32(buf, pos);
+  pos += 4;
+  ASSERT(codeSize > 0);
+  ASSERT(pos + codeSize <= size);
+
+  /* The unpatched chunk loads; the same chunk with a retired opcode in
+   * its first code byte must not. */
+  L = MLuaStateInit(TestHeapB, TEST_HEAP_SIZE);
+  ASSERT_EQ(MLuaLoadBytecode(L, buf, size, "ok"), MLUA_OK);
+
+  buf[pos] = 0x50;
+  L = MLuaStateInit(TestHeapB, TEST_HEAP_SIZE);
+  ASSERT_EQ(MLuaLoadBytecode(L, buf, size, "bad"), MLUA_ERRRUN);
+}
+
+TEST(RejectOversizedSectionCount) {
+  /* A proto record claiming 0x10000 code bytes: builds with a narrowed
+   * MLuaIdx (e.g. -DMLUA_IDX_T=U16) must reject the count itself; wide
+   * builds still fail on the truncated body. Never a silent narrow. */
+  unsigned char chunk[] = {
+      0x1B, 'M', 'L', 'u',              /* magic */
+      MLUA_BYTECODE_VERSION, 0, 0, 0,   /* version, format, LE, flags */
+      4, 4, 1, 8, 1,                    /* int/size/instr/number widths */
+      0x00,                             /* Source = nil */
+      0, 0, 0, 0,                       /* LineDefined */
+      0, 0, 0, 2,                       /* params, locals, vararg, maxstack */
+      0x00, 0x00, 0x01, 0x00,           /* code count = 0x10000 (LE) */
+  };
+  MLuaState *L = MLuaStateInit(TestHeapB, TEST_HEAP_SIZE);
+
+  ASSERT_EQ(MLuaLoadBytecode(L, (const char *)chunk, sizeof(chunk), "big"),
+            MLUA_ERRRUN);
+  if (sizeof(MLuaIdx) < sizeof(Size)) {
+    ASSERT(L->ErrorMsg != NULL);
+    ASSERT_EQ(StrCmp(L->ErrorMsg, "bytecode code section too large"), 0);
+  }
+}
+
 int main(void) {
   printf("MicroLua Bytecode Tests\n");
   printf("=======================\n\n");
@@ -130,6 +209,9 @@ int main(void) {
   RUN_TEST(RejectBadVersion);
   RUN_TEST(RejectBadEndian);
   RUN_TEST(RejectTruncatedChunk);
+  RUN_TEST(RejectPriorVersion);
+  RUN_TEST(RejectRetiredOpcode);
+  RUN_TEST(RejectOversizedSectionCount);
 
   printf("\nResults: %d passed, %d failed\n", TestsPassed, TestsFailed);
   return TestsFailed > 0 ? 1 : 0;

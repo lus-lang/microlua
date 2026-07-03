@@ -58,6 +58,18 @@
 #define MLUA_ALIGNMENT 8
 #endif
 
+/* Alignment (and therefore padded size) of the per-object GC header. Object
+ * ADDRESSES and spans always align to MLUA_ALIGNMENT — the tagging path
+ * stores its 3 tag bits in the pointer's low bits and needs that. This knob
+ * only sets where the payload starts (at sizeof(MLuaGCHeader)). A port whose
+ * loads/stores tolerate payload fields at that offset may lower it: on a
+ * target with byte alignment and 3-byte pointers the header packs from 16
+ * down to 8 bytes, cutting every float/int box from 24 to 16 bytes. Ports
+ * that need naturally-aligned payloads must leave the default. */
+#ifndef MLUA_GC_HEADER_ALIGN
+#define MLUA_GC_HEADER_ALIGN MLUA_ALIGNMENT
+#endif
+
 /* Floating-point subtype. Defaults to C `double` (IEEE binary64). A target
  * whose `double` is not 64-bit, or that wants a smaller float, can override
  * MLUA_FLOAT (e.g. `float`) and MLUA_FLOAT_BITS (e.g. 32) in its port header;
@@ -69,6 +81,25 @@
 #endif
 #ifndef MLUA_FLOAT_BITS
 #define MLUA_FLOAT_BITS 64
+#endif
+
+/* Typed numeric table array parts (32-bit tagging path only; ignored under
+ * NaN-boxing, which never heap-allocates numbers). When 1, a table whose
+ * FIRST array store is a heap float switches its array part to raw
+ * MLUA_FLOAT elements: ~4 bytes retained per element instead of a slot plus
+ * a heap box. Reads materialize values through the engine's canonical
+ * number constructor (integral values come back as plain integers, exactly
+ * as dump/undump already canonicalizes them; non-integral reads allocate a
+ * fresh box, so two reads of one slot are distinct box identities - float
+ * boxes were already identity-keyed in tables). Storing anything a float
+ * cannot hold exactly demotes the array to generic slots, once, in place.
+ * A memory-capacity feature for tiny-RAM ports, not a speed feature. */
+#ifndef MLUA_TABLE_NUM_ARRAYS
+#define MLUA_TABLE_NUM_ARRAYS 0
+#endif
+#if MLUA_PTR_SIZE == 8
+#undef MLUA_TABLE_NUM_ARRAYS
+#define MLUA_TABLE_NUM_ARRAYS 0
 #endif
 
 #ifndef MLUA_DEFAULT_STACK_SIZE
@@ -102,6 +133,46 @@
 #ifndef MLUA_DEFAULT_GC_THRESHOLD_PERCENT
 #define MLUA_DEFAULT_GC_THRESHOLD_PERCENT 75
 #endif
+
+/* Static buffer for the stack trace built on runtime errors. The builder
+ * clamps every write to the buffer and NUL-terminates, so a smaller buffer
+ * just truncates deep traces (one frame line runs ~20-40 bytes). Permanent
+ * BSS, so RAM-tight ports may want far less than the default. */
+#ifndef MLUA_STACKTRACE_BUF_SIZE
+#define MLUA_STACKTRACE_BUF_SIZE 2048
+#endif
+
+/* Index/counter type for call frames and function prototypes (MLuaIdx).
+ * Frame fields (saved PC, arena bases, argument count) and proto counters
+ * (code/constant/upvalue/proto/line-map sizes) are bounded by the arena
+ * sizes and by MLUA_IDX_MAX: the emitter rejects functions whose bytecode
+ * would outgrow it ("function too large") and the bytecode loader rejects
+ * chunks whose section counts exceed it. Ports whose arenas and functions
+ * fit 16 bits can set U16 to shrink every frame and prototype. */
+#ifndef MLUA_IDX_T
+#define MLUA_IDX_T Size
+#endif
+#define MLUA_IDX_MAX ((Size)(MLUA_IDX_T)-1)
+
+/* Line-number debug info.
+ *
+ * MLUA_ENABLE_LINEINFO 0 drops the per-function PC->line map entirely:
+ * protos lose the map fields, the parser stops recording lines, and the
+ * loader skips the (still present) line-map section of bytecode chunks.
+ * Runtime errors then report no line number and stack traces print `?`.
+ *
+ * MLUA_LINE_T narrows the in-RAM line-map entry fields (each entry is one
+ * PC plus one line of this type). The serialized format is fixed-width U32
+ * either way; emit and load saturate at MLUA_LINE_MAX, so functions whose
+ * code or line numbers outgrow a narrow type keep the map prefix and report
+ * the last recorded line beyond it. */
+#ifndef MLUA_ENABLE_LINEINFO
+#define MLUA_ENABLE_LINEINFO 1
+#endif
+#ifndef MLUA_LINE_T
+#define MLUA_LINE_T Size
+#endif
+#define MLUA_LINE_MAX ((Size)(MLUA_LINE_T)-1)
 
 #ifndef MLUA_ALIGNAS
 #if defined(__GNUC__) || defined(__clang__)

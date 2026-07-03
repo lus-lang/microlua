@@ -37,7 +37,7 @@ ninja -C builddir
   use `MLuaLoadBytecode` / `MLuaDoBytecode` or `MLuaLoadBuffer` / `MLuaDoBuffer`
   with a bytecode buffer. `-o`, `-e`, the REPL, `load`, and `loadfile` are
   compiler-enabled workflows only.
-- MicroLua bytecode format v3 uses fixed-width serialized fields and an explicit
+- MicroLua bytecode uses fixed-width serialized fields and an explicit
   endianness byte. It is portable across supported endian/pointer-size targets
   with a compatible MicroLua bytecode version. Numeric constants are serialized
   as canonical IEEE-754 binary64 values and narrowed/widened at the boundary
@@ -193,12 +193,30 @@ size into `bench/RESULTS.md`. It auto-detects a local `lua5.5`/`lua` (verified `
 - Skipping the intern-table dedup for concat results: breaks the
   pointer-equality-is-value-equality string invariant. The concat path already
   hashes incrementally and reuses the dedup probe's insert slot.
+- Cross-TU error-string deduplication (a central `extern const char` message
+  table): measured on the linked CE image, LTO already merges identical
+  literals across TUs and every message appears exactly once — the "×15 out
+  of memory" grep counts are within-TU repeats every compiler merges. A dedup
+  header would churn ~200 call sites for zero bytes.
+- `MLUA_IDX_T U16` on the ti84ce port: 16-bit frame/proto fields save ~480 B
+  of arena RAM but GROW the eZ80 image ~430 B (masking against the 24-bit
+  native word, +52 B of it inside the RunVM hot loop). The knob exists for
+  targets with cheap 16-bit loads; the measurement lives in `ports/ti84ce.h`.
 
-## Status (2026-07-02, performance pass landed)
+## Status (2026-07-02, memory-footprint pass landed)
 
-Debug and freestanding release suites are green locally, including internal C
-tests, interpreter suites, smoke tests, CLI bytecode output, security
-regressions, and the libc-free guard. Bytecode is at v4 (fused
+All build-variant suites are green locally: debug, freestanding release,
+generic32, bytecode-only, true 32-bit (`cross/x86-multilib.ini`), and the
+narrow-config variants (packed GC header, U16 line/index types, line info
+off, typed numeric arrays on). Bytecode is at v5 (dead opcodes retired,
+line-info section dropped; v4 added the fused
 GETTABLE_LL/SETTABLE_LL/SETTABLE_POP/GETGLOBAL_K); older .mlu chunks must be
-recompiled. The TI-84 CE benchmarks now beat TI-BASIC on every workload
-(platform/ti84ce/README.md has the table).
+recompiled. The GC marks iteratively (gray list through header Forward
+fields, no C-stack recursion) and the per-object header is a port knob
+(`MLUA_GC_HEADER_ALIGN`: 8 bytes on the CE, so float/int boxes cost 16 not
+24). `table.concat` renders numeric elements (it used to drop them). The
+TI-84 CE runner ships typed float arrays (`MLUA_TABLE_NUM_ARRAYS`, ~4 B
+retained per float element); the repl build skips them for image headroom.
+The CE benchmarks still beat TI-BASIC on every workload — CE size/perf
+regressions are checked with `tools/map_size.py` and the CEmu procedure in
+platform/ti84ce/README.md.

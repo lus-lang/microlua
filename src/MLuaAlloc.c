@@ -67,7 +67,7 @@ static void InitStateCommon(MLuaState *L, Size heapSize) {
   L->GCPending = FALSE;
   L->GCThreshold = MLuaNextGCThreshold(L, L->HeapTop);
   L->GCPhase = 0;
-  L->GCGrayQueue = 0;
+  L->GCGrayHead = NULL;
 
   /* Initialize globals as nil (will be tables later) */
   L->Registry = MLUA_NIL;
@@ -390,6 +390,12 @@ void MLuaGetMemoryStats(MLuaState *L, MLuaMemoryStats *out) {
       MLuaTableHeader *th = MLUA_TABLEHEADER(obj);
       Size arrayBytes = th->ArraySize * sizeof(MLuaValue);
       Size hashBytes = th->NodeCapacity * sizeof(MLuaTableNode);
+#if MLUA_TABLE_NUM_ARRAYS
+      if (MLuaTableArrayKind(th) == MLUA_TABLE_ARRAY_NUM) {
+        /* Raw-float buffer: U32 length prefix + MLUA_FLOAT elements */
+        arrayBytes = sizeof(U32) + th->ArraySize * sizeof(MLUA_FLOAT);
+      }
+#endif
       out->TableArrayBytes += arrayBytes;
       out->TableHashBytes += hashBytes;
       if (MLuaTableArrayIsInline(th)) {
@@ -412,8 +418,9 @@ void MLuaGetMemoryStats(MLuaState *L, MLuaMemoryStats *out) {
       out->ProtoConstantsBytes += proto->ConstantsCap * sizeof(MLuaValue);
       out->ProtoProtosBytes += proto->ProtosSize * sizeof(MLuaProto *);
       out->ProtoUpvaluesBytes += proto->UpvaluesSize * sizeof(MLuaUpvalDesc);
-      out->ProtoLineInfoBytes += proto->LineInfoCap * sizeof(U8);
+#if MLUA_ENABLE_LINEINFO
       out->ProtoLineMapBytes += proto->LineMapCap * sizeof(proto->LineMap[0]);
+#endif
       break;
     }
     default:

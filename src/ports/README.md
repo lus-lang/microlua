@@ -13,6 +13,7 @@ in this directory), or `-Dport_header=path/to/board.h` — or define
 | `MLUA_PORT_HEADER` | *(unset)* | Header `#include`d first by `MLuaConfig.h`; where a board sets its knobs. |
 | `MLUA_PTR_SIZE` | `8` if `__LP64__`/`_WIN64` else `4` | Value **representation selector**, not a byte size: `8` → 64-bit NaN-boxing, else → 3-bit alignment tagging (heap floats, boxed integers). |
 | `MLUA_ALIGNMENT` | `8` | Heap-object alignment. Must be ≥ 8 on the tagging path (the low 3 bits are the tag). |
+| `MLUA_GC_HEADER_ALIGN` | `MLUA_ALIGNMENT` | Alignment (and padded size) of the per-object GC header — i.e. the payload's offset. Object addresses/spans still align to `MLUA_ALIGNMENT`. Ports with no hardware alignment requirements can lower it to pack the header (16 → 8 bytes on a 3-byte-pointer target, shrinking every heap object and cutting number boxes from 24 to 16 bytes); ports that need naturally-aligned payload fields must leave the default. |
 | `MLUA_ALIGNAS(n)` | `__attribute__((aligned(n)))` (GCC/Clang) | Alignment attribute for static arenas and the GC header. |
 | `MLUA_HAVE_WIDTH_TYPES` | *(unset)* | Define it and typedef `U8`..`I64` yourself if the compiler lacks the `__UINT32_TYPE__` family. |
 | `MLUA_USE_STDINT` | *(unset)* | Fallback: derive `U8`..`I32` from the freestanding `<stdint.h>` instead of compiler width macros. |
@@ -37,6 +38,12 @@ in this directory), or `-Dport_header=path/to/board.h` — or define
 | `MLUA_THREAD_FRAMES_SIZE` | `16` | Per-coroutine frame depth. |
 | `MLUA_DEFAULT_GC_THRESHOLD_PERCENT` | `75` | Heap-fill percent that triggers a collection. |
 | `MLUA_PARSE_MAX_DEPTH` | `256` | Parser recursion bound (C-stack depth, roughly one `ParseExpr` frame per level). Lower it on targets with a small C stack. |
+| `MLUA_STACKTRACE_BUF_SIZE` | `2048` | Static BSS buffer the runtime-error stack trace is built into. Writes are clamped and the result is always NUL-terminated, so smaller buffers just truncate deep traces (one frame line runs ~20–40 bytes). |
+| `MLUA_STRING_TABLE_INITIAL_SIZE` | `64` | Initial intern-table capacity in slots (one `MLuaValue` each); also the floor the post-GC shrink pass rehashes down to. Power of two. |
+| `MLUA_ENABLE_LINEINFO` | `1` | `0` drops the per-function PC→line map: protos lose the map fields (~80 B minimum per function), errors report no line number, traces print `?`. The bytecode format is unchanged (the section is written empty and skipped on load). |
+| `MLUA_LINE_T` | `Size` | Type of the in-RAM line-map entry fields (`U16` halves the map on 32-bit targets). Serialization stays fixed-width U32; emit and load saturate at the type's max, keeping the map prefix for oversized functions. |
+| `MLUA_IDX_T` | `Size` | Type of call-frame fields (saved PC, arena bases, arg count) and prototype counters. The emitter rejects functions whose bytecode would exceed `MLUA_IDX_MAX` ("function too large"), the loader rejects oversized section counts, and static asserts keep the arena sizes in range. `U16` shrinks every frame and prototype on small ports. |
+| `MLUA_TABLE_NUM_ARRAYS` | `0` | `1` (32-bit tagging path only; forced off under NaN-boxing) stores a float-seeded table array part as raw `MLUA_FLOAT` elements instead of value slots pointing at heap boxes — a several-fold cut in retained bytes per element. Reads materialize values through the canonical number constructor (integral values return as plain integers, matching dump/undump canonicalization; non-integral reads allocate, so two reads of one slot are distinct box identities). Unrepresentable stores demote the array to generic slots once, in place. A memory-capacity lever, not a speed one. |
 
 ## Numeric limits and math backend (in `MLuaCore.h` / `MLuaValue.h`)
 
@@ -89,6 +96,16 @@ meson setup build-m32   --cross-file cross/x86-multilib.ini # true 32-bit word
 meson setup build-f32   -Dport=generic32 \
     -Dc_args="-DMLUA_FLOAT=float -DMLUA_FLOAT_BITS=32"       # single precision
 meson test -C <dir>                                         # (float: --suite bytecode)
+```
+
+Narrow-config knobs get their own full-suite runs (a knob nobody tests rots);
+note the multilib cross file's `-m32` must be repeated when overriding `c_args`:
+
+```sh
+meson setup build-g32-line16 -Dport=generic32 -Dc_args=-DMLUA_LINE_T=U16
+meson setup build-line0      -Dc_args=-DMLUA_ENABLE_LINEINFO=0
+meson setup build-m32-hdr    --cross-file cross/x86-multilib.ini \
+    -Dc_args="-m32 -DMLUA_GC_HEADER_ALIGN=4" -Dc_link_args=-m32  # packed header
 ```
 
 The `guard` suite additionally compiles the core under `avr-gcc` (16-bit `int`,

@@ -91,14 +91,21 @@ TEST(Alloc_Alignment) {
   MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
   ASSERT_NE(L, NULL);
 
-  /* Allocate odd sizes, check alignment */
+  /* Allocate odd sizes, check alignment. Payloads sit at sizeof(MLuaGCHeader)
+   * inside an MLUA_ALIGNMENT-aligned object, so their guarantee is
+   * MLUA_GC_HEADER_ALIGN (== MLUA_ALIGNMENT unless a port packs the header).
+   * Object headers themselves must stay MLUA_ALIGNMENT-aligned. */
   void *p1 = MLuaAlloc(L, 1);
   void *p2 = MLuaAlloc(L, 7);
   void *p3 = MLuaAlloc(L, 13);
 
-  ASSERT(IS_ALIGNED((UPtr)p1, MLUA_ALIGNMENT));
-  ASSERT(IS_ALIGNED((UPtr)p2, MLUA_ALIGNMENT));
-  ASSERT(IS_ALIGNED((UPtr)p3, MLUA_ALIGNMENT));
+  ASSERT(IS_ALIGNED((UPtr)p1, MLUA_GC_HEADER_ALIGN));
+  ASSERT(IS_ALIGNED((UPtr)p2, MLUA_GC_HEADER_ALIGN));
+  ASSERT(IS_ALIGNED((UPtr)p3, MLUA_GC_HEADER_ALIGN));
+
+  ASSERT(IS_ALIGNED((UPtr)MLUA_OBJHEADER(p1), MLUA_ALIGNMENT));
+  ASSERT(IS_ALIGNED((UPtr)MLUA_OBJHEADER(p2), MLUA_ALIGNMENT));
+  ASSERT(IS_ALIGNED((UPtr)MLUA_OBJHEADER(p3), MLUA_ALIGNMENT));
 }
 
 TEST(Alloc_ZeroSize) {

@@ -94,7 +94,9 @@ Bool MLuaGCStep(MLuaState *L);
 void MLuaGCMark(MLuaState *L, MLuaValue value);
 
 /*
- * Mark an object header as reachable.
+ * Mark an object header as reachable. Containers are queued on the state's
+ * gray list; their children are scanned when the collection's mark phase
+ * drains it (marking never recurses).
  */
 void MLuaGCMarkObject(MLuaState *L, MLuaGCHeader *obj);
 

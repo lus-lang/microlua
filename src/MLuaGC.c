@@ -81,9 +81,15 @@ static void MarkRaw(MLuaState *L, void *buffer) {
   }
 }
 
+/*
+ * Marking is ITERATIVE: MLuaGCMarkObject only sets the mark bit and, for
+ * container types, threads the object onto a gray list through the header's
+ * Forward field (dead storage until the compute-addresses phase rewrites
+ * it). DrainGrayList pops and scans until empty. Zero auxiliary memory and
+ * bounded C stack, so arbitrarily deep object graphs cannot overflow the
+ * (possibly tiny) native stack mid-collection.
+ */
 void MLuaGCMarkObject(MLuaState *L, MLuaGCHeader *obj) {
-  U8 objType;
-
   if (!obj || MLuaGCIsMarked(obj)) {
     return; /* Already marked or null */
   }
@@ -95,11 +101,25 @@ void MLuaGCMarkObject(MLuaState *L, MLuaGCHeader *obj) {
 
   SetMarked(obj);
 
-  /* Get object type from packed flags */
-  objType = MLUA_OBJTYPE(obj);
+  switch (MLUA_OBJTYPE(obj)) {
+  case OBJTYPE_TABLE:
+  case OBJTYPE_FUNCTION:
+  case OBJTYPE_PROTO:
+  case OBJTYPE_UPVALUE:
+  case OBJTYPE_THREAD:
+    /* Containers wait on the gray list until DrainGrayList scans them */
+    obj->Forward = L->GCGrayHead;
+    L->GCGrayHead = obj;
+    break;
+  default:
+    /* STRING/USERDATA/NUMBER/RAW/INT carry no references: marked is done */
+    break;
+  }
+}
 
-  /* Recursively mark children based on object type */
-  switch (objType) {
+/* Scan one gray (marked, unscanned) container's children */
+static void ScanGrayObject(MLuaState *L, MLuaGCHeader *obj) {
+  switch (MLUA_OBJTYPE(obj)) {
   case OBJTYPE_TABLE: {
     /* Mark table keys and values */
     MLuaTableHeader *th = MLUA_TABLEHEADER(obj);
@@ -113,9 +133,16 @@ void MLuaGCMarkObject(MLuaState *L, MLuaGCHeader *obj) {
     if (!MLuaTableHashIsInline(th) && th->NodeCapacity > 0) {
       MarkRaw(L, nodes);
     }
-    /* Mark array part */
-    for (i = 0; i < th->ArraySize; i++) {
-      MLuaGCMark(L, array[i]);
+    /* Mark array part. A typed (NUM) array holds raw floats, never values:
+     * scanning its bits as tagged pointers would chase garbage. The buffer
+     * itself was marked above. */
+#if MLUA_TABLE_NUM_ARRAYS
+    if (MLuaTableArrayKind(th) != MLUA_TABLE_ARRAY_NUM)
+#endif
+    {
+      for (i = 0; i < th->ArraySize; i++) {
+        MLuaGCMark(L, array[i]);
+      }
     }
     /* Mark hash part */
     for (i = 0; i < th->NodeCapacity; i++) {
@@ -154,8 +181,9 @@ void MLuaGCMarkObject(MLuaState *L, MLuaGCHeader *obj) {
     MarkRaw(L, proto->Constants);
     MarkRaw(L, proto->Protos);
     MarkRaw(L, proto->Upvalues);
-    MarkRaw(L, proto->LineInfo);
+#if MLUA_ENABLE_LINEINFO
     MarkRaw(L, proto->LineMap);
+#endif
     MLuaGCMark(L, proto->Source);
     for (i = 0; i < proto->ConstantsSize; i++) {
       MLuaGCMark(L, proto->Constants[i]);
@@ -213,13 +241,21 @@ void MLuaGCMarkObject(MLuaState *L, MLuaGCHeader *obj) {
     }
     break;
   }
-  case OBJTYPE_STRING:
-  case OBJTYPE_USERDATA:
-  case OBJTYPE_NUMBER:
-  case OBJTYPE_RAW:
-  case OBJTYPE_INT:
-    /* These don't contain GC references */
+  default:
+    /* Leaf types never reach the gray list */
     break;
+  }
+}
+
+/* Pop and scan gray objects until none remain. Threading runs through the
+ * Forward field, which the compute-addresses phase rewrites afterwards for
+ * every marked object, so no cleanup is owed beyond list hygiene. */
+static void DrainGrayList(MLuaState *L) {
+  while (L->GCGrayHead) {
+    MLuaGCHeader *obj = L->GCGrayHead;
+    L->GCGrayHead = (MLuaGCHeader *)obj->Forward;
+    obj->Forward = NULL;
+    ScanGrayObject(L, obj);
   }
 }
 
@@ -530,9 +566,16 @@ static void UpdateReferences(MLuaState *L) {
         MLuaTableNode *nodes = MLuaTableNodeData(th);
         Size i;
         /* Contents are updated through the OLD buffer (they move with it);
-         * the buffer pointers are then remapped to the new locations. */
-        for (i = 0; i < th->ArraySize; i++) {
-          array[i] = UpdateValue(L, array[i]);
+         * the buffer pointers are then remapped to the new locations. Typed
+         * (NUM) arrays hold raw floats: nothing inside to update, but the
+         * buffer pointer remap below still applies. */
+#if MLUA_TABLE_NUM_ARRAYS
+        if (MLuaTableArrayKind(th) != MLUA_TABLE_ARRAY_NUM)
+#endif
+        {
+          for (i = 0; i < th->ArraySize; i++) {
+            array[i] = UpdateValue(L, array[i]);
+          }
         }
         for (i = 0; i < th->NodeCapacity; i++) {
           nodes[i].Key = UpdateValue(L, nodes[i].Key);
@@ -575,8 +618,9 @@ static void UpdateReferences(MLuaState *L) {
         proto->Constants = (MLuaValue *)UpdateDataPtr(L, proto->Constants);
         proto->Protos = (MLuaProto **)UpdateDataPtr(L, proto->Protos);
         proto->Upvalues = (MLuaUpvalDesc *)UpdateDataPtr(L, proto->Upvalues);
-        proto->LineInfo = (U8 *)UpdateDataPtr(L, proto->LineInfo);
+#if MLUA_ENABLE_LINEINFO
         proto->LineMap = UpdateDataPtr(L, proto->LineMap);
+#endif
         break;
       }
       case OBJTYPE_UPVALUE: {
@@ -812,8 +856,10 @@ GC_TRACE("[gc] mark (top=%lu)\n", (unsigned long)L->HeapTop);
   MLuaGCVerifyHeap(L, "mark-start");
 #endif
 
-  /* Phase 1: Mark all reachable objects */
+  /* Phase 1: Mark all reachable objects. Roots go gray; the drain scans
+   * the graph iteratively (any pre-collection stray marks drain too). */
   MarkRoots(L);
+  DrainGrayList(L);
 
   L->GCPhase = GC_PHASE_COMPUTE;
 GC_TRACE("[gc] compute%s\n", "");

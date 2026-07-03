@@ -193,8 +193,8 @@ void MLuaSetGlobal(MLuaState *L, const char *name, MLuaValue value) {
 
 #include <stdarg.h>
 
-/* Static buffer for stacktrace */
-static char StackTraceBuffer[2048];
+/* Static buffer for stacktrace (size is a port knob; writes are clamped) */
+static char StackTraceBuffer[MLUA_STACKTRACE_BUF_SIZE];
 
 /*
  * Append formatted pieces to the stack-trace buffer without libc.
@@ -209,7 +209,15 @@ static char *TraceAppend(char *p, char *end, const char *s, Size len) {
 static char *TraceAppendLine(char *p, char *end, const char *src, Size srcLen,
                              Size line, const char *label) {
   char numBuf[24];
-  Size numLen = MLuaIntToStr((I64)line, numBuf);
+  Size numLen;
+
+  /* Line 0 means "unknown" (e.g. line info disabled by the port). */
+  if (line == 0) {
+    numBuf[0] = '?';
+    numLen = 1;
+  } else {
+    numLen = MLuaIntToStr((I64)line, numBuf);
+  }
 
   p = TraceAppend(p, end, "\t", 1);
   p = TraceAppend(p, end, src, srcLen);
@@ -325,8 +333,6 @@ MLuaValue MLuaArith(MLuaState *L, MLuaOpCode op, MLuaValue a, MLuaValue b) {
       return MLuaMakeInt(L, ia - ib);
     case OP_MUL:
       return MLuaMakeInt(L, ia * ib);
-    case OP_IDIV:
-      return ib != 0 ? MLuaMakeInt(L, ia / ib) : MakeInt(0);
     case OP_MOD:
       return ib != 0 ? MLuaMakeInt(L, ia % ib) : MakeInt(0);
     case OP_UNM:
@@ -349,8 +355,6 @@ MLuaValue MLuaArith(MLuaState *L, MLuaOpCode op, MLuaValue a, MLuaValue b) {
     return MakeNumber(L, na * nb);
   case OP_DIV:
     return MakeNumber(L, nb != 0 ? na / nb : 0);
-  case OP_IDIV:
-    return MakeNumber(L, nb != 0 ? (double)(I32)(na / nb) : 0);
   case OP_MOD:
     return MakeNumber(L, nb != 0 ? na - (I32)(na / nb) * nb : 0);
   case OP_POW: {
@@ -768,7 +772,9 @@ static void ReloadFrame(MLuaState *L, const U8 **pc, MLuaProto **proto,
  * MLuaTableGetSafe/MLuaTableSetSafe, whose entry points carry the same
  * fast path for every other caller.
  */
-static Bool TryArrayGetFast(MLuaValue tbl, MLuaValue key, MLuaValue *out) {
+static Bool TryArrayGetFast(MLuaState *L, MLuaValue tbl, MLuaValue key,
+                            MLuaValue *out) {
+  UNUSED(L);
   if (IsTable(tbl) && IsInlineInt(key)) {
     I32 i = GetInt(key);
     MLuaTableHeader *th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl));
@@ -779,6 +785,13 @@ static Bool TryArrayGetFast(MLuaValue tbl, MLuaValue key, MLuaValue *out) {
         return TRUE;
       }
     }
+#if MLUA_TABLE_NUM_ARRAYS
+    /* Typed arrays keep ArrayLen == 0, so they land here on the generic
+     * miss path: the hit path above is byte-identical for generic tables. */
+    if (MLuaTableArrayKind(th) == MLUA_TABLE_ARRAY_NUM) {
+      return MLuaTableNumGetFast(L, th, i, out);
+    }
+#endif
   }
   return FALSE;
 }
@@ -791,6 +804,11 @@ static Bool TryArraySetFast(MLuaValue tbl, MLuaValue key, MLuaValue val) {
       MLuaTableArrayData(th)[i - 1] = val;
       return TRUE;
     }
+#if MLUA_TABLE_NUM_ARRAYS
+    if (MLuaTableArrayKind(th) == MLUA_TABLE_ARRAY_NUM) {
+      return MLuaTableNumSetFast(th, i, val);
+    }
+#endif
   }
   return FALSE;
 }
@@ -1077,7 +1095,7 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       MLuaValue tbl = LOCAL_GET(slots >> 4);
       MLuaValue key = LOCAL_GET(slots & 0x0F);
       MLuaValue result;
-      if (TryArrayGetFast(tbl, key, &result)) {
+      if (TryArrayGetFast(L, tbl, key, &result)) {
         STACK_PUSH(result);
         VM_BREAK;
       }

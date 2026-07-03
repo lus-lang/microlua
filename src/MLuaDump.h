@@ -9,8 +9,10 @@
 #include "MLuaCore.h"
 #include "MLuaValue.h"
 
-/* v4: fused opcodes GETGLOBAL_K, GETTABLE_LL, SETTABLE_LL, SETTABLE_POP */
-#define MLUA_BYTECODE_VERSION 4
+/* v4: fused opcodes GETGLOBAL_K, GETTABLE_LL, SETTABLE_LL, SETTABLE_POP
+ * v5: dead opcodes retired and the (always-empty) Exp-Golomb line-info
+ *     section removed from the proto record */
+#define MLUA_BYTECODE_VERSION 5
 #define MLUA_BYTECODE_ENDIAN_LITTLE 0
 #define MLUA_BYTECODE_ENDIAN_BIG 1
 #define MLUA_BYTECODE_FLOAT_IEEE754 1

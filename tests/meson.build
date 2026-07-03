@@ -18,6 +18,7 @@ if compiler_enabled
         'test_operators',
         'test_bigint',
         'test_index_fused',
+        'test_table_numarray',
     ]
     foreach t : interpreter_tests
         test('interp_' + t, mlua_exe,
@@ -71,6 +72,22 @@ if compiler_enabled
         args: [files('gc_pressure.py'), mlua_exe],
         suite: ['cli', 'gc'],
         timeout: 60,
+    )
+
+    test('stack_trace', python_prog,
+        args: [files('stack_trace.py'), mlua_exe],
+        suite: 'cli',
+    )
+
+    test('error_lines', python_prog,
+        args: [files('error_lines.py'), mlua_exe],
+        suite: 'cli',
+    )
+
+    test('gc_deep', python_prog,
+        args: [files('gc_deep.py'), mlua_exe],
+        suite: ['cli', 'gc'],
+        timeout: 90,
     )
 endif
 

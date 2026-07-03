@@ -13,6 +13,12 @@
 #define MLUA_PTR_SIZE 4  /* tagging representation (32-bit value word) */
 #define MLUA_ALIGNMENT 8 /* allocator-enforced; frees low 3 bits for tags */
 
+/* The eZ80 has no alignment requirements, so pack the GC header (3-byte
+ * Forward + U32 + U8 = 8 bytes instead of 16): every heap object shrinks by
+ * 8 bytes and float/int boxes drop from 24 to 16. Object addresses stay
+ * 8-aligned via MLUA_ALIGNMENT; only the payload offset changes. */
+#define MLUA_GC_HEADER_ALIGN 1
+
 /* Native double is binary32; narrow canonical binary64 bytecode on load. */
 #define MLUA_FLOAT float
 #define MLUA_FLOAT_BITS 32
@@ -30,6 +36,20 @@
 /* The OS grants ~4 KB of C stack; bound parser recursion well inside it. */
 #define MLUA_PARSE_MAX_DEPTH 32
 
+/* ~12 trace lines fit the 10-line home screen; the frame cap is 48, so deep
+ * traces truncate rather than reserving 2 KB of scarce BSS. */
+#define MLUA_STACKTRACE_BUF_SIZE 512
+
+/* Halve the per-function line-map RAM: calculator sources are short, and
+ * functions whose bytecode outgrows 64 KB could not fit RAM here anyway. */
+#define MLUA_LINE_T U16
+
+/* MLUA_IDX_T deliberately stays at the default (Size) here. U16 would take
+ * frames from 24 to 14 bytes (~480 B of arena), but measured on ez80-clang
+ * it GROWS the image by ~430 B - 16-bit fields need masking against the
+ * eZ80's 24-bit native word - including +52 B inside the RunVM hot loop.
+ * Image bytes are scarcer than heap bytes on this device. */
+
 /* No way to store or send a dumped chunk from the calculator, and the full
  * build only barely fits user RAM - drop the bytecode serializer. */
 #define MLUA_ENABLE_DUMP 0
@@ -42,6 +62,13 @@
  * dispatch, which is worth more per byte here: the eZ80 pays heavily for
  * the switch's bounds check + jump on every instruction. */
 #define MLUA_VM_COMPUTED_GOTO 1
+
+/* MLUA_TABLE_NUM_ARRAYS is NOT set here: the typed-array code measures
+ * ~2.8 KB of eZ80 image, which fits the runner target (its makefile opts
+ * in) but would leave the full repl build under 1.3 KB of launch headroom.
+ * A heap of a few tens of KB cannot afford a 16-byte box per stored float,
+ * so the runner - where large precompiled workloads actually run - takes
+ * the trade; the repl keeps the image bytes. */
 
 /* Math backend: the MLuaCore.h defaults follow MLUA_FLOAT_BITS, so this
  * port automatically gets the f-suffixed builtins (sinf, powf, ...). */

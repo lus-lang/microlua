@@ -5,7 +5,7 @@ Two programs built with the [CE C/C++ Toolchain](https://github.com/CE-Programmi
 | Program | Directory | Contents |
 |---|---|---|
 | `MLUA.8xp` (~57 KB) | `repl/` | Full build: runs Lua **source or bytecode** appvars, on-calc **REPL** |
-| `MLUAR.8xp` (~44 KB) | `runner/` | Bytecode-only runner (no compiler); smallest footprint |
+| `MLUAR.8xp` (~44 KB) | `runner/` | Bytecode-only runner (no compiler); smallest footprint. Ships **typed float arrays** (`MLUA_TABLE_NUM_ARRAYS`): a table of floats retains ~4 bytes/element instead of ~20, so float-heavy workloads fit the 48 KB heap. The repl build skips this (~2.8 KB of image it can't spare). |
 
 Both include the `gfx` / `key` / `timer` calculator bindings and ship as a
 single compressed `.8xp` (zx0; the decompressed image is ~110-139 KB of
@@ -117,11 +117,31 @@ verifies the tokenization. The Lua side runs from source appvars via MLUA.
   ceiling is ~137 KB once the VAT and the LibLoad library copies are
   accounted for. The full build sits at ~132 KB after trading the
   `string.pack` engine (`MLUA_ENABLE_PACK=0`) for computed-goto dispatch
-  (`MLUA_VM_COMPUTED_GOTO=1`), which is worth more per byte here. Watch
-  the top-of-image address in `bin/MLUA.map` when adding core code.
-- C stack: ~4 KB. Parser recursion is capped (`MLUA_PARSE_MAX_DEPTH 32`);
-  deeply nested table constructors are bounded by GC mark recursion
-  (roughly 60-100 levels).
+  (`MLUA_VM_COMPUTED_GOTO=1`), which is worth more per byte here. Measure
+  with `python3 ../../tools/map_size.py bin/MLUA.map` (image size, largest
+  symbols, and `--diff old.map new.map` for per-symbol deltas against a
+  saved baseline map).
+
+### Size/perf regression procedure
+
+Before landing a change that touches core code, from `platform/ti84ce/`:
+
+1. Save the current `repl/bin/MLUA.map` and `runner/bin/MLUAR.map` as
+   baselines, then rebuild both targets (`make` in each dir).
+2. `python3 ../../tools/map_size.py --diff baseline.map bin/MLUA.map` for
+   both targets; the image must stay under the ~137 KB ceiling and any
+   growth needs a justification in the commit message.
+3. Run the CEmu autotester smoke (`autotest.json`, see Tests below) for
+   both targets.
+4. Re-run the benchmark table above (`bench_int`, `mandel`, `bench_list`,
+   `bench_str` from `examples/`) in CEmu, check the printed checksums
+   match, and compare the printed `ms` against the table. Timings are
+   self-reported by the scripts; every row must be at or below its
+   recorded value (allow ~2% CEmu jitter). Update the table when a change
+   legitimately shifts a number.
+- C stack: ~4 KB. Parser recursion is capped (`MLUA_PARSE_MAX_DEPTH 32`).
+  The GC marks iteratively (gray list through the header Forward field), so
+  object-graph depth no longer touches the C stack.
 
 ## Known limits
 
