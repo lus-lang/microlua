@@ -39,7 +39,7 @@ ninja -C builddir
   compiler-enabled workflows only.
 - MicroLua bytecode uses fixed-width serialized fields and an explicit
   endianness byte. It is portable across supported endian/pointer-size targets
-  with a compatible MicroLua bytecode version. Numeric constants are serialized
+  with a compatible MicroLua bytecode header. Numeric constants are serialized
   as canonical IEEE-754 binary64 values and narrowed/widened at the boundary
   when `MLUA_FLOAT_BITS` is 32; unsupported headers must be rejected
   deterministically by `MLuaUndump`.

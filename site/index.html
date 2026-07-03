@@ -38,6 +38,7 @@
         <li><a href="#build">Compile</a></li>
         <li><a href="#use">Use</a></li>
         <li><a href="#embedding">Embed MicroLua</a></li>
+        <li><a href="#special-ports">Special ports</a></li>
         <li><a href="#documentation">Documentation</a></li>
         <li><a href="#limitations">Limitations</a></li>
         <li><a href="#tests">Tests and Benchmarks</a></li>
@@ -95,14 +96,17 @@ ninja -C build-bytecode</code></pre>
         <p>
           Port settings live in <code>src/MLuaConfig.h</code>. Use
           <code>-Dport=generic64</code>, <code>generic32</code>,
-          <code>cortex-m</code>, or <code>riscv32</code> for bundled presets,
-          or provide a board-specific header:
+          <code>cortex-m</code>, <code>riscv32</code>, or
+          <code>ti84ce</code> for bundled presets, or provide a
+          board-specific header:
         </p>
         <pre><code>meson setup build-board -Dport_header=path/to/my_board_mlua.h</code></pre>
         <p>
           A port header can override pointer size, heap alignment, default
           stack and frame sizes, GC threshold, fixed-width type source, native
-          float subtype and width, math hooks, and compiler support.
+          float subtype and width, math hooks, compiler support, bytecode
+          dumping, the <code>string.pack</code> format engine, VM dispatch
+          style, and opcode profiling.
           MicroLua supports 64-bit NaN-boxing and a 32-bit alignment-tagging
           representation with boxed full-width integers.
         </p>
@@ -146,7 +150,8 @@ ninja -C build-bytecode</code></pre>
           targets with a compatible MicroLua bytecode version. Numeric
           constants are stored as canonical IEEE-754 binary64 values and are
           narrowed or widened at the boundary for targets using a narrower
-          native <code>MLUA_FLOAT</code>.
+          native <code>MLUA_FLOAT</code>. The current bytecode format is v4,
+          which adds fused global and table-indexing opcodes.
         </p>
       </section>
 
@@ -242,6 +247,112 @@ print(total)</code></pre>
       </p>
     </section>
 
+    <section id="special-ports">
+      <h2>Special ports</h2>
+      <p>
+        Special ports are complete platform integrations that go beyond a Meson
+        port preset. They may include board-specific build systems, host
+        bindings, packaging tools, install notes, benchmarks, or emulator test
+        flows.
+      </p>
+      <section id="ti84ce">
+        <h3>TI-84 Plus CE</h3>
+        <p>
+          <code>platform/ti84ce/</code> is a complete board port for the
+          TI-84 Plus CE: an eZ80 target with 24-bit <code>int</code> and
+          pointers, binary32 <code>double</code>, a small C stack, and a tight
+          RAM budget. It is built with the external CE C/C++ Toolchain makefiles,
+          not Meson.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Program</th>
+              <th scope="col">Directory</th>
+              <th scope="col">Contents</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>MLUA.8xp</code> (~57 KB)</td>
+              <td><code>platform/ti84ce/repl/</code></td>
+              <td>Full build: runs source or bytecode appvars and includes an on-calc REPL.</td>
+            </tr>
+            <tr>
+              <td><code>MLUAR.8xp</code> (~44 KB)</td>
+              <td><code>platform/ti84ce/runner/</code></td>
+              <td>Bytecode-only runner without the lexer, parser, or compiler.</td>
+            </tr>
+          </tbody>
+        </table>
+        <pre><code>cd platform/ti84ce/repl &amp;&amp; make
+cd platform/ti84ce/runner &amp;&amp; make</code></pre>
+        <p>
+          The CE preset disables <code>string.dump</code> and the
+          <code>string.pack</code> family
+          (<code>MLUA_ENABLE_DUMP=0</code>, <code>MLUA_ENABLE_PACK=0</code>)
+          and enables GNU-C computed-goto dispatch
+          (<code>MLUA_VM_COMPUTED_GOTO=1</code>). The full REPL is close to the
+          calculator's practical decompressed image ceiling, so image size should
+          be checked in <code>bin/MLUA.map</code> when core code grows.
+        </p>
+        <table>
+          <caption>MicroLua vs TI-BASIC in CEmu on OS 5.7</caption>
+          <thead>
+            <tr>
+              <th scope="col">Benchmark</th>
+              <th scope="col">Workload</th>
+              <th scope="col">TI-BASIC</th>
+              <th scope="col">MicroLua</th>
+              <th scope="col">Winner</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>bench_int</code></td>
+              <td>Scalar integer loop, 20k iterations</td>
+              <td>161 s</td>
+              <td>19.9 s</td>
+              <td>MicroLua 8.1x</td>
+            </tr>
+            <tr>
+              <td><code>mandel</code></td>
+              <td>32x24 Mandelbrot floats, compute</td>
+              <td>121 s</td>
+              <td>52.7 s</td>
+              <td>MicroLua 2.3x</td>
+            </tr>
+            <tr>
+              <td><code>mandel</code></td>
+              <td>Draw phase, one pixel per cell</td>
+              <td>5 s</td>
+              <td>1.7 s</td>
+              <td>MicroLua 2.9x</td>
+            </tr>
+            <tr>
+              <td><code>bench_list</code></td>
+              <td>60 element-wise passes over 500-element lists</td>
+              <td>20 s</td>
+              <td>19.8 s</td>
+              <td>MicroLua 1.01x</td>
+            </tr>
+            <tr>
+              <td><code>bench_str</code></td>
+              <td>Build 1000-char string by 500 appends and scan</td>
+              <td>11 s</td>
+              <td>6.8 s</td>
+              <td>MicroLua 1.6x</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The matched benchmark sources, calculator bindings, installation notes,
+          and CEmu autotester workflow are documented in
+          <code>platform/ti84ce/README.md</code>.
+        </p>
+      </section>
+    </section>
+
     <section id="documentation">
       <h2>Documentation</h2>
 
@@ -270,8 +381,9 @@ print(total)</code></pre>
         </p>
         <p>
           Functions support lexical closures, upvalues, varargs, multiple return
-          values, and proper tail calls for plain <code>return f(...)</code>
-          style calls.
+          values, and tail-call frame reuse for plain fixed-arity
+          <code>return f(args)</code> calls. Vararg and multiple-return call
+          forms have the same language result but may allocate a fresh frame.
         </p>
       </section>
 
@@ -381,6 +493,11 @@ print(total)</code></pre>
           <code>string.byte</code>, <code>string.char</code>, and
           <code>string.reverse</code> operate on codepoints. Pattern matching is
           byte-based, and case conversion is ASCII-only.
+          <code>string.dump</code> is present when
+          <code>MLUA_ENABLE_DUMP</code> is enabled. The
+          <code>string.pack</code>, <code>string.packsize</code>, and
+          <code>string.unpack</code> functions are present when
+          <code>MLUA_ENABLE_PACK</code> is enabled; both knobs default on.
         </p>
         <table>
           <thead>
@@ -522,6 +639,7 @@ print(total)</code></pre>
         <li>Metatables are absent; <code>setmetatable</code>, <code>getmetatable</code>, <code>rawequal</code>, <code>rawget</code>, and <code>rawset</code> are absent.</li>
         <li><code>coroutine.wrap</code> is absent.</li>
         <li><code>string.gsub</code> and <code>string.gmatch</code> are absent.</li>
+        <li>Small ports may compile out <code>string.dump</code> or the <code>string.pack</code> family.</li>
         <li>The package library, <code>LUA_PATH</code>, and <code>LUA_CPATH</code> behavior are absent.</li>
         <li>Table arrays reject holes by design.</li>
         <li>Integer arithmetic uses MicroLua's 32-bit integer behavior.</li>
