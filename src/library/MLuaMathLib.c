@@ -4,6 +4,8 @@
  */
 
 #include "MLuaMathLib.h"
+
+#if MLUA_ENABLE_MATHLIB
 #include "../MLuaCore.h"
 #include "../MLuaString.h"
 #include "../MLuaVM.h"
@@ -355,3 +357,5 @@ void MLuaOpenMath(MLuaState *L) {
   key = MLuaStringNew(L, "mininteger", 10);
   MLuaTableSet(L, lib, key, MLuaMakeInt(L, MLUA_INT_MIN));
 }
+
+#endif /* MLUA_ENABLE_MATHLIB */

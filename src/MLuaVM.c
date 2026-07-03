@@ -2348,12 +2348,20 @@ void MLuaOpenLibs(MLuaState *L) {
     L->Globals = MLuaTableNewSized(L, 0, 32);
   }
 
-  /* Open all standard libraries */
+  /* Open all standard libraries (each behind its image knob) */
   MLuaOpenBase(L);
+#if MLUA_ENABLE_MATHLIB
   MLuaOpenMath(L);
+#endif
+#if MLUA_ENABLE_COROLIB
   MLuaOpenCoroutine(L);
+#endif
+#if MLUA_ENABLE_STRINGLIB
   MLuaOpenString(L);
+#endif
+#if MLUA_ENABLE_TABLELIB
   MLuaOpenTable(L);
+#endif
 
   /* Register print if output is available */
   if (L->OutputFunc) {

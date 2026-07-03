@@ -4,6 +4,8 @@
  */
 
 #include "MLuaCoroLib.h"
+
+#if MLUA_ENABLE_COROLIB
 #include "../MLuaCore.h"
 #include "../MLuaFunc.h"
 #include "../MLuaString.h"
@@ -201,3 +203,5 @@ void MLuaOpenCoroutine(MLuaState *L) {
   MLuaValue lib = MLuaNewLib(L, "coroutine");
   MLuaRegisterLib(L, lib, CoroLibEntries);
 }
+
+#endif /* MLUA_ENABLE_COROLIB */

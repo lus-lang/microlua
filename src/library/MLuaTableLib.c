@@ -4,6 +4,8 @@
  */
 
 #include "MLuaTableLib.h"
+
+#if MLUA_ENABLE_TABLELIB
 #include "../MLuaConvert.h"
 #include "../MLuaCore.h"
 #include "../MLuaGC.h"
@@ -605,3 +607,5 @@ void MLuaOpenTable(MLuaState *L) {
   /* Lua 5.1 global alias */
   MLuaRegisterGlobal(L, "unpack", TableUnpack);
 }
+
+#endif /* MLUA_ENABLE_TABLELIB */

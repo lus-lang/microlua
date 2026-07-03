@@ -203,6 +203,26 @@
 #define MLUA_DEFAULT_GC_THRESHOLD_PERCENT 75
 #endif
 
+/* Per-library image knobs: each stdlib can be dropped wholesale from the
+ * build (source body and registration both compile away). The base
+ * library stays unconditional - assert/pcall/tostring/pairs are the
+ * language floor. Dropping the string library also drops the pattern
+ * engine and string.format; dropping the coroutine LIBRARY removes the
+ * Lua-visible API while the core coroutine machinery (MLuaThread) stays
+ * for embedders that drive it from C. */
+#ifndef MLUA_ENABLE_MATHLIB
+#define MLUA_ENABLE_MATHLIB 1
+#endif
+#ifndef MLUA_ENABLE_STRINGLIB
+#define MLUA_ENABLE_STRINGLIB 1
+#endif
+#ifndef MLUA_ENABLE_TABLELIB
+#define MLUA_ENABLE_TABLELIB 1
+#endif
+#ifndef MLUA_ENABLE_COROLIB
+#define MLUA_ENABLE_COROLIB 1
+#endif
+
 /* Integer width of the number-FORMATTING digit emitters (MLuaIntToStr and
  * string.format's %d/%u/%x paths). The default I64 renders any integral
  * binary64 exactly; targets whose runtime int is 32-bit and whose float

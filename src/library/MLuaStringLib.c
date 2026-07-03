@@ -4,6 +4,8 @@
  */
 
 #include "MLuaStringLib.h"
+
+#if MLUA_ENABLE_STRINGLIB
 #include "../MLuaCode.h"
 #include "../MLuaConvert.h"
 #include "../MLuaCore.h"
@@ -1273,3 +1275,5 @@ void MLuaOpenString(MLuaState *L) {
   MLuaValue lib = MLuaNewLib(L, "string");
   MLuaRegisterLib(L, lib, StringLibEntries);
 }
+
+#endif /* MLUA_ENABLE_STRINGLIB */
