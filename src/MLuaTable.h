@@ -64,6 +64,11 @@ typedef struct {
 /* Get table header from GC header */
 #define MLUA_TABLEHEADER(gch) ((MLuaTableHeader *)MLUA_OBJDATA(gch))
 
+/* Get GC header back from a table header (inverse of MLUA_TABLEHEADER) */
+static inline MLuaGCHeader *MLuaTableGCHeader(MLuaTableHeader *th) {
+  return (MLuaGCHeader *)((U8 *)th - sizeof(MLuaGCHeader));
+}
+
 /* Initial sizes */
 #define MLUA_TABLE_INITIAL_ARRAY_SIZE 4
 #define MLUA_TABLE_INITIAL_HASH_SIZE 4

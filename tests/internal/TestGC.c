@@ -293,6 +293,49 @@ TEST(GCMark_Object) {
   ASSERT(MLuaGCIsMarked(obj));
 }
 
+/* Pointer keys hash by address; compaction moves them. The GC must leave
+ * the table findable afterwards (GCFLAG_HASHSTALE + rehash-on-access), or
+ * table-keyed entries silently vanish after any collection. */
+TEST(GCCollect_PointerKeysSurviveCompaction) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  MLuaGCRef tref;
+  MLuaGCRef kref[8];
+  int i;
+  ASSERT_NE(L, NULL);
+
+  MLuaGCEnable(L, FALSE);
+
+  MLuaPushGCRef(L, &tref, MLuaTableNew(L));
+
+  /* Interleave garbage before each key so compaction slides the keys down */
+  for (i = 0; i < 8; i++) {
+    MLuaAllocObject(L, OBJTYPE_STRING, 128);
+    MLuaPushGCRef(L, &kref[i], MLuaTableNew(L));
+    MLuaTableSet(L, tref.Value, kref[i].Value, MakeInt(i + 1));
+  }
+
+  MLuaGCCollect(L);
+
+  for (i = 0; i < 8; i++) {
+    MLuaValue v = MLuaTableGet(L, tref.Value, kref[i].Value);
+    ASSERT(IsInt(v));
+    ASSERT_EQ(GetInt(v), i + 1);
+  }
+
+  /* A second cycle must not regress what the rehash repaired */
+  MLuaGCCollect(L);
+  for (i = 0; i < 8; i++) {
+    MLuaValue v = MLuaTableGet(L, tref.Value, kref[i].Value);
+    ASSERT(IsInt(v));
+    ASSERT_EQ(GetInt(v), i + 1);
+  }
+
+  for (i = 7; i >= 0; i--) {
+    MLuaPopGCRef(L, &kref[i]);
+  }
+  MLuaPopGCRef(L, &tref);
+}
+
 /* ========================================================================== */
 /* Main                                                                       */
 /* ========================================================================== */
@@ -315,6 +358,7 @@ int main(void) {
   RUN_TEST(GCCollect_UnreferencedObjects);
   RUN_TEST(GCCollect_ReferencedOnStack);
   RUN_TEST(GCCollect_ReferencedByGCRef);
+  RUN_TEST(GCCollect_PointerKeysSurviveCompaction);
 
   printf("\nMarking:\n");
   RUN_TEST(GCMark_NonPointer);

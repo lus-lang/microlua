@@ -572,6 +572,10 @@ static Bool HashGrow(MLuaState *L, MLuaTableHeader *th) {
     }
   }
 
+  /* Every entry was just re-slotted by its current HashValue, so any
+   * compaction-induced staleness is repaired as a side effect. */
+  MLuaTableGCHeader(th)->Flags &= (U8)~GCFLAG_HASHSTALE;
+
   return TRUE;
 }
 
@@ -579,7 +583,12 @@ static Bool HashGrow(MLuaState *L, MLuaTableHeader *th) {
  * Value nil - see HashSet's delete path). Callers read Value, so a dead node
  * behaves as a miss; HashSet uses the returned dead node to resurrect in
  * place. Probing stops only at a truly-empty slot (Key nil), which dead
- * nodes never are - that is what keeps probe chains intact across deletes. */
+ * nodes never are - that is what keeps probe chains intact across deletes.
+ *
+ * A table flagged GCFLAG_HASHSTALE had pointer-hashed keys moved by the
+ * compactor, so slot positions no longer match HashValue order; until a
+ * rebuild clears the flag (HashRefresh), lookups fall back to scanning every
+ * slot, which is hash-order-independent and therefore always correct. */
 static MLuaTableNode *HashFind(MLuaTableHeader *th, MLuaValue key) {
   MLuaTableNode *nodes;
   U32 hash;
@@ -591,6 +600,16 @@ static MLuaTableNode *HashFind(MLuaTableHeader *th, MLuaValue key) {
   }
 
   nodes = MLuaTableNodeData(th);
+
+  if (MLuaTableGCHeader(th)->Flags & GCFLAG_HASHSTALE) {
+    for (i = 0; i < th->NodeCapacity; i++) {
+      if (!IsNil(nodes[i].Key) && MLuaRawEqual(nodes[i].Key, key)) {
+        return &nodes[i];
+      }
+    }
+    return NULL;
+  }
+
   hash = HashValue(key);
   slot = hash % th->NodeCapacity;
 
@@ -611,6 +630,16 @@ static MLuaTableNode *HashFind(MLuaTableHeader *th, MLuaValue key) {
   return NULL;
 }
 
+/* Rebuild a stale table's hash order (see HashFind). HashGrow re-slots every
+ * live entry by its current HashValue and clears the flag; on OOM the flag
+ * stays set and lookups keep using the linear fallback, so staleness is a
+ * performance state, never a correctness one. */
+static void HashRefresh(MLuaState *L, MLuaTableHeader *th) {
+  if (MLuaTableGCHeader(th)->Flags & GCFLAG_HASHSTALE) {
+    (void)HashGrow(L, th);
+  }
+}
+
 static Bool HashSet(MLuaState *L, MLuaTableHeader *th, MLuaValue key,
                     MLuaValue value) {
   U32 hash;
@@ -618,9 +647,15 @@ static Bool HashSet(MLuaState *L, MLuaTableHeader *th, MLuaValue key,
   Size i;
   Size threshold;
   MLuaTableNode *nodes;
+  MLuaTableNode *existing;
+
+  /* Repair compaction-stale hash order first: the insert probe below places
+   * the new key by its current HashValue, which only lines up with lookups
+   * once the surviving entries are re-slotted too. */
+  HashRefresh(L, th);
 
   /* Find existing node (live or dead - HashFind matches on Key) */
-  MLuaTableNode *existing = HashFind(th, key);
+  existing = HashFind(th, key);
   if (existing) {
     /* Deleting keeps the Key in place as a dead node ({Key, Value=nil}):
      * nilling the Key would terminate probe chains early and orphan every
@@ -691,7 +726,6 @@ MLuaValue MLuaTableRawGet(MLuaState *L, MLuaValue tbl, MLuaValue key) {
   Size index;
   MLuaTableNode *node;
 
-  UNUSED(L);
   if (!IsTable(tbl)) {
     return MLUA_NIL;
   }
@@ -719,7 +753,9 @@ MLuaValue MLuaTableRawGet(MLuaState *L, MLuaValue tbl, MLuaValue key) {
     }
   }
 
-  /* Check hash part */
+  /* Check hash part (repairing compaction-stale hash order when possible;
+   * an OOM leaves the flag set and HashFind scans linearly instead) */
+  HashRefresh(L, th);
   node = HashFind(th, key);
   if (node) {
     return node->Value;

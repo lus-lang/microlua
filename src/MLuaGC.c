@@ -578,8 +578,23 @@ static void UpdateReferences(MLuaState *L) {
           }
         }
         for (i = 0; i < th->NodeCapacity; i++) {
-          nodes[i].Key = UpdateValue(L, nodes[i].Key);
+          MLuaValue oldKey = nodes[i].Key;
+          nodes[i].Key = UpdateValue(L, oldKey);
           nodes[i].Value = UpdateValue(L, nodes[i].Value);
+          /* A key that hashes by ADDRESS (tables, closures, threads, heap
+           * floats - anything but content-hashed strings and value-hashed
+           * int boxes) lands in a slot chosen from its pre-move address;
+           * once the compactor relocates it, lookups probe the wrong chain.
+           * Flag the table so it re-slots (or scans linearly) on next use.
+           * Classify via the OLD pointer: it is still intact during this
+           * phase, whereas the new value points at the post-compact address
+           * whose memory is not populated yet. */
+          if (nodes[i].Key != oldKey && IsPtr(oldKey)) {
+            U8 keyType = MLUA_OBJTYPE((MLuaGCHeader *)GetPtr(oldKey));
+            if (keyType != OBJTYPE_STRING && keyType != OBJTYPE_INT) {
+              obj->Flags |= GCFLAG_HASHSTALE;
+            }
+          }
         }
         th->Forward = UpdateValue(L, th->Forward);
         if (!MLuaTableArrayIsInline(th) && th->ArraySize > 0) {

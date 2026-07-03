@@ -320,6 +320,9 @@ static inline double GetDouble(MLuaValue v) {
 
 /* Flag bits in header byte */
 #define GCFLAG_TYPE_MASK 0x0F /* Low 4 bits: type */
+#define GCFLAG_HASHSTALE 0x10 /* Bit 4: TABLE only - a pointer-hashed key
+                                 moved in compaction; slots no longer match
+                                 HashValue order until the table rehashes */
 #define GCFLAG_MARKED 0x20    /* Bit 5: marked by GC */
 #define GCFLAG_PINNED 0x40    /* Bit 6: pinned (don't move) */
 #define GCFLAG_ROM 0x80       /* Bit 7: read-only memory */
