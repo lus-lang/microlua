@@ -2500,8 +2500,24 @@ static void ParseExprStat(MLuaParser *p) {
       MLuaEmitOp(fs, OP_SETTABLE_POP);
       StackPop(p, 2); /* Pop t, v */
     } else if (name) {
-      /* Simple name = value - ParseAssignment expects to see and consume = */
-      MLuaEmitOpB(fs, OP_POP, 1);
+      /* Simple name = value. The prefix parse already emitted a READ of
+       * the name (one 2-byte GETLOCAL/GETUPVAL/GETGLOBAL_K, necessarily
+       * the last instruction); the assignment discards that value, so
+       * retract the read instead of emitting a POP - for a global, the
+       * dead read was a live _G hash lookup on every execution. The
+       * opcode check keeps any unexpected shape on the old POP path. */
+      MLuaProto *proto = fs->Proto;
+      Size last = fs->LastInstrPos;
+      if (last != (Size)-1 && proto->CodeSize == last + 2 &&
+          (proto->Code[last] == OP_GETLOCAL ||
+           proto->Code[last] == OP_GETUPVAL ||
+           proto->Code[last] == OP_GETGLOBAL_K)) {
+        proto->CodeSize = last;
+        fs->LastInstrPos = (Size)-1;
+        fs->PrevInstrPos = (Size)-1;
+      } else {
+        MLuaEmitOpB(fs, OP_POP, 1);
+      }
       StackPop(p, 1);
       ParseAssignment(p, name, nameLen);
     } else {

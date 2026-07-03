@@ -114,6 +114,48 @@ TEST(Assignment) {
   ASSERT_NE(proto, NULL);
 }
 
+/* Helper: count occurrences of an opcode, walking whole instructions via
+ * MLuaOpSize so operand bytes cannot alias opcodes. */
+static int CountOp(const MLuaProto *proto, U8 op) {
+  int n = 0;
+  Size i = 0;
+  while (i < proto->CodeSize) {
+    if (proto->Code[i] == op) {
+      n++;
+    }
+    i += MLuaOpSize((MLuaOpCode)proto->Code[i]);
+  }
+  return n;
+}
+
+/* A simple assignment must not execute a dead read of its own target:
+ * `g = 5` used to compile to GETGLOBAL_K g; POP 1; ... (a live _G lookup
+ * per execution). The read is retracted at parse time now. */
+TEST(AssignmentRetractsDeadRead) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  MLuaProto *proto;
+
+  proto = MLuaParse(L, "g = 5", 5, "test");
+  ASSERT_NE(proto, NULL);
+  ASSERT_EQ(CountOp(proto, (U8)OP_GETGLOBAL_K), 0);
+  ASSERT_EQ(CountOp(proto, (U8)OP_POP), 0);
+
+  {
+    const char *src = "local x x = 5";
+    proto = MLuaParse(L, src, StrLen(src), "test");
+    ASSERT_NE(proto, NULL);
+    ASSERT_EQ(CountOp(proto, (U8)OP_GETLOCAL), 0);
+    ASSERT_EQ(CountOp(proto, (U8)OP_POP), 0);
+  }
+
+  { /* the read must survive when the value actually uses the variable */
+    const char *src = "g = g + 1";
+    proto = MLuaParse(L, src, StrLen(src), "test");
+    ASSERT_NE(proto, NULL);
+    ASSERT_EQ(CountOp(proto, (U8)OP_GETGLOBAL_K), 1);
+  }
+}
+
 TEST(Arithmetic) {
   MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
   const char *src = "local x = 1 + 2 * 3";
@@ -234,6 +276,7 @@ int main(void) {
   RUN_TEST(LocalVar);
   RUN_TEST(LocalMultiple);
   RUN_TEST(Assignment);
+  RUN_TEST(AssignmentRetractsDeadRead);
   RUN_TEST(Arithmetic);
 
   printf("\nControl Flow:\n");
