@@ -216,7 +216,9 @@ static Bool MatchClass(char c, char cl) {
           (c >= 'A' && c <= 'F');
     break;
   default:
-    res = FALSE;
+    /* Not a class letter: '%x' matches the literal character x. This is
+     * how %. %% %( %[ %- etc. escape the magic characters (PUC rule). */
+    res = (c == cl);
     break;
   }
   return res;
