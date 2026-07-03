@@ -63,6 +63,12 @@
  * the switch's bounds check + jump on every instruction. */
 #define MLUA_VM_COMPUTED_GOTO 1
 
+/* Word-wise Mem* stays off: UPtr is 32-bit but the eZ80 ALU is 24-bit, so
+ * the word loads/stores lower to slower multi-byte sequences while adding
+ * ~0.2-0.4 KB of image. The byte loops (or a future LDIR implementation
+ * via MLUA_PORT_MEMFUNCS) are the right shape for this machine. */
+#define MLUA_MEM_WORDWISE 0
+
 /* MLUA_TABLE_NUM_ARRAYS is NOT set here: the typed-array code measures
  * ~2.8 KB of eZ80 image, which fits the runner target (its makefile opts
  * in) but would leave the full repl build under 1.3 KB of launch headroom.

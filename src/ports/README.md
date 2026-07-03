@@ -23,6 +23,8 @@ in this directory), or `-Dport_header=path/to/board.h` — or define
 | `MLUA_ENABLE_DUMP` | `1` | `0` drops the bytecode serializer (`MLuaDumpFunction`, `string.dump`) for ports with no way to store or transmit dumped chunks. Loading bytecode (`MLuaUndump`) is unaffected. |
 | `MLUA_ENABLE_PACK` | `1` | `0` drops `string.pack`/`packsize`/`unpack` (the binary format engine) for ports with no byte-oriented I/O to speak of; worth several KB of image on small targets. |
 | `MLUA_VM_COMPUTED_GOTO` | `0` | `1` dispatches through a GNU-C label table (one indirect jump per instruction, no bounds check). Needs GCC/Clang; costs ~1–2 KB of table + dispatch tails, so size-constrained ports should measure before opting in. |
+| `MLUA_MEM_WORDWISE` | `1` on GCC/Clang, else `0` | Word-at-a-time bodies in `MemCpy`/`MemMove`/`MemSet` (pointer-width blocks when src/dst are co-aligned). Big on string/GC-heavy hosts; opt out where the native word is narrower than `UPtr` (the eZ80 pays ~0.2–0.4 KB of image for slower code). |
+| `MLUA_PORT_MEMFUNCS` | `0` | `1` suppresses the portable `MemCpy`/`MemMove`/`MemSet` definitions so the port links its own (e.g. an eZ80 `LDIR` implementation) — same pattern as the `Math*` hooks. |
 | `MLUA_PROFILE_OPS` | `0` | `1` counts every dispatched opcode; `MLuaDumpOpProfile` reports the counts through the output callback. Diagnostic builds only. |
 
 ## Arenas and GC (default constrained state)

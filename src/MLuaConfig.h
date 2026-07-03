@@ -90,6 +90,28 @@
 #endif
 #endif
 
+/* Word-at-a-time bodies in MemCpy/MemMove/MemSet. The byte loops move one
+ * byte per iteration, which dominates string/GC-heavy workloads on hosts;
+ * the word paths copy pointer-width blocks when source and destination are
+ * co-aligned. Needs GNU C for the may_alias word type (all supported
+ * toolchains). Ports whose native word is narrower than UPtr should opt
+ * out: on the eZ80 (24-bit ALU, 32-bit UPtr) the word ops lower to slower
+ * multi-byte sequences and cost ~0.2-0.4 KB of image. */
+#ifndef MLUA_MEM_WORDWISE
+#if defined(__GNUC__) || defined(__clang__)
+#define MLUA_MEM_WORDWISE 1
+#else
+#define MLUA_MEM_WORDWISE 0
+#endif
+#endif
+
+/* A port can define MLUA_PORT_MEMFUNCS to 1 and link its own
+ * MemCpy/MemMove/MemSet (e.g. an eZ80 LDIR implementation), suppressing the
+ * portable definitions in MLuaCore.c -- same pattern as the Math* hooks. */
+#ifndef MLUA_PORT_MEMFUNCS
+#define MLUA_PORT_MEMFUNCS 0
+#endif
+
 #ifndef MLUA_ALIGNMENT
 #define MLUA_ALIGNMENT 8
 #endif
