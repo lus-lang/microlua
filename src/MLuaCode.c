@@ -316,6 +316,10 @@ void MLuaPatchJump(MLuaFuncState *fs, Size jmp, Size target) {
 /* Opcode Names                                                               */
 /* ========================================================================== */
 
+/* Only the MLUA_PROFILE_OPS dump consumes these strings; as an exported
+ * symbol the table would otherwise survive linkers that run without
+ * --gc-sections/LTO, so the guard makes its removal unconditional. */
+#if MLUA_PROFILE_OPS
 const char *MLuaOpName(MLuaOpCode op) {
   static const char *names[] = {
       [OP_NOP] = "NOP",
@@ -387,6 +391,7 @@ const char *MLuaOpName(MLuaOpCode op) {
   }
   return "UNKNOWN";
 }
+#endif /* MLUA_PROFILE_OPS */
 
 /* ========================================================================== */
 /* Line Number Info                                                           */

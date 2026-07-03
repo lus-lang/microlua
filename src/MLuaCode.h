@@ -369,9 +369,12 @@ void MLuaPatchJump(MLuaFuncState *fs, Size jmp, Size target);
 Size MLuaCodePos(MLuaFuncState *fs);
 
 /*
- * Get opcode name for debugging.
+ * Get opcode name for debugging. Only compiled for the opcode-profiling
+ * build; nothing else consumes the name table.
  */
+#if MLUA_PROFILE_OPS
 const char *MLuaOpName(MLuaOpCode op);
+#endif
 
 /* ========================================================================== */
 /* Line Number Info                                                           */
