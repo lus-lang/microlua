@@ -5,6 +5,7 @@
 
 #include "MLuaAlloc.h"
 #include "MLuaCore.h"
+#include "MLuaGC.h"
 #include "MLuaString.h"
 #include <stdio.h>
 
@@ -143,6 +144,49 @@ TEST(Intern_DifferentStrings) {
   ASSERT_NE(v1, v2);
 }
 
+/*
+ * Pins the masked probe against every intern-table shape it must survive:
+ * growth past the load factor (64 -> 128+ slots), tombstones left by a
+ * collection, and probe chains that wrap the table end. Dedup identity
+ * (equal contents => identical value) is asserted before and after each
+ * transition.
+ */
+TEST(Intern_MaskResizeTombstones) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  ASSERT_NE(L, NULL);
+
+  MLuaGCRef keeper;
+  char name[16];
+  int i;
+
+  MLuaPushGCRef(L, &keeper, MLuaStringNew(L, "keeper-string", 13));
+
+  /* 100 unique heap strings: blows through the 64 * 70% resize threshold */
+  for (i = 0; i < 100; i++) {
+    sprintf(name, "churn-%03d", i);
+    MLuaValue v = MLuaStringNew(L, name, StrLen(name));
+    ASSERT(!IsNil(v));
+  }
+
+  /* Dedup identity across the resize */
+  ASSERT_EQ(MLuaStringNew(L, "churn-050", 9), MLuaStringNew(L, "churn-050", 9));
+  ASSERT_EQ(MLuaStringNew(L, "keeper-string", 13), keeper.Value);
+
+  /* The churn strings are unreferenced: collecting tombstones their slots */
+  MLuaGCCollect(L);
+
+  /* Probe through the tombstoned chains: fresh inserts + dedup still hold */
+  for (i = 0; i < 100; i++) {
+    sprintf(name, "again-%03d", i);
+    MLuaValue v = MLuaStringNew(L, name, StrLen(name));
+    ASSERT(!IsNil(v));
+    ASSERT_EQ(MLuaStringNew(L, name, StrLen(name)), v);
+  }
+  ASSERT_EQ(MLuaStringNew(L, "keeper-string", 13), keeper.Value);
+
+  MLuaPopGCRef(L, &keeper);
+}
+
 /* ========================================================================== */
 /* String Comparison Tests                                                    */
 /* ========================================================================== */
@@ -244,6 +288,7 @@ int main(void) {
   printf("\nInterning:\n");
   RUN_TEST(Intern_SameString);
   RUN_TEST(Intern_DifferentStrings);
+  RUN_TEST(Intern_MaskResizeTombstones);
 
   printf("\nComparison:\n");
   RUN_TEST(Compare_Equal);

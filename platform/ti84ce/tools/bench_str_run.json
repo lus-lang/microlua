@@ -1,0 +1,47 @@
+{
+  "rom": "84ce.rom",
+  "transfer_files": [
+    "../repl/bin/MLUA.8xp",
+    "fixtures/BENCHSTR.8xv",
+    "../repl/test/clibs/libload.8xv",
+    "../repl/test/clibs/graphx.8xv"
+  ],
+  "target": {
+    "name": "MLUA",
+    "isASM": true
+  },
+  "sequence": [
+    "delay|2000",
+    "key|apps",
+    "delay|1000",
+    "key|4",
+    "delay|2500",
+    "key|down",
+    "key|down",
+    "key|down",
+    "key|down",
+    "key|down",
+    "key|down",
+    "key|down",
+    "key|down",
+    "key|down",
+    "key|down",
+    "delay|500",
+    "key|enter",
+    "delay|3500",
+    "key|enter",
+    "delay|30000",
+    "hashWait|1"
+  ],
+  "hashes": {
+    "1": {
+      "description": "benchstr",
+      "start": "vram_start",
+      "size": "vram_16_size",
+      "expected_CRCs": [
+        "00000000"
+      ],
+      "timeout": 2000
+    }
+  }
+}

@@ -6,6 +6,13 @@
 #include "MLuaString.h"
 #include "MLuaGC.h"
 
+/* The intern-table probe masks instead of taking modulo, which requires the
+ * capacity to stay a power of two through every transition: the initial
+ * size (a port knob), the *2 growth, and the /2-toward-initial shrink. */
+MLUA_STATIC_ASSERT((MLUA_STRING_TABLE_INITIAL_SIZE &
+                    (MLUA_STRING_TABLE_INITIAL_SIZE - 1)) == 0,
+                   "intern table capacity must be a power of two");
+
 /* ========================================================================== */
 /* String Hash (FNV-1a)                                                       */
 /* ========================================================================== */
@@ -100,10 +107,13 @@ static MLuaValue *StringTableFind(MLuaState *L, const char *str, Size len,
     return NULL;
   }
 
-  index = hash % L->StringTableCap;
+  /* Capacity is a power of two (initial size static-asserted at the top of
+   * this file, growth and shrink are *2 / /2), so masking replaces the two
+   * modulos on this hot probe -- every intern passes through here. */
+  index = hash & (L->StringTableCap - 1);
 
   for (i = 0; i < L->StringTableCap; i++) {
-    Size slot = (index + i) % L->StringTableCap;
+    Size slot = (index + i) & (L->StringTableCap - 1);
     v = L->StringTable[slot];
 
     if (IsNil(v)) {

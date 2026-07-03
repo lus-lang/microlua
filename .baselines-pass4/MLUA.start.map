@@ -1,0 +1,1744 @@
+
+Merging object attributes
+
+
+Discarded input sections
+
+ .comment       0x00000000      0xc97 obj/MLUA.o
+ .note.GNU-stack
+                0x00000000        0x0 obj/MLUA.o
+ .init.weak_crt
+                0x00000000       0x10 obj/MLUA.o
+ .text          0x00000000        0x0 obj/crt0.o
+ .data          0x00000000        0x0 obj/crt0.o
+ .bss           0x00000000        0x0 obj/crt0.o
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+prgm             0x00d1a87f         0x00400000
+bss              0x00d052c6         0x0000ed12
+*default*        0x00000000         0xffffffff
+
+Linker script and memory map
+
+                0x00d1a87f                        LOAD_ADDR = 0xd1a87f
+                0x00d052c6                        BSSHEAP_LOW = 0xd052c6
+                0x00d13fd8                        BSSHEAP_HIGH = 0xd13fd8
+                0x00d1a87e                        STACK_HIGH = 0xd1a87e
+                0x00000001                        __TICE__ = 0x1
+                0x00d1a87f                        . = LOAD_ADDR
+
+.header         0x00d1a87f       0x11
+ *(.header)
+ .header        0x00d1a87f        0x3 obj/crt0.o
+ *(.header.icon)
+ .header.icon   0x00d1a882        0xe obj/MLUA.o
+                0x00d1a887                ___description
+
+.init           0x00d1a890      0x12e
+ *(.init)
+ .init          0x00d1a890      0x12e obj/crt0.o
+                0x00d1a890                __start
+                0x00d1a8ed                __libload_library_GRAPHX
+                0x00d1a8f6                _gfx_Begin
+                0x00d1a8fa                _gfx_End
+                0x00d1a8fe                _gfx_SetColor
+                0x00d1a902                _gfx_FillScreen
+                0x00d1a906                _gfx_SetPixel
+                0x00d1a90a                _gfx_SetDraw
+                0x00d1a90e                _gfx_SwapDraw
+                0x00d1a912                _gfx_PrintStringXY
+                0x00d1a916                _gfx_SetTextBGColor
+                0x00d1a91a                _gfx_SetTextFGColor
+                0x00d1a91e                _gfx_Line
+                0x00d1a922                _gfx_Circle
+                0x00d1a926                _gfx_FillCircle
+                0x00d1a92a                _gfx_Rectangle
+                0x00d1a92e                _gfx_FillRectangle
+                0x00d1a982                ___exithl
+                0x00d1a983                _exit.sp
+
+.text           0x00d1a9be    0x204e9
+ *(.text.unlikely .text.*_unlikely .text.unlikely.*)
+ *(.text.exit .text.exit.*)
+ *(.text.startup .text.startup.*)
+ *(.text.hot .text.hot.*)
+ *(SORT_BY_NAME(.text.sorted.*))
+ *(.text .stub .text.* .gnu.linkonce.t.*)
+ .text          0x00d1a9be      0x5f5 obj/MLUA.o
+                0x00d1a9be                __land
+                0x00d1a9c2                __iand
+                0x00d1a9d9                __bshl
+                0x00d1a9e2                __bshru
+                0x00d1a9ec                __fneg
+                0x00d1a9f9                __frameset
+                0x00d1aa07                __frameset0
+                0x00d1aa12                __frem
+                0x00d1aa2a                __ftoll
+                0x00d1aa2a                __ftoull
+                0x00d1aa38                __imuls
+                0x00d1aa38                __imulu
+                0x00d1aa68                __indcallhl
+                0x00d1aa69                __ineg
+                0x00d1aa69                __sneg
+                0x00d1aa72                __inot
+                0x00d1aa72                __snot
+                0x00d1aa7c                __sshl
+                0x00d1aa7c                __ishl
+                0x00d1aaa2                __ishru
+                0x00d1aaa7                __ishrs
+                0x00d1aae3                __ladd
+                0x00d1aae9                __lcmps
+                0x00d1aaf6                __lcmpu
+                0x00d1aafe                __lcmpzero
+                0x00d1aafe                __lequzero
+                0x00d1ab09                __ldivu
+                0x00d1ab13                __ldivu_lremu_common
+                0x00d1ab3b                __lladd
+                0x00d1ab5f                __lland
+                0x00d1ab9b                __llcmps
+                0x00d1abc8                __llcmpu
+                0x00d1abf2                __llcmpzero
+                0x00d1abf2                __llequzero
+                0x00d1ac07                __lldivu
+                0x00d1ac1b                __lldvrmu
+                0x00d1ac22                __lldvrmu.hijack
+                0x00d1ac79                __llmulu
+                0x00d1acce                __llneg
+                0x00d1accf                __llneg.hijack_nc
+                0x00d1ace7                __llnot
+                0x00d1acfb                __llor
+                0x00d1ad37                __llshl
+                0x00d1ad51                __llshru
+                0x00d1ad81                __llshrs
+                0x00d1adbd                __llsub
+                0x00d1addf                __lltof
+                0x00d1adf2                __llxor
+                0x00d1ae2e                __lmuls
+                0x00d1ae2e                __lmulu
+                0x00d1ae8a                __lneg
+                0x00d1ae97                __lnot
+                0x00d1aea4                __lrems
+                0x00d1aeb7                __lremu
+                0x00d1aec3                __lshl
+                0x00d1aed0                __lshrs
+                0x00d1aeea                __lshru
+                0x00d1aef8                __lsub
+                0x00d1af02                __lor
+                0x00d1af06                __ior
+                0x00d1af1d                __sand
+                0x00d1af26                __setflag
+                0x00d1af30                __ulltof
+                0x00d1af43                __ultof
+                0x00d1af57                __lxor
+                0x00d1af5b                __ixor
+                0x00d1af72                __ldivs_lrems_common
+                0x00d1af83                _clock
+                0x00d1af8e                _atomic_load_increasing_32
+ .text._MLuaNextGCThreshold
+                0x00d1afb3      0x13e obj/MLUA.o
+                0x00d1afb3                _MLuaNextGCThreshold
+ .text._MLuaFirstObjOffset
+                0x00d1b0f1       0xc0 obj/MLUA.o
+                0x00d1b0f1                _MLuaFirstObjOffset
+ .text._MLuaNewConstrainedState
+                0x00d1b1b1      0x16e obj/MLUA.o
+                0x00d1b1b1                _MLuaNewConstrainedState
+ .text._InitStateCommon
+                0x00d1b31f      0x17b obj/MLUA.o
+ .text._MLuaAlloc
+                0x00d1b49a       0x6f obj/MLUA.o
+                0x00d1b49a                _MLuaAlloc
+ .text._CoreAlloc
+                0x00d1b509      0x15a obj/MLUA.o
+ .text._MLuaAllocObject
+                0x00d1b663       0x7e obj/MLUA.o
+                0x00d1b663                _MLuaAllocObject
+ .text._MLuaProtoNew
+                0x00d1b6e1       0x5e obj/MLUA.o
+                0x00d1b6e1                _MLuaProtoNew
+ .text._MLuaEmitBytes
+                0x00d1b73f       0xe3 obj/MLUA.o
+                0x00d1b73f                _MLuaEmitBytes
+ .text._GrowCode
+                0x00d1b822       0xa7 obj/MLUA.o
+ .text._MLuaEmitOp
+                0x00d1b8c9       0x28 obj/MLUA.o
+                0x00d1b8c9                _MLuaEmitOp
+ .text._MLuaInsertBytes
+                0x00d1b8f1      0x19c obj/MLUA.o
+                0x00d1b8f1                _MLuaInsertBytes
+ .text._MLuaEmitOpB
+                0x00d1ba8d       0x2e obj/MLUA.o
+                0x00d1ba8d                _MLuaEmitOpB
+ .text._MLuaAddConstant
+                0x00d1babb       0xf1 obj/MLUA.o
+                0x00d1babb                _MLuaAddConstant
+ .text._GrowConstants
+                0x00d1bbac       0xbe obj/MLUA.o
+ .text._MLuaAddConstantRaw
+                0x00d1bc6a       0x9c obj/MLUA.o
+                0x00d1bc6a                _MLuaAddConstantRaw
+ .text._MLuaAddStringK
+                0x00d1bd06       0x40 obj/MLUA.o
+                0x00d1bd06                _MLuaAddStringK
+ .text._MLuaPatchJump
+                0x00d1bd46       0x5f obj/MLUA.o
+                0x00d1bd46                _MLuaPatchJump
+ .text._MLuaEmitLine
+                0x00d1bda5      0x1bd obj/MLUA.o
+                0x00d1bda5                _MLuaEmitLine
+ .text._MLuaGetLine
+                0x00d1bf62       0xd9 obj/MLUA.o
+                0x00d1bf62                _MLuaGetLine
+ .text._MLuaIntToStr
+                0x00d1c03b      0x110 obj/MLUA.o
+                0x00d1c03b                _MLuaIntToStr
+ .text._MLuaDoubleToStr
+                0x00d1c14b      0x362 obj/MLUA.o
+                0x00d1c14b                _MLuaDoubleToStr
+ .text._MLuaValueToStr
+                0x00d1c4ad      0x4e0 obj/MLUA.o
+                0x00d1c4ad                _MLuaValueToStr
+ .text._MLuaGetIntVal
+                0x00d1c98d       0x35 obj/MLUA.o
+ .text._WriteHexPtr
+                0x00d1c9c2      0x12a obj/MLUA.o
+ .text._MLuaStrToNumber
+                0x00d1caec      0x514 obj/MLUA.o
+                0x00d1caec                _MLuaStrToNumber
+ .text._MLuaStrToInt
+                0x00d1d000      0x236 obj/MLUA.o
+                0x00d1d000                _MLuaStrToInt
+ .text._MLuaFormat
+                0x00d1d236     0x12b1 obj/MLUA.o
+                0x00d1d236                _MLuaFormat
+ .text._FmtUnsigned
+                0x00d1e4e7       0xfb obj/MLUA.o
+ .text._MemCpy  0x00d1e5e2       0x46 obj/MLUA.o
+                0x00d1e5e2                _MemCpy
+ .text._MemMove
+                0x00d1e628       0xa4 obj/MLUA.o
+                0x00d1e628                _MemMove
+ .text._MemCmp  0x00d1e6cc       0x53 obj/MLUA.o
+                0x00d1e6cc                _MemCmp
+ .text._StrLen  0x00d1e71f       0x2a obj/MLUA.o
+                0x00d1e71f                _StrLen
+ .text._MLuaClosureNew
+                0x00d1e749       0x81 obj/MLUA.o
+                0x00d1e749                _MLuaClosureNew
+ .text._MLuaUpvalueNew
+                0x00d1e7ca       0x47 obj/MLUA.o
+                0x00d1e7ca                _MLuaUpvalueNew
+ .text._MLuaFindUpvalue
+                0x00d1e811       0x90 obj/MLUA.o
+                0x00d1e811                _MLuaFindUpvalue
+ .text._MLuaCloseUpvalues
+                0x00d1e8a1       0x4f obj/MLUA.o
+                0x00d1e8a1                _MLuaCloseUpvalues
+ .text._MLuaGCMarkObject
+                0x00d1e8f0       0x54 obj/MLUA.o
+                0x00d1e8f0                _MLuaGCMarkObject
+ .text._MLuaGCMark
+                0x00d1e944       0x26 obj/MLUA.o
+                0x00d1e944                _MLuaGCMark
+ .text._MLuaGCCollect
+                0x00d1e96a     0x1858 obj/MLUA.o
+                0x00d1e96a                _MLuaGCCollect
+ .text._MarkRaw
+                0x00d201c2       0x20 obj/MLUA.o
+ .text._UpdateValue
+                0x00d201e2       0x47 obj/MLUA.o
+ .text._UpdatePtr
+                0x00d20229       0x35 obj/MLUA.o
+ .text._UpdateDataPtr
+                0x00d2025e       0x32 obj/MLUA.o
+ .text._MLuaLexNext
+                0x00d20290      0x8c5 obj/MLUA.o
+                0x00d20290                _MLuaLexNext
+ .text._Advance
+                0x00d20b55       0x8f obj/MLUA.o
+ .text._Match   0x00d20be4       0x33 obj/MLUA.o
+ .text._ScanNumber
+                0x00d20c17      0x447 obj/MLUA.o
+ .text._IsAlpha
+                0x00d2105e       0x30 obj/MLUA.o
+ .text._MLuaLexPeek
+                0x00d2108e       0x51 obj/MLUA.o
+                0x00d2108e                _MLuaLexPeek
+ .text._MLuaParse
+                0x00d210df       0xab obj/MLUA.o
+                0x00d210df                _MLuaParse
+ .text._ParseOnce
+                0x00d2118a      0x29f obj/MLUA.o
+ .text._ParseBlock
+                0x00d21429     0x363d obj/MLUA.o
+ .text._OptimizeLastLocalUses
+                0x00d24a66      0x42c obj/MLUA.o
+ .text._MarkLoopRange
+                0x00d24e92       0x84 obj/MLUA.o
+ .text._IsCapturedLocal
+                0x00d24f16       0x54 obj/MLUA.o
+ .text._EnterParseDepth
+                0x00d24f6a       0x43 obj/MLUA.o
+ .text._Advance.87
+                0x00d24fad       0x34 obj/MLUA.o
+ .text._AddLocal
+                0x00d24fe1      0x1a6 obj/MLUA.o
+ .text._ParseFuncBody
+                0x00d25187      0x5f5 obj/MLUA.o
+ .text._Match.90
+                0x00d2577c       0x21 obj/MLUA.o
+ .text._ParseExpr
+                0x00d2579d       0x16 obj/MLUA.o
+ .text._AdjustTo1
+                0x00d257b3       0x50 obj/MLUA.o
+ .text._Expect  0x00d25803       0x3a obj/MLUA.o
+ .text._EmitFwdJump
+                0x00d2583d      0x128 obj/MLUA.o
+ .text._BeginScope
+                0x00d25965      0x15f obj/MLUA.o
+ .text._EndScope
+                0x00d25ac4       0x9b obj/MLUA.o
+ .text._PushPatch
+                0x00d25b5f      0x13a obj/MLUA.o
+ .text._PatchFwdJump
+                0x00d25c99       0x99 obj/MLUA.o
+ .text._EmitCloseIfCaptured
+                0x00d25d32       0x33 obj/MLUA.o
+ .text._EmitBackJump
+                0x00d25d65      0x16f obj/MLUA.o
+ .text._PatchAll
+                0x00d25ed4       0x7a obj/MLUA.o
+ .text._EmitLocalCleanup
+                0x00d25f4e       0x70 obj/MLUA.o
+ .text._EmitGetVar
+                0x00d25fbe       0x90 obj/MLUA.o
+ .text._ParsePrefix
+                0x00d2604e      0x5d5 obj/MLUA.o
+ .text._ParseSuffixForAssign
+                0x00d26623      0x4eb obj/MLUA.o
+ .text._ResolveVar
+                0x00d26b0e      0x351 obj/MLUA.o
+ .text._TryRetractLocalPair
+                0x00d26e5f      0x10c obj/MLUA.o
+ .text._EmitPendingGet
+                0x00d26f6b       0x98 obj/MLUA.o
+ .text._AddUpval
+                0x00d27003      0x18f obj/MLUA.o
+ .text._EmitCallOp
+                0x00d27192       0x41 obj/MLUA.o
+ .text._ParseSubExpr
+                0x00d271d3      0x37e obj/MLUA.o
+ .text._FuseCompareBranch
+                0x00d27551       0xcb obj/MLUA.o
+ .text._MLuaStringHash
+                0x00d2761c       0x7f obj/MLUA.o
+                0x00d2761c                _MLuaStringHash
+ .text._MLuaStringTableInit
+                0x00d2769b       0x8f obj/MLUA.o
+                0x00d2769b                _MLuaStringTableInit
+ .text._MLuaStringTableShrink
+                0x00d2772a      0x250 obj/MLUA.o
+                0x00d2772a                _MLuaStringTableShrink
+ .text._StringTableFind
+                0x00d2797a      0x12f obj/MLUA.o
+ .text._MLuaStringNewShort
+                0x00d27aa9       0x2c obj/MLUA.o
+                0x00d27aa9                _MLuaStringNewShort
+ .text._MLuaStringNew
+                0x00d27ad5      0x199 obj/MLUA.o
+                0x00d27ad5                _MLuaStringNew
+ .text._StringHashAscii
+                0x00d27c6e       0xa0 obj/MLUA.o
+ .text._StringTableInsert
+                0x00d27d0e      0x258 obj/MLUA.o
+ .text._MLuaStringLen
+                0x00d27f66       0x76 obj/MLUA.o
+                0x00d27f66                _MLuaStringLen
+ .text._MLuaStringIsAscii
+                0x00d27fdc       0xfc obj/MLUA.o
+                0x00d27fdc                _MLuaStringIsAscii
+ .text._MLuaStringData
+                0x00d280d8      0x125 obj/MLUA.o
+                0x00d280d8                _MLuaStringData
+ .text._MLuaStringCompare
+                0x00d281fd       0xd5 obj/MLUA.o
+                0x00d281fd                _MLuaStringCompare
+ .text._MLuaStringConcatMany
+                0x00d282d2      0x40e obj/MLUA.o
+                0x00d282d2                _MLuaStringConcatMany
+ .text._MLuaTableNew
+                0x00d286e0       0x19 obj/MLUA.o
+                0x00d286e0                _MLuaTableNew
+ .text._MLuaTableNewSized
+                0x00d286f9      0x302 obj/MLUA.o
+                0x00d286f9                _MLuaTableNewSized
+ .text._MLuaTableRawGet
+                0x00d289fb       0xe5 obj/MLUA.o
+                0x00d289fb                _MLuaTableRawGet
+ .text._IsPositiveInt
+                0x00d28ae0       0x5b obj/MLUA.o
+ .text._HashRefresh
+                0x00d28b3b       0x1c obj/MLUA.o
+ .text._HashFind
+                0x00d28b57      0x18d obj/MLUA.o
+ .text._HashValue
+                0x00d28ce4       0xf8 obj/MLUA.o
+ .text._MLuaGetIntVal.131
+                0x00d28ddc       0x35 obj/MLUA.o
+ .text._HashGrow
+                0x00d28e11      0x3b0 obj/MLUA.o
+ .text._MLuaTableGet
+                0x00d291c1       0x9b obj/MLUA.o
+                0x00d291c1                _MLuaTableGet
+ .text._MLuaTableGetForward
+                0x00d2925c       0x29 obj/MLUA.o
+                0x00d2925c                _MLuaTableGetForward
+ .text._MLuaTableGetField
+                0x00d29285       0xa0 obj/MLUA.o
+                0x00d29285                _MLuaTableGetField
+ .text._MLuaTableSetField
+                0x00d29325       0x5d obj/MLUA.o
+                0x00d29325                _MLuaTableSetField
+ .text._HashSet
+                0x00d29382      0x276 obj/MLUA.o
+ .text._MLuaTableSet
+                0x00d295f8       0xe9 obj/MLUA.o
+                0x00d295f8                _MLuaTableSet
+ .text._ArraySet
+                0x00d296e1      0x306 obj/MLUA.o
+ .text._MLuaTableLen
+                0x00d299e7       0x28 obj/MLUA.o
+                0x00d299e7                _MLuaTableLen
+ .text._MLuaTableArrayInsert
+                0x00d29a0f       0xff obj/MLUA.o
+                0x00d29a0f                _MLuaTableArrayInsert
+ .text._MLuaTableArrayRemove
+                0x00d29b0e      0x130 obj/MLUA.o
+                0x00d29b0e                _MLuaTableArrayRemove
+ .text._MLuaTableAppend
+                0x00d29c3e       0x50 obj/MLUA.o
+                0x00d29c3e                _MLuaTableAppend
+ .text._MLuaTableNext
+                0x00d29c8e      0x243 obj/MLUA.o
+                0x00d29c8e                _MLuaTableNext
+ .text._MLuaTableGetSafe
+                0x00d29ed1      0x132 obj/MLUA.o
+                0x00d29ed1                _MLuaTableGetSafe
+ .text._MLuaTableSetSafe
+                0x00d2a003      0x137 obj/MLUA.o
+                0x00d2a003                _MLuaTableSetSafe
+ .text._MLuaThreadNew
+                0x00d2a13a      0x24f obj/MLUA.o
+                0x00d2a13a                _MLuaThreadNew
+ .text._MLuaThreadResume
+                0x00d2a389      0x4de obj/MLUA.o
+                0x00d2a389                _MLuaThreadResume
+ .text._SaveCtx
+                0x00d2a867      0x10f obj/MLUA.o
+ .text._LoadCtx
+                0x00d2a976      0x10f obj/MLUA.o
+ .text._MLuaThreadYield
+                0x00d2aa85       0xa2 obj/MLUA.o
+                0x00d2aa85                _MLuaThreadYield
+ .text._MLuaThreadGetStatus
+                0x00d2ab27       0x25 obj/MLUA.o
+                0x00d2ab27                _MLuaThreadGetStatus
+ .text._MLuaUTF8SeqLen
+                0x00d2ab4c       0x5a obj/MLUA.o
+                0x00d2ab4c                _MLuaUTF8SeqLen
+ .text._MLuaUTF8Decode
+                0x00d2aba6      0x1c1 obj/MLUA.o
+                0x00d2aba6                _MLuaUTF8Decode
+ .text._MLuaUTF8Encode
+                0x00d2ad67      0x124 obj/MLUA.o
+                0x00d2ad67                _MLuaUTF8Encode
+ .text._MLuaUTF8Len
+                0x00d2ae8b       0x71 obj/MLUA.o
+                0x00d2ae8b                _MLuaUTF8Len
+ .text._MLuaUTF8Offset
+                0x00d2aefc       0x96 obj/MLUA.o
+                0x00d2aefc                _MLuaUTF8Offset
+ .text._MLuaUndump
+                0x00d2af92      0x208 obj/MLUA.o
+                0x00d2af92                _MLuaUndump
+ .text._ReadU8  0x00d2b19a       0x62 obj/MLUA.o
+ .text._ReadProto
+                0x00d2b1fc      0x751 obj/MLUA.o
+ .text._ReadValue
+                0x00d2b94d      0x65f obj/MLUA.o
+ .text._ReadU32
+                0x00d2bfac      0x1d1 obj/MLUA.o
+ .text._AllocArray
+                0x00d2c17d       0xb4 obj/MLUA.o
+ .text._Need    0x00d2c231       0x5a obj/MLUA.o
+ .text._MLuaPush
+                0x00d2c28b       0x64 obj/MLUA.o
+                0x00d2c28b                _MLuaPush
+ .text._MLuaPop
+                0x00d2c2ef       0x49 obj/MLUA.o
+                0x00d2c2ef                _MLuaPop
+ .text._MLuaGetArg
+                0x00d2c338       0x65 obj/MLUA.o
+                0x00d2c338                _MLuaGetArg
+ .text._MLuaGetStack
+                0x00d2c39d       0xe3 obj/MLUA.o
+                0x00d2c39d                _MLuaGetStack
+ .text._MLuaSetGlobal
+                0x00d2c480       0x7a obj/MLUA.o
+                0x00d2c480                _MLuaSetGlobal
+ .text._MLuaArith
+                0x00d2c4fa      0x3bb obj/MLUA.o
+                0x00d2c4fa                _MLuaArith
+ .text._MLuaGetIntVal.173
+                0x00d2c8b5       0x35 obj/MLUA.o
+ .text._MLuaCompare
+                0x00d2c8ea      0x364 obj/MLUA.o
+                0x00d2c8ea                _MLuaCompare
+ .text._MLuaLen
+                0x00d2cc4e       0xab obj/MLUA.o
+                0x00d2cc4e                _MLuaLen
+ .text._MLuaConcat
+                0x00d2ccf9      0x4ab obj/MLUA.o
+                0x00d2ccf9                _MLuaConcat
+ .text._MLuaCall
+                0x00d2d1a4      0x430 obj/MLUA.o
+                0x00d2d1a4                _MLuaCall
+ .text._PushFrame
+                0x00d2d5d4      0x33d obj/MLUA.o
+ .text._RunVM   0x00d2d911     0x2e1e obj/MLUA.o
+ .text._ReloadFrame
+                0x00d3072f       0x88 obj/MLUA.o
+ .text._VMRaise
+                0x00d307b7      0x2da obj/MLUA.o
+ .text._PopFrame
+                0x00d30a91       0xe8 obj/MLUA.o
+ .text._TraceAppendLine
+                0x00d30b79      0x108 obj/MLUA.o
+ .text._TraceAppend
+                0x00d30c81       0x4a obj/MLUA.o
+ .text._MLuaRunSuspended
+                0x00d30ccb       0x37 obj/MLUA.o
+                0x00d30ccb                _MLuaRunSuspended
+ .text._MLuaExecute
+                0x00d30d02       0xa5 obj/MLUA.o
+                0x00d30d02                _MLuaExecute
+ .text._MLuaPCall
+                0x00d30da7       0xe7 obj/MLUA.o
+                0x00d30da7                _MLuaPCall
+ .text._MLuaDoString
+                0x00d30e8e       0x62 obj/MLUA.o
+                0x00d30e8e                _MLuaDoString
+ .text._MLuaLoadString
+                0x00d30ef0       0x98 obj/MLUA.o
+                0x00d30ef0                _MLuaLoadString
+ .text._MLuaLoadBytecode
+                0x00d30f88       0xc7 obj/MLUA.o
+                0x00d30f88                _MLuaLoadBytecode
+ .text._MLuaDoBytecode
+                0x00d3104f       0x50 obj/MLUA.o
+                0x00d3104f                _MLuaDoBytecode
+ .text._MLuaLoadBuffer
+                0x00d3109f       0x5e obj/MLUA.o
+                0x00d3109f                _MLuaLoadBuffer
+ .text._MLuaDoBuffer
+                0x00d310fd       0x5e obj/MLUA.o
+                0x00d310fd                _MLuaDoBuffer
+ .text._MLuaRegisterCFunc
+                0x00d3115b      0x19c obj/MLUA.o
+                0x00d3115b                _MLuaRegisterCFunc
+ .text._MLuaRegisterGlobal
+                0x00d312f7       0x32 obj/MLUA.o
+                0x00d312f7                _MLuaRegisterGlobal
+ .text._MLuaNewLib
+                0x00d31329       0x5b obj/MLUA.o
+                0x00d31329                _MLuaNewLib
+ .text._MLuaRegisterLib
+                0x00d31384       0xa7 obj/MLUA.o
+                0x00d31384                _MLuaRegisterLib
+ .text._MLuaOpenLibs
+                0x00d3142b       0xcc obj/MLUA.o
+                0x00d3142b                _MLuaOpenLibs
+ .text._BasePrint
+                0x00d314f7      0xc28 obj/MLUA.o
+ .text._BaseRequire
+                0x00d3211f       0x64 obj/MLUA.o
+ .text._MLuaTypeName
+                0x00d32183       0xcd obj/MLUA.o
+                0x00d32183                _MLuaTypeName
+ .text._MLuaMakeIntSafe
+                0x00d32250       0x8e obj/MLUA.o
+                0x00d32250                _MLuaMakeIntSafe
+ .text._MLuaShortStrLen
+                0x00d322de       0x9a obj/MLUA.o
+                0x00d322de                _MLuaShortStrLen
+ .text._MLuaMakeShortStr
+                0x00d32378      0x12b obj/MLUA.o
+                0x00d32378                _MLuaMakeShortStr
+ .text._MLuaRawEqual
+                0x00d324a3       0x83 obj/MLUA.o
+                0x00d324a3                _MLuaRawEqual
+ .text._MLuaGetIntVal.231
+                0x00d32526       0x35 obj/MLUA.o
+ .text._MLuaIsNumber
+                0x00d3255b       0x39 obj/MLUA.o
+                0x00d3255b                _MLuaIsNumber
+ .text._MLuaToNumber
+                0x00d32594       0x70 obj/MLUA.o
+                0x00d32594                _MLuaToNumber
+ .text._MLuaMakeNumber
+                0x00d32604       0x95 obj/MLUA.o
+                0x00d32604                _MLuaMakeNumber
+ .text._MLuaMakeFloat
+                0x00d32699       0x58 obj/MLUA.o
+                0x00d32699                _MLuaMakeFloat
+ .text._MLuaOpenBase
+                0x00d326f1      0x117 obj/MLUA.o
+                0x00d326f1                _MLuaOpenBase
+ .text._BaseAssert
+                0x00d32808       0xe0 obj/MLUA.o
+ .text._BaseError
+                0x00d328e8       0x2d obj/MLUA.o
+ .text._BaseLoad
+                0x00d32915      0x11f obj/MLUA.o
+ .text._BaseNext
+                0x00d32a34       0xbb obj/MLUA.o
+ .text._BasePairs
+                0x00d32aef       0x69 obj/MLUA.o
+ .text._BaseIpairs
+                0x00d32b58       0x66 obj/MLUA.o
+ .text._BasePcall
+                0x00d32bbe      0x11c obj/MLUA.o
+ .text._BaseSelect
+                0x00d32cda      0x19c obj/MLUA.o
+ .text._BaseTonumber
+                0x00d32e76      0x13b obj/MLUA.o
+ .text._BaseTostring
+                0x00d32fb1      0x11f obj/MLUA.o
+ .text._BaseType
+                0x00d330d0       0x50 obj/MLUA.o
+ .text._BaseXpcall
+                0x00d33120      0x25f obj/MLUA.o
+ .text._IpairsIter
+                0x00d3337f       0xab obj/MLUA.o
+ .text._PairsIter
+                0x00d3342a       0x10 obj/MLUA.o
+ .text._MLuaOpenCoroutine
+                0x00d3343a       0x27 obj/MLUA.o
+                0x00d3343a                _MLuaOpenCoroutine
+ .text._CoroClose
+                0x00d33461      0x193 obj/MLUA.o
+ .text._CoroCreate
+                0x00d335f4       0x79 obj/MLUA.o
+ .text._CoroIsyieldable
+                0x00d3366d       0x73 obj/MLUA.o
+ .text._CoroResume
+                0x00d336e0      0x163 obj/MLUA.o
+ .text._CoroRunning
+                0x00d33843       0x79 obj/MLUA.o
+ .text._CoroStatus
+                0x00d338bc       0x8e obj/MLUA.o
+ .text._CoroYield
+                0x00d3394a       0x16 obj/MLUA.o
+ .text._MLuaOpenMath
+                0x00d33960      0x163 obj/MLUA.o
+                0x00d33960                _MLuaOpenMath
+ .text._MathAbs
+                0x00d33ac3       0x1a obj/MLUA.o
+ .text._MathAcosF
+                0x00d33add       0x1a obj/MLUA.o
+ .text._MathAsinF
+                0x00d33af7       0x1a obj/MLUA.o
+ .text._MathAtanF
+                0x00d33b11       0x94 obj/MLUA.o
+ .text._MathCeilF
+                0x00d33ba5       0x1a obj/MLUA.o
+ .text._MathCosF
+                0x00d33bbf       0x1a obj/MLUA.o
+ .text._MathCoshF
+                0x00d33bd9       0x1a obj/MLUA.o
+ .text._MathDeg
+                0x00d33bf3       0x1a obj/MLUA.o
+ .text._MathExpF
+                0x00d33c0d       0x1a obj/MLUA.o
+ .text._MathFloorF
+                0x00d33c27       0x1a obj/MLUA.o
+ .text._MathFmodF
+                0x00d33c41       0x5a obj/MLUA.o
+ .text._MathFrexpF
+                0x00d33c9b       0x77 obj/MLUA.o
+ .text._MathLdexpF
+                0x00d33d12       0x5f obj/MLUA.o
+ .text._MathLogF
+                0x00d33d71       0xb9 obj/MLUA.o
+ .text._MathLog10F
+                0x00d33e2a       0x1a obj/MLUA.o
+ .text._MathMax
+                0x00d33e44       0xce obj/MLUA.o
+ .text._MathMin
+                0x00d33f12       0xc9 obj/MLUA.o
+ .text._MathPowF
+                0x00d33fdb       0x61 obj/MLUA.o
+ .text._MathModfF
+                0x00d3403c       0x73 obj/MLUA.o
+ .text._MathRad
+                0x00d340af       0x1a obj/MLUA.o
+ .text._MathRandom
+                0x00d340c9      0x2a8 obj/MLUA.o
+ .text._MathRandomseed
+                0x00d34371       0x7a obj/MLUA.o
+ .text._MathSinF
+                0x00d343eb       0x1a obj/MLUA.o
+ .text._MathSinhF
+                0x00d34405       0x1a obj/MLUA.o
+ .text._MathSqrtF
+                0x00d3441f       0x1a obj/MLUA.o
+ .text._MathTanF
+                0x00d34439       0x1a obj/MLUA.o
+ .text._MathTanhF
+                0x00d34453       0x1a obj/MLUA.o
+ .text._MathTointeger
+                0x00d3446d       0xf6 obj/MLUA.o
+ .text._MathType
+                0x00d34563       0xa2 obj/MLUA.o
+ .text._MathUlt
+                0x00d34605       0x75 obj/MLUA.o
+ .text._GetIntArg
+                0x00d3467a       0x19 obj/MLUA.o
+ .text._GetArg  0x00d34693       0x1e obj/MLUA.o
+ .text._MathTanhFThunk
+                0x00d346b1       0x16 obj/MLUA.o
+ .text._Math1   0x00d346c7       0x3a obj/MLUA.o
+ .text._MathTanFThunk
+                0x00d34701       0x16 obj/MLUA.o
+ .text._MathSqrtFThunk
+                0x00d34717       0x16 obj/MLUA.o
+ .text._MathSinhFThunk
+                0x00d3472d       0x16 obj/MLUA.o
+ .text._MathSinFThunk
+                0x00d34743       0x16 obj/MLUA.o
+ .text._MathRadThunk
+                0x00d34759       0x1a obj/MLUA.o
+ .text._MathLog10FThunk
+                0x00d34773       0x16 obj/MLUA.o
+ .text._MathFloorFThunk
+                0x00d34789       0x16 obj/MLUA.o
+ .text._MathExpFThunk
+                0x00d3479f       0x16 obj/MLUA.o
+ .text._MathDegThunk
+                0x00d347b5       0x1a obj/MLUA.o
+ .text._MathCoshFThunk
+                0x00d347cf       0x16 obj/MLUA.o
+ .text._MathCosFThunk
+                0x00d347e5       0x16 obj/MLUA.o
+ .text._MathCeilFThunk
+                0x00d347fb       0x16 obj/MLUA.o
+ .text._MathAsinFThunk
+                0x00d34811       0x16 obj/MLUA.o
+ .text._MathAcosFThunk
+                0x00d34827       0x16 obj/MLUA.o
+ .text._MathAbsThunk
+                0x00d3483d       0x16 obj/MLUA.o
+ .text._MLuaOpenString
+                0x00d34853       0x27 obj/MLUA.o
+                0x00d34853                _MLuaOpenString
+ .text._StringByte
+                0x00d3487a      0x392 obj/MLUA.o
+ .text._StringChar
+                0x00d34c0c      0x231 obj/MLUA.o
+ .text._StringFind
+                0x00d34e3d      0x9c7 obj/MLUA.o
+ .text._StringFormat
+                0x00d35804      0x5d0 obj/MLUA.o
+ .text._StringLen
+                0x00d35dd4       0x75 obj/MLUA.o
+ .text._StringLower
+                0x00d35e49       0xe4 obj/MLUA.o
+ .text._StringMatch
+                0x00d35f2d      0x612 obj/MLUA.o
+ .text._StringRep
+                0x00d3653f      0x1a1 obj/MLUA.o
+ .text._StringReverse
+                0x00d366e0      0x13d obj/MLUA.o
+ .text._StringSub
+                0x00d3681d      0x2c6 obj/MLUA.o
+ .text._StringUpper
+                0x00d36ae3       0xe4 obj/MLUA.o
+ .text._GetStrArg
+                0x00d36bc7       0x53 obj/MLUA.o
+ .text._PushBuiltString
+                0x00d36c1a       0x30 obj/MLUA.o
+ .text._MLuaGetIntVal.334
+                0x00d36c4a       0x35 obj/MLUA.o
+ .text._PatMatch
+                0x00d36c7f      0x301 obj/MLUA.o
+ .text._MatchRepeat
+                0x00d36f80      0x118 obj/MLUA.o
+ .text._MatchSingle
+                0x00d37098       0xbe obj/MLUA.o
+ .text._MatchClass
+                0x00d37156      0x12a obj/MLUA.o
+ .text._MLuaOpenTable
+                0x00d37280       0x3d obj/MLUA.o
+                0x00d37280                _MLuaOpenTable
+ .text._TableUnpack
+                0x00d372bd      0x171 obj/MLUA.o
+ .text._MLuaGetIntVal.343
+                0x00d3742e       0x35 obj/MLUA.o
+ .text._TableConcat
+                0x00d37463      0x66e obj/MLUA.o
+ .text._TableForwardF
+                0x00d37ad1       0x4e obj/MLUA.o
+ .text._TableInsert
+                0x00d37b1f      0x1c0 obj/MLUA.o
+ .text._TableMaxn
+                0x00d37cdf      0x2ac obj/MLUA.o
+ .text._TablePack
+                0x00d37f8b      0x138 obj/MLUA.o
+ .text._TableRemove
+                0x00d380c3       0xff obj/MLUA.o
+ .text._TableSort
+                0x00d381c2     0x103c obj/MLUA.o
+ .text._SortGet
+                0x00d391fe       0x70 obj/MLUA.o
+ .text._TableSortCompare
+                0x00d3926e      0x1f4 obj/MLUA.o
+ .text._SortSwap
+                0x00d39462      0x15e obj/MLUA.o
+ .text._IsAnyString
+                0x00d395c0       0x35 obj/MLUA.o
+ .text._ConcatElemToStr
+                0x00d395f5       0x57 obj/MLUA.o
+ .text._MLuaCeOpenLibs
+                0x00d3964c      0x1f9 obj/MLUA.o
+                0x00d3964c                _MLuaCeOpenLibs
+ .text._SetConst
+                0x00d39845       0x7b obj/MLUA.o
+ .text._TimerMillis
+                0x00d398c0       0x29 obj/MLUA.o
+ .text._TimerSleep
+                0x00d398e9       0x63 obj/MLUA.o
+ .text._ClockMillis
+                0x00d3994c       0x5b obj/MLUA.o
+ .text._GetIntArg.372
+                0x00d399a7       0x27 obj/MLUA.o
+ .text._KeyScanBlocking
+                0x00d399ce        0xf obj/MLUA.o
+ .text._KeyScan
+                0x00d399dd        0xe obj/MLUA.o
+ .text._KeyIsDown
+                0x00d399eb       0x65 obj/MLUA.o
+ .text._KeyAny  0x00d39a50       0x88 obj/MLUA.o
+ .text._KeyRow  0x00d39ad8       0x80 obj/MLUA.o
+ .text._GfxBegin
+                0x00d39b58       0x29 obj/MLUA.o
+ .text._GfxEnd  0x00d39b81        0xe obj/MLUA.o
+ .text._GfxSwap
+                0x00d39b8f        0xe obj/MLUA.o
+ .text._GfxColor
+                0x00d39b9d       0x1f obj/MLUA.o
+ .text._GfxFillScreen
+                0x00d39bbc       0x1f obj/MLUA.o
+ .text._GfxPixel
+                0x00d39bdb       0x3c obj/MLUA.o
+ .text._GfxLine
+                0x00d39c17       0x6a obj/MLUA.o
+ .text._GfxRect
+                0x00d39c81       0x6a obj/MLUA.o
+ .text._GfxFillRect
+                0x00d39ceb       0x6a obj/MLUA.o
+ .text._GfxCircle
+                0x00d39d55       0x53 obj/MLUA.o
+ .text._GfxFillCircle
+                0x00d39da8       0x53 obj/MLUA.o
+ .text._GfxText
+                0x00d39dfb       0x9d obj/MLUA.o
+ .text._GfxTextColor
+                0x00d39e98       0x57 obj/MLUA.o
+ .text._MLuaCeGfxCleanup
+                0x00d39eef       0x12 obj/MLUA.o
+                0x00d39eef                _MLuaCeGfxCleanup
+ .text._MLuaCeConsoleInit
+                0x00d39f01       0x11 obj/MLUA.o
+                0x00d39f01                _MLuaCeConsoleInit
+ .text._MLuaCeConsoleWrite
+                0x00d39f12      0x10b obj/MLUA.o
+                0x00d39f12                _MLuaCeConsoleWrite
+ .text._MLuaCeConsoleWriteStr
+                0x00d3a01d       0x40 obj/MLUA.o
+                0x00d3a01d                _MLuaCeConsoleWriteStr
+ .text._MLuaCeConsolePause
+                0x00d3a05d        0xf obj/MLUA.o
+                0x00d3a05d                _MLuaCeConsolePause
+ .text._MLuaCeLoadVar
+                0x00d3a06c       0x51 obj/MLUA.o
+                0x00d3a06c                _MLuaCeLoadVar
+ .text._MLuaCeListScripts
+                0x00d3a0bd      0x1a5 obj/MLUA.o
+                0x00d3a0bd                _MLuaCeListScripts
+ .text._MLuaCeRequire
+                0x00d3a262       0xed obj/MLUA.o
+                0x00d3a262                _MLuaCeRequire
+ .text._MLuaCeNewState
+                0x00d3a34f       0x5d obj/MLUA.o
+                0x00d3a34f                _MLuaCeNewState
+ .text._CeOutput
+                0x00d3a3ac       0x1c obj/MLUA.o
+ .text._MLuaCeRun
+                0x00d3a3c8       0xd8 obj/MLUA.o
+                0x00d3a3c8                _MLuaCeRun
+ .text._MLuaCeRunLoop
+                0x00d3a4a0      0x2f4 obj/MLUA.o
+                0x00d3a4a0                _MLuaCeRunLoop
+ .text._main    0x00d3a794        0x8 obj/MLUA.o
+                0x00d3a794                _main
+ .text._MLuaCeRepl
+                0x00d3a79c      0x47d obj/MLUA.o
+                0x00d3a79c                _MLuaCeRepl
+ .text.__ftoll_c
+                0x00d3ac19      0x10d obj/MLUA.o
+                0x00d3ac19                __ftoll_c
+ .text.__lltof_c
+                0x00d3ad26       0xab obj/MLUA.o
+                0x00d3ad26                __lltof_c
+ .text.__ulltof_c
+                0x00d3add1       0x73 obj/MLUA.o
+                0x00d3add1                __ulltof_c
+ .text.__bctlz  0x00d3ae44       0x22 obj/MLUA.o
+                0x00d3ae44                __bctlz
+ .text.__sctlz  0x00d3ae66        0xc obj/MLUA.o
+                0x00d3ae66                __sctlz
+ .text.__ictlz  0x00d3ae72       0x12 obj/MLUA.o
+                0x00d3ae72                __ictlz
+ .text.__llctlz
+                0x00d3ae84        0xe obj/MLUA.o
+                0x00d3ae84                __llctlz
+ .text.__i48ctlz
+                0x00d3ae92       0x15 obj/MLUA.o
+                0x00d3ae92                __i48ctlz
+ *(.gnu.warning)
+
+.rodata         0x00d3aea7     0x1b4a
+ *(.rodata .rodata.* .gnu.linkonce.r.*)
+ .rodata._MLuaValueToStr
+                0x00d3aea7       0x24 obj/MLUA.o
+ .rodata._MLuaFormat
+                0x00d3aecb       0x42 obj/MLUA.o
+ .rodata._MLuaGCCollect
+                0x00d3af0d       0x24 obj/MLUA.o
+ .rodata._MLuaLexNext
+                0x00d3af31       0x72 obj/MLUA.o
+ .rodata._ParseBlock
+                0x00d3afa3       0x48 obj/MLUA.o
+ .rodata._ParsePrefix
+                0x00d3afeb       0x33 obj/MLUA.o
+ .rodata._ParseSuffixForAssign
+                0x00d3b01e       0x1e obj/MLUA.o
+ .rodata._ParseSubExpr
+                0x00d3b03c       0xd8 obj/MLUA.o
+ .rodata._MLuaUTF8Decode
+                0x00d3b114        0xc obj/MLUA.o
+ .rodata._ReadValue
+                0x00d3b120       0x12 obj/MLUA.o
+ .rodata._MLuaArith
+                0x00d3b132       0x30 obj/MLUA.o
+ .rodata._MLuaCompare
+                0x00d3b162        0xc obj/MLUA.o
+ .rodata._MLuaTypeName
+                0x00d3b16e        0xf obj/MLUA.o
+ .rodata._MatchClass
+                0x00d3b17d       0x27 obj/MLUA.o
+ .rodata._MLuaCeRunLoop
+                0x00d3b1a4       0x1e obj/MLUA.o
+ .rodata._MLuaCeRepl
+                0x00d3b1c2       0x4e obj/MLUA.o
+ .rodata._OpSizes
+                0x00d3b210       0x81 obj/MLUA.o
+ .rodata._.str  0x00d3b291        0xb obj/MLUA.o
+ .rodata._.str.1
+                0x00d3b29c        0x8 obj/MLUA.o
+ .rodata._.str.2
+                0x00d3b2a4        0x8 obj/MLUA.o
+ .rodata._.str.3
+                0x00d3b2ac        0xb obj/MLUA.o
+ .rodata._.str.4
+                0x00d3b2b7        0xa obj/MLUA.o
+ .rodata._.str.5
+                0x00d3b2c1        0x9 obj/MLUA.o
+ .rodata._.str.6
+                0x00d3b2ca        0xa obj/MLUA.o
+ .rodata._.str.9
+                0x00d3b2d4       0x11 obj/MLUA.o
+ .rodata._.str.10
+                0x00d3b2e5       0x11 obj/MLUA.o
+ .rodata._.str.11
+                0x00d3b2f6       0x19 obj/MLUA.o
+ .rodata._.str.1.12
+                0x00d3b30f       0x15 obj/MLUA.o
+ .rodata._.str.56
+                0x00d3b324       0x1e obj/MLUA.o
+ .rodata._.str.57
+                0x00d3b342       0x17 obj/MLUA.o
+ .rodata._.str.58
+                0x00d3b359       0x29 obj/MLUA.o
+ .rodata._.str.59
+                0x00d3b382       0x12 obj/MLUA.o
+ .rodata._.str.60
+                0x00d3b394       0x18 obj/MLUA.o
+ .rodata._Keywords
+                0x00d3b3ac       0x84 obj/MLUA.o
+ .rodata._.str.62
+                0x00d3b430        0x4 obj/MLUA.o
+ .rodata._.str.63
+                0x00d3b434        0x6 obj/MLUA.o
+ .rodata._.str.64
+                0x00d3b43a        0x3 obj/MLUA.o
+ .rodata._.str.65
+                0x00d3b43d        0x5 obj/MLUA.o
+ .rodata._.str.66
+                0x00d3b442        0x7 obj/MLUA.o
+ .rodata._.str.67
+                0x00d3b449        0x4 obj/MLUA.o
+ .rodata._.str.68
+                0x00d3b44d        0x6 obj/MLUA.o
+ .rodata._.str.69
+                0x00d3b453        0x4 obj/MLUA.o
+ .rodata._.str.71
+                0x00d3b457        0x3 obj/MLUA.o
+ .rodata._.str.72
+                0x00d3b45a        0x3 obj/MLUA.o
+ .rodata._.str.73
+                0x00d3b45d        0x6 obj/MLUA.o
+ .rodata._.str.75
+                0x00d3b463        0x4 obj/MLUA.o
+ .rodata._.str.76
+                0x00d3b467        0x3 obj/MLUA.o
+ .rodata._.str.77
+                0x00d3b46a        0x7 obj/MLUA.o
+ .rodata._.str.78
+                0x00d3b471        0x7 obj/MLUA.o
+ .rodata._.str.79
+                0x00d3b478        0x5 obj/MLUA.o
+ .rodata._.str.80
+                0x00d3b47d        0x5 obj/MLUA.o
+ .rodata._.str.81
+                0x00d3b482        0x6 obj/MLUA.o
+ .rodata._.str.82
+                0x00d3b488        0x6 obj/MLUA.o
+ .rodata._.str.83
+                0x00d3b48e       0x2a obj/MLUA.o
+ .rodata._.str.2.85
+                0x00d3b4b8       0x13 obj/MLUA.o
+ .rodata._.str.3.86
+                0x00d3b4cb       0x17 obj/MLUA.o
+ .rodata._.str.4.119
+                0x00d3b4e2       0x18 obj/MLUA.o
+ .rodata._.str.5.88
+                0x00d3b4fa       0x17 obj/MLUA.o
+ .rodata._.str.6.89
+                0x00d3b511       0x17 obj/MLUA.o
+ .rodata._.str.7.118
+                0x00d3b528       0x23 obj/MLUA.o
+ .rodata._.str.8.114
+                0x00d3b54b       0x1b obj/MLUA.o
+ .rodata._.str.9.115
+                0x00d3b566        0x5 obj/MLUA.o
+ .rodata._.str.10.116
+                0x00d3b56b       0x18 obj/MLUA.o
+ .rodata._.str.11.117
+                0x00d3b583       0x1a obj/MLUA.o
+ .rodata._.str.12.111
+                0x00d3b59d       0x23 obj/MLUA.o
+ .rodata._.str.13.112
+                0x00d3b5c0       0x1f obj/MLUA.o
+ .rodata._.str.14.108
+                0x00d3b5df       0x1c obj/MLUA.o
+ .rodata._.str.15.103
+                0x00d3b5fb       0x14 obj/MLUA.o
+ .rodata._.str.16.109
+                0x00d3b60f       0x1f obj/MLUA.o
+ .rodata._.str.17.110
+                0x00d3b62e       0x25 obj/MLUA.o
+ .rodata._.str.18.95
+                0x00d3b653       0x1f obj/MLUA.o
+ .rodata._.str.19.113
+                0x00d3b672       0x11 obj/MLUA.o
+ .rodata._.str.20.91
+                0x00d3b683        0xa obj/MLUA.o
+ .rodata._.str.21.92
+                0x00d3b68d        0xa obj/MLUA.o
+ .rodata._.str.22.93
+                0x00d3b697        0xa obj/MLUA.o
+ .rodata._.str.23.94
+                0x00d3b6a1        0xa obj/MLUA.o
+ .rodata._.str.24.102
+                0x00d3b6ab       0x21 obj/MLUA.o
+ .rodata._.str.25.96
+                0x00d3b6cc        0xf obj/MLUA.o
+ .rodata._.str.26.97
+                0x00d3b6db        0xc obj/MLUA.o
+ .rodata._.str.27.98
+                0x00d3b6e7        0xe obj/MLUA.o
+ .rodata._.str.28.99
+                0x00d3b6f5       0x12 obj/MLUA.o
+ .rodata._.str.29.100
+                0x00d3b707        0xc obj/MLUA.o
+ .rodata._.str.30.101
+                0x00d3b713       0x28 obj/MLUA.o
+ .rodata._.str.31.104
+                0x00d3b73b       0x1a obj/MLUA.o
+ .rodata._.str.32.105
+                0x00d3b755       0x24 obj/MLUA.o
+ .rodata._.str.33.106
+                0x00d3b779       0x1b obj/MLUA.o
+ .rodata._.str.34.107
+                0x00d3b794        0xd obj/MLUA.o
+ .rodata._switch.table.FuseCompareBranch
+                0x00d3b7a1        0xc obj/MLUA.o
+ .rodata._.str.124
+                0x00d3b7ad       0x10 obj/MLUA.o
+ .rodata._.str.2.130
+                0x00d3b7bd        0x1 obj/MLUA.o
+ .rodata._.str.132
+                0x00d3b7be       0x2a obj/MLUA.o
+ .rodata._.str.1.133
+                0x00d3b7e8       0x1d obj/MLUA.o
+ .rodata._.str.2.134
+                0x00d3b805       0x23 obj/MLUA.o
+ .rodata._.str.3.135
+                0x00d3b828       0x17 obj/MLUA.o
+ .rodata._.str.136
+                0x00d3b83f       0x19 obj/MLUA.o
+ .rodata._.str.1.137
+                0x00d3b858       0x1d obj/MLUA.o
+ .rodata._.str.2.138
+                0x00d3b875       0x26 obj/MLUA.o
+ .rodata._.str.4.140
+                0x00d3b89b       0x2a obj/MLUA.o
+ .rodata._.str.5.141
+                0x00d3b8c5       0x2a obj/MLUA.o
+ .rodata._.str.144
+                0x00d3b8ef       0x13 obj/MLUA.o
+ .rodata._.str.1.145
+                0x00d3b902       0x1d obj/MLUA.o
+ .rodata._.str.2.146
+                0x00d3b91f       0x1c obj/MLUA.o
+ .rodata._.str.3.147
+                0x00d3b93b       0x20 obj/MLUA.o
+ .rodata._.str.4.148
+                0x00d3b95b       0x23 obj/MLUA.o
+ .rodata._.str.5.142
+                0x00d3b97e       0x11 obj/MLUA.o
+ .rodata._.str.6.149
+                0x00d3b98f       0x23 obj/MLUA.o
+ .rodata._.str.7.143
+                0x00d3b9b2       0x13 obj/MLUA.o
+ .rodata._.str.8.150
+                0x00d3b9c5       0x1f obj/MLUA.o
+ .rodata._.str.9.151
+                0x00d3b9e4       0x1d obj/MLUA.o
+ .rodata._.str.10.152
+                0x00d3ba01       0x1c obj/MLUA.o
+ .rodata._.str.11.153
+                0x00d3ba1d       0x20 obj/MLUA.o
+ .rodata._.str.12.154
+                0x00d3ba3d       0x22 obj/MLUA.o
+ .rodata._.str.13.155
+                0x00d3ba5f       0x21 obj/MLUA.o
+ .rodata._.str.14.156
+                0x00d3ba80       0x24 obj/MLUA.o
+ .rodata._.str.15.157
+                0x00d3baa4       0x1f obj/MLUA.o
+ .rodata._.str.16.158
+                0x00d3bac3       0x1c obj/MLUA.o
+ .rodata._.str.17.159
+                0x00d3badf       0x1f obj/MLUA.o
+ .rodata._.str.18.167
+                0x00d3bafe       0x1a obj/MLUA.o
+ .rodata._.str.19.168
+                0x00d3bb18       0x1e obj/MLUA.o
+ .rodata._.str.20.160
+                0x00d3bb36       0x18 obj/MLUA.o
+ .rodata._.str.21.161
+                0x00d3bb4e       0x22 obj/MLUA.o
+ .rodata._.str.22.162
+                0x00d3bb70       0x1f obj/MLUA.o
+ .rodata._.str.23.163
+                0x00d3bb8f       0x22 obj/MLUA.o
+ .rodata._.str.24.164
+                0x00d3bbb1       0x25 obj/MLUA.o
+ .rodata._.str.25.165
+                0x00d3bbd6       0x22 obj/MLUA.o
+ .rodata._.str.26.166
+                0x00d3bbf8       0x24 obj/MLUA.o
+ .rodata._.str.171
+                0x00d3bc1c        0xf obj/MLUA.o
+ .rodata._.str.1.172
+                0x00d3bc2b       0x34 obj/MLUA.o
+ .rodata._.str.2.174
+                0x00d3bc5f       0x25 obj/MLUA.o
+ .rodata._.str.3.175
+                0x00d3bc84       0x32 obj/MLUA.o
+ .rodata._.str.5.177
+                0x00d3bcb6       0x23 obj/MLUA.o
+ .rodata._.str.6.178
+                0x00d3bcd9       0x2a obj/MLUA.o
+ .rodata._.str.8.182
+                0x00d3bd03       0x1f obj/MLUA.o
+ .rodata._.str.9.183
+                0x00d3bd22       0x18 obj/MLUA.o
+ .rodata._.str.10.184
+                0x00d3bd3a       0x24 obj/MLUA.o
+ .rodata._.str.11.185
+                0x00d3bd5e       0x1c obj/MLUA.o
+ .rodata._.str.12.186
+                0x00d3bd7a       0x25 obj/MLUA.o
+ .rodata._.str.13.202
+                0x00d3bd9f       0x1e obj/MLUA.o
+ .rodata._.str.14.203
+                0x00d3bdbd       0x26 obj/MLUA.o
+ .rodata._.str.16.205
+                0x00d3bde3        0xe obj/MLUA.o
+ .rodata._.str.17.206
+                0x00d3bdf1        0xd obj/MLUA.o
+ .rodata._.str.18.207
+                0x00d3bdfe       0x14 obj/MLUA.o
+ .rodata._.str.19.208
+                0x00d3be12        0x6 obj/MLUA.o
+ .rodata._.str.20.209
+                0x00d3be18        0x8 obj/MLUA.o
+ .rodata._.str.21.198
+                0x00d3be20       0x14 obj/MLUA.o
+ .rodata._.str.22.199
+                0x00d3be34       0x21 obj/MLUA.o
+ .rodata._RunVM.DispatchTable
+                0x00d3be55      0x300 obj/MLUA.o
+ .rodata._.str.23.187
+                0x00d3c155       0x21 obj/MLUA.o
+ .rodata._.str.24.188
+                0x00d3c176       0x1a obj/MLUA.o
+ .rodata._.str.25.189
+                0x00d3c190       0x10 obj/MLUA.o
+ .rodata._.str.26.190
+                0x00d3c1a0        0xf obj/MLUA.o
+ .rodata._.str.27.193
+                0x00d3c1af        0x2 obj/MLUA.o
+ .rodata._.str.28.191
+                0x00d3c1b1        0xe obj/MLUA.o
+ .rodata._.str.29.192
+                0x00d3c1bf        0xc obj/MLUA.o
+ .rodata._.str.30.194
+                0x00d3c1cb        0x2 obj/MLUA.o
+ .rodata._.str.31.195
+                0x00d3c1cd        0x2 obj/MLUA.o
+ .rodata._.str.212
+                0x00d3c1cf        0x4 obj/MLUA.o
+ .rodata._.str.1.215
+                0x00d3c1d3        0x8 obj/MLUA.o
+ .rodata._.str.2.213
+                0x00d3c1db        0x7 obj/MLUA.o
+ .rodata._.str.4.210
+                0x00d3c1e2        0x9 obj/MLUA.o
+ .rodata._ObjTypeNames
+                0x00d3c1eb       0x18 obj/MLUA.o
+ .rodata._.str.5.214
+                0x00d3c203        0x9 obj/MLUA.o
+ .rodata._.str.6.211
+                0x00d3c20c        0x8 obj/MLUA.o
+ .rodata._.str.8.217
+                0x00d3c214        0x8 obj/MLUA.o
+ .rodata._.str.10.219
+                0x00d3c21c        0x6 obj/MLUA.o
+ .rodata._.str.11.220
+                0x00d3c222        0x8 obj/MLUA.o
+ .rodata._.str.12.221
+                0x00d3c22a        0x7 obj/MLUA.o
+ .rodata._.str.242
+                0x00d3c231        0x7 obj/MLUA.o
+ .rodata._.str.2.244
+                0x00d3c238        0x5 obj/MLUA.o
+ .rodata._.str.3.245
+                0x00d3c23d        0xb obj/MLUA.o
+ .rodata._.str.4.246
+                0x00d3c248        0x5 obj/MLUA.o
+ .rodata._.str.5.247
+                0x00d3c24d        0x6 obj/MLUA.o
+ .rodata._.str.6.248
+                0x00d3c253        0x7 obj/MLUA.o
+ .rodata._.str.7.249
+                0x00d3c25a        0x6 obj/MLUA.o
+ .rodata._.str.8.250
+                0x00d3c260        0x7 obj/MLUA.o
+ .rodata._.str.9.251
+                0x00d3c267        0x9 obj/MLUA.o
+ .rodata._.str.10.252
+                0x00d3c270        0x9 obj/MLUA.o
+ .rodata._.str.12.254
+                0x00d3c279        0x7 obj/MLUA.o
+ .rodata._.str.13.259
+                0x00d3c280       0x12 obj/MLUA.o
+ .rodata._.str.14.257
+                0x00d3c292        0x8 obj/MLUA.o
+ .rodata._.str.15.258
+                0x00d3c29a       0x16 obj/MLUA.o
+ .rodata._.str.16.256
+                0x00d3c2b0       0x21 obj/MLUA.o
+ .rodata._.str.17.255
+                0x00d3c2d1       0x24 obj/MLUA.o
+ .rodata._.str.262
+                0x00d3c2f5        0xa obj/MLUA.o
+ .rodata._CoroLibEntries
+                0x00d3c2ff       0x30 obj/MLUA.o
+ .rodata._.str.1.263
+                0x00d3c32f        0x6 obj/MLUA.o
+ .rodata._.str.2.264
+                0x00d3c335        0x7 obj/MLUA.o
+ .rodata._.str.3.265
+                0x00d3c33c        0xc obj/MLUA.o
+ .rodata._.str.4.266
+                0x00d3c348        0x7 obj/MLUA.o
+ .rodata._.str.5.267
+                0x00d3c34f        0x8 obj/MLUA.o
+ .rodata._.str.6.268
+                0x00d3c357        0x7 obj/MLUA.o
+ .rodata._.str.7.269
+                0x00d3c35e        0x6 obj/MLUA.o
+ .rodata._.str.8.275
+                0x00d3c364       0x10 obj/MLUA.o
+ .rodata._.str.9.276
+                0x00d3c374       0x21 obj/MLUA.o
+ .rodata._.str.10.274
+                0x00d3c395       0x30 obj/MLUA.o
+ .rodata._.str.11.273
+                0x00d3c3c5        0x6 obj/MLUA.o
+ .rodata._.str.12.271
+                0x00d3c3cb        0xa obj/MLUA.o
+ .rodata._.str.13.272
+                0x00d3c3d5        0x7 obj/MLUA.o
+ .rodata._.str.14.270
+                0x00d3c3dc        0x5 obj/MLUA.o
+ .rodata._switch.table.CoroStatus
+                0x00d3c3e1        0x9 obj/MLUA.o
+ .rodata._.str.279
+                0x00d3c3ea        0x5 obj/MLUA.o
+ .rodata._MathLibEntries
+                0x00d3c3ef       0xc6 obj/MLUA.o
+ .rodata._.str.2.281
+                0x00d3c4b5        0x5 obj/MLUA.o
+ .rodata._.str.3.282
+                0x00d3c4ba        0xb obj/MLUA.o
+ .rodata._.str.4.283
+                0x00d3c4c5        0xb obj/MLUA.o
+ .rodata._.str.5.284
+                0x00d3c4d0        0x4 obj/MLUA.o
+ .rodata._.str.6.285
+                0x00d3c4d4        0x5 obj/MLUA.o
+ .rodata._.str.7.286
+                0x00d3c4d9        0x5 obj/MLUA.o
+ .rodata._.str.8.287
+                0x00d3c4de        0x5 obj/MLUA.o
+ .rodata._.str.9.288
+                0x00d3c4e3        0x6 obj/MLUA.o
+ .rodata._.str.10.289
+                0x00d3c4e9        0x5 obj/MLUA.o
+ .rodata._.str.11.290
+                0x00d3c4ee        0x4 obj/MLUA.o
+ .rodata._.str.12.291
+                0x00d3c4f2        0x5 obj/MLUA.o
+ .rodata._.str.13.292
+                0x00d3c4f7        0x4 obj/MLUA.o
+ .rodata._.str.14.293
+                0x00d3c4fb        0x4 obj/MLUA.o
+ .rodata._.str.15.294
+                0x00d3c4ff        0x6 obj/MLUA.o
+ .rodata._.str.16.295
+                0x00d3c505        0x5 obj/MLUA.o
+ .rodata._.str.17.296
+                0x00d3c50a        0x6 obj/MLUA.o
+ .rodata._.str.18.297
+                0x00d3c510        0x6 obj/MLUA.o
+ .rodata._.str.19.298
+                0x00d3c516        0x4 obj/MLUA.o
+ .rodata._.str.20.299
+                0x00d3c51a        0x6 obj/MLUA.o
+ .rodata._.str.21.300
+                0x00d3c520        0x4 obj/MLUA.o
+ .rodata._.str.22.301
+                0x00d3c524        0x4 obj/MLUA.o
+ .rodata._.str.23.302
+                0x00d3c528        0x4 obj/MLUA.o
+ .rodata._.str.24.303
+                0x00d3c52c        0x4 obj/MLUA.o
+ .rodata._.str.25.304
+                0x00d3c530        0x5 obj/MLUA.o
+ .rodata._.str.26.305
+                0x00d3c535        0x4 obj/MLUA.o
+ .rodata._.str.27.306
+                0x00d3c539        0x7 obj/MLUA.o
+ .rodata._.str.28.307
+                0x00d3c540        0xb obj/MLUA.o
+ .rodata._.str.29.308
+                0x00d3c54b        0x4 obj/MLUA.o
+ .rodata._.str.30.309
+                0x00d3c54f        0x5 obj/MLUA.o
+ .rodata._.str.31.310
+                0x00d3c554        0x5 obj/MLUA.o
+ .rodata._.str.32.311
+                0x00d3c559        0x4 obj/MLUA.o
+ .rodata._.str.33.312
+                0x00d3c55d        0x5 obj/MLUA.o
+ .rodata._.str.34.313
+                0x00d3c562        0xa obj/MLUA.o
+ .rodata._.str.35.314
+                0x00d3c56c        0x5 obj/MLUA.o
+ .rodata._.str.36.315
+                0x00d3c571        0x4 obj/MLUA.o
+ .rodata._.str.37.316
+                0x00d3c575        0x8 obj/MLUA.o
+ .rodata._.str.38.317
+                0x00d3c57d        0x6 obj/MLUA.o
+ .rodata._.str.320
+                0x00d3c583        0x7 obj/MLUA.o
+ .rodata._StringLibEntries
+                0x00d3c58a       0x48 obj/MLUA.o
+ .rodata._.str.1.321
+                0x00d3c5d2        0x5 obj/MLUA.o
+ .rodata._.str.2.322
+                0x00d3c5d7        0x5 obj/MLUA.o
+ .rodata._.str.3.323
+                0x00d3c5dc        0x5 obj/MLUA.o
+ .rodata._.str.4.324
+                0x00d3c5e1        0x7 obj/MLUA.o
+ .rodata._.str.5.325
+                0x00d3c5e8        0x4 obj/MLUA.o
+ .rodata._.str.6.326
+                0x00d3c5ec        0x6 obj/MLUA.o
+ .rodata._.str.7.327
+                0x00d3c5f2        0x6 obj/MLUA.o
+ .rodata._.str.8.328
+                0x00d3c5f8        0x4 obj/MLUA.o
+ .rodata._.str.9.329
+                0x00d3c5fc        0x8 obj/MLUA.o
+ .rodata._.str.10.330
+                0x00d3c604        0x4 obj/MLUA.o
+ .rodata._.str.11.331
+                0x00d3c608        0x6 obj/MLUA.o
+ .rodata._.str.12.335
+                0x00d3c60e       0x22 obj/MLUA.o
+ .rodata._.str.13.336
+                0x00d3c630       0x12 obj/MLUA.o
+ .rodata._.str.14.337
+                0x00d3c642       0x18 obj/MLUA.o
+ .rodata._.str.15.338
+                0x00d3c65a       0x13 obj/MLUA.o
+ .rodata._.str.341
+                0x00d3c66d        0x6 obj/MLUA.o
+ .rodata._TableLibEntries
+                0x00d3c673       0x36 obj/MLUA.o
+ .rodata._.str.1.342
+                0x00d3c6a9        0x7 obj/MLUA.o
+ .rodata._.str.2.344
+                0x00d3c6b0        0x7 obj/MLUA.o
+ .rodata._.str.3.345
+                0x00d3c6b7        0x8 obj/MLUA.o
+ .rodata._.str.4.346
+                0x00d3c6bf        0x7 obj/MLUA.o
+ .rodata._.str.5.347
+                0x00d3c6c6        0x5 obj/MLUA.o
+ .rodata._.str.6.348
+                0x00d3c6cb        0x5 obj/MLUA.o
+ .rodata._.str.7.349
+                0x00d3c6d0        0x7 obj/MLUA.o
+ .rodata._.str.8.350
+                0x00d3c6d7        0x5 obj/MLUA.o
+ .rodata._.str.10.356
+                0x00d3c6dc        0xe obj/MLUA.o
+ .rodata._.str.11.352
+                0x00d3c6ea       0x2e obj/MLUA.o
+ .rodata._.str.12.353
+                0x00d3c718       0x35 obj/MLUA.o
+ .rodata._.str.13.354
+                0x00d3c74d       0x2d obj/MLUA.o
+ .rodata._.str.357
+                0x00d3c77a        0x4 obj/MLUA.o
+ .rodata._.str.1.358
+                0x00d3c77e        0x4 obj/MLUA.o
+ .rodata._.str.2.359
+                0x00d3c782        0x6 obj/MLUA.o
+ .rodata._GfxEntries
+                0x00d3c788       0x54 obj/MLUA.o
+ .rodata._KeyEntries
+                0x00d3c7dc       0x1e obj/MLUA.o
+ .rodata._TimerEntries
+                0x00d3c7fa       0x12 obj/MLUA.o
+ .rodata._.str.3.360
+                0x00d3c80c        0x3 obj/MLUA.o
+ .rodata._.str.4.361
+                0x00d3c80f        0x5 obj/MLUA.o
+ .rodata._.str.5.362
+                0x00d3c814        0x5 obj/MLUA.o
+ .rodata._.str.6.363
+                0x00d3c819        0x6 obj/MLUA.o
+ .rodata._.str.7.364
+                0x00d3c81f        0x6 obj/MLUA.o
+ .rodata._.str.8.365
+                0x00d3c825        0x6 obj/MLUA.o
+ .rodata._.str.9.366
+                0x00d3c82b        0x7 obj/MLUA.o
+ .rodata._.str.10.367
+                0x00d3c832        0x6 obj/MLUA.o
+ .rodata._.str.11.368
+                0x00d3c838        0x5 obj/MLUA.o
+ .rodata._.str.12.369
+                0x00d3c83d        0x4 obj/MLUA.o
+ .rodata._.str.13.377
+                0x00d3c841        0x6 obj/MLUA.o
+ .rodata._.str.14.378
+                0x00d3c847        0x7 obj/MLUA.o
+ .rodata._.str.15.379
+                0x00d3c84e        0x5 obj/MLUA.o
+ .rodata._.str.16.380
+                0x00d3c853        0x6 obj/MLUA.o
+ .rodata._.str.17.381
+                0x00d3c859        0x5 obj/MLUA.o
+ .rodata._.str.18.382
+                0x00d3c85e        0x6 obj/MLUA.o
+ .rodata._.str.19.383
+                0x00d3c864        0x5 obj/MLUA.o
+ .rodata._.str.20.384
+                0x00d3c869        0x5 obj/MLUA.o
+ .rodata._.str.21.385
+                0x00d3c86e        0x9 obj/MLUA.o
+ .rodata._.str.22.386
+                0x00d3c877        0x7 obj/MLUA.o
+ .rodata._.str.23.387
+                0x00d3c87e        0xb obj/MLUA.o
+ .rodata._.str.24.388
+                0x00d3c889        0x5 obj/MLUA.o
+ .rodata._.str.25.389
+                0x00d3c88e        0xa obj/MLUA.o
+ .rodata._.str.26.390
+                0x00d3c898       0x1a obj/MLUA.o
+ .rodata._.str.27.373
+                0x00d3c8b2        0x5 obj/MLUA.o
+ .rodata._.str.28.374
+                0x00d3c8b7        0x7 obj/MLUA.o
+ .rodata._.str.29.375
+                0x00d3c8be        0x4 obj/MLUA.o
+ .rodata._.str.30.376
+                0x00d3c8c2        0x4 obj/MLUA.o
+ .rodata._.str.31.370
+                0x00d3c8c6        0x7 obj/MLUA.o
+ .rodata._.str.32.371
+                0x00d3c8cd        0x6 obj/MLUA.o
+ .rodata._.str.391
+                0x00d3c8d3        0x4 obj/MLUA.o
+ .rodata._.str.1.392
+                0x00d3c8d7        0x6 obj/MLUA.o
+ .rodata._.str.2.393
+                0x00d3c8dd        0x3 obj/MLUA.o
+ .rodata._.str.3.394
+                0x00d3c8e0        0xe obj/MLUA.o
+ .rodata._.str.4.395
+                0x00d3c8ee        0x2 obj/MLUA.o
+ .rodata._.str.5.397
+                0x00d3c8f0       0x19 obj/MLUA.o
+ .rodata._.str.6.396
+                0x00d3c909       0x16 obj/MLUA.o
+ .rodata._.str.8.401
+                0x00d3c91f        0x3 obj/MLUA.o
+ .rodata._.str.9.399
+                0x00d3c922       0x1c obj/MLUA.o
+ .rodata._.str.10.398
+                0x00d3c93e       0x15 obj/MLUA.o
+ .rodata._.str.11.403
+                0x00d3c953       0x17 obj/MLUA.o
+ .rodata._.str.13.402
+                0x00d3c96a       0x18 obj/MLUA.o
+ .rodata._.str.407
+                0x00d3c982       0x1a obj/MLUA.o
+ .rodata._.str.1.408
+                0x00d3c99c        0xf obj/MLUA.o
+ .rodata._.str.2.409
+                0x00d3c9ab       0x1b obj/MLUA.o
+ .rodata._.str.3.411
+                0x00d3c9c6        0x6 obj/MLUA.o
+ .rodata._.str.4.410
+                0x00d3c9cc        0x3 obj/MLUA.o
+ .rodata.libload
+                0x00d3c9cf       0x22 obj/crt0.o
+
+.init_array     0x00d3c9f1        0x0
+                [!provide]                        PROVIDE (__init_array_start = .)
+ *(.preinit_array)
+ *(SORT_BY_INIT_PRIORITY(.init_array.*))
+ *(.init_array)
+                [!provide]                        PROVIDE (__init_array_end = .)
+
+.fini_array     0x00d3c9f1        0x0
+                [!provide]                        PROVIDE (__fini_array_start = .)
+ *(SORT_BY_INIT_PRIORITY(.fini_array.*))
+ *(.fini_array)
+                [!provide]                        PROVIDE (__fini_array_end = .)
+                0x00d3c9f1                        ___data_low = .
+
+.data           0x00d3c9f1        0x8
+ *(.data .data.* .gnu.linkonce.d.*)
+ .data._RandomState
+                0x00d3c9f1        0x8 obj/MLUA.o
+ *(.data1)
+                0x00d3c9f9                        ___runprgm_reloc_start = .
+ *(.runprgm.reloc)
+                0x00d3c9f9                        ___runprgm_reloc_end = .
+                0x00d3c9f9                        ___data_high = .
+                0x00000008                        ___data_len = (___data_high - ___data_low)
+                0x00d052c6                        . = BSSHEAP_LOW
+                0x00d052c6                        ___bss_low = .
+
+.bss            0x00d052c8     0xc350
+ *(.dynbss)
+ *(.bss .bss.* .gnu.linkonce.b.*)
+ .bss._ShortStrBuffer
+                0x00d052c8       0x10 obj/MLUA.o
+ .bss._ShortStrBufferIdx
+                0x00d052d8        0x3 obj/MLUA.o
+ .bss._StackTraceBuffer
+                0x00d052db      0x200 obj/MLUA.o
+ .bss._GfxActive
+                0x00d054db        0x1 obj/MLUA.o
+ *fill*         0x00d054dc        0x4 
+ .bss._LuaHeap  0x00d054e0     0xc000 obj/MLUA.o
+ .bss._MLuaCeRunLoop.names
+                0x00d114e0       0xd8 obj/MLUA.o
+ .bss._MLuaCeRepl.line
+                0x00d115b8       0x60 obj/MLUA.o
+ *(COMMON)
+                0x00d11618                        ___bss_high = .
+                0x0000c352                        ___bss_len = (___bss_high - ___bss_low)
+                0x00000001                        ASSERT ((. <= BSSHEAP_HIGH), Error: BSS exceed BSSHEAP_HIGH limit)
+                0x00d11618                        ___heap_low = .
+                0x00d13fd8                        . = BSSHEAP_HIGH
+                0x00d13fd8                        ___heap_high = .
+
+.runprgm
+ *(.runprgm.reloc)
+
+.debug_info
+ *(.debug_info .debug_info.*)
+
+.debug_abbrev
+ *(.debug_abbrev .debug_abbrev.*)
+
+.debug_line
+ *(.debug_line .debug_line.*)
+
+.debug_line_str
+ *(.debug_line_str .debug_line_str.*)
+
+.debug_str
+ *(.debug_str .debug_str.*)
+
+.debug_str_offsets
+ *(.debug_str_offsets .debug_str_offsets.*)
+
+.debug_addr
+ *(.debug_addr .debug_addr.*)
+
+.debug_aranges
+ *(.debug_aranges .debug_aranges.*)
+
+.debug_ranges
+ *(.debug_ranges .debug_ranges.*)
+
+.debug_rnglists
+ *(.debug_rnglists .debug_rnglists.*)
+
+.debug_loc
+ *(.debug_loc .debug_loc.*)
+
+.debug_loclists
+ *(.debug_loclists .debug_loclists.*)
+
+.debug_frame
+ *(.debug_frame .debug_frame.*)
+
+.debug_macro
+ *(.debug_macro .debug_macro.*)
+
+.debug_macinfo
+ *(.debug_macinfo .debug_macinfo.*)
+
+.debug_names
+ *(.debug_names .debug_names.*)
+
+.debug_pubnames
+ *(.debug_pubnames .debug_pubnames.*)
+
+.debug_pubtypes
+ *(.debug_pubtypes .debug_pubtypes.*)
+
+.debug_types
+ *(.debug_types .debug_types.*)
+
+.debug_sup
+ *(.debug_sup .debug_sup.*)
+
+.debug_cu_index
+ *(.debug_cu_index .debug_cu_index.*)
+
+.debug_tu_index
+ *(.debug_tu_index .debug_tu_index.*)
+
+.gdb_index
+ *(.gdb_index)
+
+.debug_gdb_scripts
+ *(.debug_gdb_scripts)
+
+.debug_abbrev.dwo
+ *(.debug_abbrev.dwo .debug_abbrev.dwo.*)
+
+.debug_info.dwo
+ *(.debug_info.dwo .debug_info.dwo.*)
+
+.debug_line.dwo
+ *(.debug_line.dwo .debug_line.dwo.*)
+
+.debug_loclists.dwo
+ *(.debug_loclists.dwo .debug_loclists.dwo.*)
+
+.debug_macro.dwo
+ *(.debug_macro.dwo .debug_macro.dwo.*)
+
+.debug_rnglists.dwo
+ *(.debug_rnglists.dwo .debug_rnglists.dwo.*)
+
+.debug_str.dwo
+ *(.debug_str.dwo .debug_str.dwo.*)
+
+.debug_str_offsets.dwo
+ *(.debug_str_offsets.dwo .debug_str_offsets.dwo.*)
+
+.eh_frame
+ *(.eh_frame)
+
+.eh_frame_hdr
+ *(.eh_frame_hdr)
+
+/DISCARD/
+ *(.comment)
+ *(.note*)
+                [!provide]                        PROVIDE (___runprgm_reloc_len = (___runprgm_reloc_end - ___runprgm_reloc_start))
+LOAD obj/MLUA.o
+LOAD obj/crt0.o
+START GROUP
+LOAD /home/tornadus/CEdev/lib/libc/allocator_standard.a
+LOAD /home/tornadus/CEdev/lib/crt/libcrt.a
+LOAD /home/tornadus/CEdev/lib/ce/libce.a
+LOAD /home/tornadus/CEdev/lib/softfloat/libsoftfloat.a
+LOAD /home/tornadus/CEdev/lib/libc/libc_os.a
+LOAD /home/tornadus/CEdev/lib/libcxx/libcxx.a
+END GROUP
+OUTPUT(bin/MLUA.obj elf32-z80)
