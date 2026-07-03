@@ -822,6 +822,18 @@ static Bool TryArraySetFast(MLuaValue tbl, MLuaValue key, MLuaValue val) {
       MLuaTableArrayData(th)[i - 1] = val;
       return TRUE;
     }
+    /* Append without growth: the shape sequential fills take on every
+     * iteration that doesn't grow (growth is geometric, so almost all of
+     * them). Only past the first element (ArrayLen >= 1): a store into a
+     * virgin array must keep taking MLuaTableSet, where the typed-NUM
+     * promotion decision lives -- and NUM arrays themselves keep
+     * ArrayLen == 0, so they can never reach this arm either. */
+    if (i >= 1 && (U32)i == th->ArrayLen + 1 && (U32)i <= th->ArraySize &&
+        th->ArrayLen >= 1) {
+      MLuaTableArrayData(th)[i - 1] = val;
+      th->ArrayLen = (U32)i;
+      return TRUE;
+    }
 #if MLUA_TABLE_NUM_ARRAYS
     if (MLuaTableArrayKind(th) == MLUA_TABLE_ARRAY_NUM) {
       return MLuaTableNumSetFast(th, i, val);
