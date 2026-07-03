@@ -870,6 +870,9 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       [OP_SETGLOBAL] = &&L_OP_SETGLOBAL,
       [OP_GETGLOBAL_K] = &&L_OP_GETGLOBAL_K,
       [OP_SETGLOBAL_K] = &&L_OP_SETGLOBAL_K,
+      [OP_GETFIELD_K] = &&L_OP_GETFIELD_K,
+      [OP_SETFIELD_K] = &&L_OP_SETFIELD_K,
+      [OP_SETFIELD_K_POP] = &&L_OP_SETFIELD_K_POP,
       [OP_POP] = &&L_OP_POP,
       [OP_DUP] = &&L_OP_DUP,
       [OP_SWAP] = &&L_OP_SWAP,
@@ -1132,6 +1135,34 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       MLuaValue key = STACK_POP();
       MLuaValue tbl = STACK_POP();
       VM_TRY(MLuaTableSetSafe(L, tbl, key, val));
+      VM_BREAK;
+    }
+
+    VM_CASE(OP_GETFIELD_K): {
+      /* Fused LOADK B; GETTABLE */
+      U8 k = READ_BYTE();
+      MLuaValue tbl = STACK_POP();
+      MLuaValue result;
+      VM_TRY(MLuaTableGetSafe(L, tbl, proto->Constants[k], &result));
+      STACK_PUSH(result);
+      VM_BREAK;
+    }
+
+    VM_CASE(OP_SETFIELD_K): {
+      /* Fused LOADK B; SWAP; SETTABLE (keeps the table: constructors) */
+      U8 k = READ_BYTE();
+      MLuaValue val = STACK_POP();
+      MLuaValue tbl = STACK_TOP();
+      VM_TRY(MLuaTableSetSafe(L, tbl, proto->Constants[k], val));
+      VM_BREAK;
+    }
+
+    VM_CASE(OP_SETFIELD_K_POP): {
+      /* Fused LOADK B; SWAP; SETTABLE_POP (statement store: drops it) */
+      U8 k = READ_BYTE();
+      MLuaValue val = STACK_POP();
+      MLuaValue tbl = STACK_POP();
+      VM_TRY(MLuaTableSetSafe(L, tbl, proto->Constants[k], val));
       VM_BREAK;
     }
 

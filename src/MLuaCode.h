@@ -80,6 +80,13 @@ typedef enum {
   /* SETTABLE that also pops the table: replaces SETTABLE; POP 1 */
   OP_SETTABLE_POP = 0x27, /* 1B: t k v → : t[k] = v */
 
+  /* Fused constant-key field access (t.f forms). The store comes in the
+   * same two flavors as SETTABLE vs SETTABLE_POP: the constructor keeps
+   * the table for the next field, a statement store drops it. */
+  OP_GETFIELD_K = 0x28,     /* 2B: t → v   : v = t[constants[B]] */
+  OP_SETFIELD_K = 0x29,     /* 2B: t v → t : t[constants[B]] = v */
+  OP_SETFIELD_K_POP = 0x2A, /* 2B: t v →   : t[constants[B]] = v */
+
   /* ===== Logic (0x30-0x34) ===== */
   OP_NOT = 0x30, /* 1B: v → bool   : Push true if v is nil/false */
   OP_EQ = 0x31,  /* 1B: a b → bool : Push a == b */

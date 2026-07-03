@@ -1005,9 +1005,7 @@ static void ParsePrefix(MLuaParser *p) {
           Advance(p); /* = */
           ParseExpr(p);
           AdjustTo1(p);
-          MLuaEmitOpB(fs, OP_LOADK, (U8)(U16)k);
-          MLuaEmitOp(fs, OP_SWAP);
-          MLuaEmitOp(fs, OP_SETTABLE);
+          MLuaEmitOpB(fs, OP_SETFIELD_K, (U8)(U16)k);
           StackPop(p, 1);
         } else {
           /* Array element. The FINAL element expands all its call/vararg
@@ -1191,8 +1189,7 @@ static void EmitPendingGet(MLuaParser *p, AccessInfo *info) {
     }
     StackPop(p, 1);
   } else if (info->accessType == 2) {
-    MLuaEmitOpB(fs, OP_LOADK, (U8)info->fieldConstIdx);
-    MLuaEmitOp(fs, OP_GETTABLE);
+    MLuaEmitOpB(fs, OP_GETFIELD_K, (U8)info->fieldConstIdx);
   }
   info->accessType = 0;
 }
@@ -2426,12 +2423,12 @@ static void ParseMultiAssign(MLuaParser *p, AccessInfo firstInfo,
           k = MLuaAddStringK(fs, p->Lex.Token.Value.String.Data,
                              p->Lex.Token.Value.String.Length);
           Advance(p);
-          MLuaEmitOpB(fs, OP_LOADK, (U8)k);
-          StackPush(p, 1);
           if (Check(p, TK_DOT) || Check(p, TK_LBRACKET)) {
-            MLuaEmitOp(fs, OP_GETTABLE); /* Intermediate access */
-            StackPop(p, 1);
+            /* Intermediate access */
+            MLuaEmitOpB(fs, OP_GETFIELD_K, (U8)k);
           } else {
+            MLuaEmitOpB(fs, OP_LOADK, (U8)k);
+            StackPush(p, 1);
             break; /* Final: [t, k] stays */
           }
         } else if (Match(p, TK_LBRACKET)) {
@@ -2611,9 +2608,7 @@ static void ParseExprStat(MLuaParser *p) {
       Advance(p);
       ParseExpr(p);
       AdjustTo1(p);
-      MLuaEmitOpB(fs, OP_LOADK, (U8)accessInfo.fieldConstIdx);
-      MLuaEmitOp(fs, OP_SWAP);
-      MLuaEmitOp(fs, OP_SETTABLE_POP);
+      MLuaEmitOpB(fs, OP_SETFIELD_K_POP, (U8)accessInfo.fieldConstIdx);
       StackPop(p, 2); /* Pop t, v */
     } else if (name) {
       /* Simple name = value. The prefix parse already emitted a READ of
