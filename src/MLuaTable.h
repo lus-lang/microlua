@@ -196,6 +196,13 @@ MLuaValue MLuaTableGet(MLuaState *L, MLuaValue tbl, MLuaValue key);
  */
 Bool MLuaTableSet(MLuaState *L, MLuaValue tbl, MLuaValue key, MLuaValue value);
 
+/* Positional insert/remove with raw array-part shifting (table.insert /
+ * table.remove backends). Callers validate pos; FALSE = store failure. */
+Bool MLuaTableArrayInsert(MLuaState *L, MLuaValue tbl, Size pos,
+                          MLuaValue value);
+Bool MLuaTableArrayRemove(MLuaState *L, MLuaValue tbl, Size pos,
+                          MLuaValue *removed);
+
 /*
  * Get the length of the array part (# operator).
  */

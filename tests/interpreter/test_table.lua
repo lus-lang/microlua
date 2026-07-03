@@ -334,6 +334,44 @@ test.describe("integer arithmetic and comparison edges", function()
     end)
 end)
 
+test.describe("positional insert/remove shifting", function()
+    test.it("insert at head, middle, and end", function()
+        local t = { "b", "d" }
+        table.insert(t, 1, "a")
+        table.insert(t, 3, "c")
+        table.insert(t, "e")
+        test.expect(table.concat(t)).toBe("abcde")
+        test.expect(#t).toBe(5)
+    end)
+
+    test.it("remove from head, middle, and end", function()
+        local t = { "a", "b", "c", "d", "e" }
+        test.expect(table.remove(t, 1)).toBe("a")
+        test.expect(table.remove(t, 2)).toBe("c")
+        test.expect(table.remove(t)).toBe("e")
+        test.expect(table.concat(t)).toBe("bd")
+        test.expect(#t).toBe(2)
+    end)
+
+    test.it("interleaved churn stays consistent", function()
+        local t = {}
+        for i = 1, 50 do table.insert(t, 1, i) end -- 50..1
+        test.expect(t[1]).toBe(50)
+        test.expect(t[50]).toBe(1)
+        for i = 1, 25 do table.remove(t, 1) end
+        test.expect(t[1]).toBe(25)
+        test.expect(#t).toBe(25)
+        local sum = 0
+        for _, v in ipairs(t) do sum = sum + v end
+        test.expect(sum).toBe(325) -- 1+..+25
+    end)
+
+    test.it("out-of-bounds insert positions raise", function()
+        test.expect(pcall(table.insert, { 1 }, 5, "x")).toBe(false)
+        test.expect(pcall(table.insert, { 1 }, 0, "x")).toBe(false)
+    end)
+end)
+
 test.describe("large array append", function()
     test.it("fills 200k sequential elements correctly", function()
         -- Regression canary for growth policy: flat (+256) growth made this

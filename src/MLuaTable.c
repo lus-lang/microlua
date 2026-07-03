@@ -919,6 +919,86 @@ Size MLuaTableLen(MLuaValue tbl) {
   return th->ArrayLen;
 }
 
+/* Positional insert/remove over the array part: one grow/append through
+ * the normal store path (so capacity, length bookkeeping, and typed-array
+ * promotion/demotion rules all apply), then a raw MemMove of the slots -
+ * replacing the per-element boxed-key get/set loops table.insert/remove
+ * used, which cost a full generic table dispatch per shifted element.
+ * pos is 1-based and must satisfy 1 <= pos <= len(+1 for insert); callers
+ * validate. Returns FALSE on store failure (OOM / hole error). */
+Bool MLuaTableArrayInsert(MLuaState *L, MLuaValue tbl, Size pos,
+                          MLuaValue value) {
+  MLuaTableHeader *th;
+  Size len;
+
+  if (!IsTable(tbl)) {
+    return FALSE;
+  }
+  th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl));
+  len = MLuaTableLen(tbl);
+
+  /* Append through the normal path: handles growth and, for NUM arrays,
+   * acceptance/demotion. The appended value is the final element; the
+   * shift below rotates it into place. */
+  if (!MLuaTableSet(L, tbl, MakeInt((I32)(len + 1)), value)) {
+    return FALSE;
+  }
+  if (pos == len + 1) {
+    return TRUE;
+  }
+
+#if MLUA_TABLE_NUM_ARRAYS
+  if (MLuaTableArrayKind(th) == MLUA_TABLE_ARRAY_NUM) {
+    MLuaTableNumArray *buf = TypedArray(th);
+    MLUA_FLOAT f = buf->Data[len]; /* the just-appended value */
+    MemMove(&buf->Data[pos], &buf->Data[pos - 1],
+            (len + 1 - pos) * sizeof(MLUA_FLOAT));
+    buf->Data[pos - 1] = f;
+    return TRUE;
+  }
+#endif
+  {
+    MLuaValue *a = MLuaTableArrayData(th);
+    MemMove(&a[pos], &a[pos - 1], (len + 1 - pos) * sizeof(MLuaValue));
+    a[pos - 1] = value;
+  }
+  return TRUE;
+}
+
+Bool MLuaTableArrayRemove(MLuaState *L, MLuaValue tbl, Size pos,
+                          MLuaValue *removed) {
+  MLuaTableHeader *th;
+  Size len;
+
+  if (!IsTable(tbl)) {
+    return FALSE;
+  }
+  th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl));
+  len = MLuaTableLen(tbl);
+  if (len == 0 || pos < 1 || pos > len) {
+    return FALSE;
+  }
+
+  *removed = MLuaTableGet(L, tbl, MakeInt((I32)pos));
+
+#if MLUA_TABLE_NUM_ARRAYS
+  if (MLuaTableArrayKind(th) == MLUA_TABLE_ARRAY_NUM) {
+    MLuaTableNumArray *buf = TypedArray(th);
+    MemMove(&buf->Data[pos - 1], &buf->Data[pos],
+            (len - pos) * sizeof(MLUA_FLOAT));
+    buf->Len--;
+    return TRUE;
+  }
+#endif
+  {
+    MLuaValue *a = MLuaTableArrayData(th);
+    MemMove(&a[pos - 1], &a[pos], (len - pos) * sizeof(MLuaValue));
+    a[len - 1] = MLUA_NIL;
+    th->ArrayLen--;
+  }
+  return TRUE;
+}
+
 Bool MLuaTableAppend(MLuaState *L, MLuaValue tbl, MLuaValue value) {
   MLuaGCHeader *gch;
   MLuaTableHeader *th;

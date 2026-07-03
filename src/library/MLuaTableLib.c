@@ -201,13 +201,16 @@ static int TableInsert(MLuaState *L) {
     }
     pos = (Size)MLuaGetIntVal(posv);
 
-    /* Shift elements up (top-down, so the array never transiently holds a
-       hole) */
-    for (i = len; i >= pos; i--) {
-      MLuaValue v = MLuaTableGet(L, tbl, MakeInt((I32)i));
-      MLuaTableSet(L, tbl, MakeInt((I32)(i + 1)), v);
+    /* Raw array-part shift (one grow + MemMove) instead of a boxed-key
+       get/set round trip per shifted element. */
+    if (!MLuaTableArrayInsert(L, tbl, pos, value)) {
+      if (L->ErrorMsg) {
+        return -1;
+      }
+      L->ErrorMsg = "bad argument #1 to 'insert' (table expected)";
+      return -1;
     }
-    MLuaTableSet(L, tbl, MakeInt((I32)pos), value);
+    UNUSED(i);
   }
 
   return 0;
@@ -293,17 +296,12 @@ static int TableRemove(MLuaState *L) {
     pos = len;
   }
 
-  /* Get the element to remove */
-  removed = MLuaTableGet(L, tbl, MakeInt((I32)pos));
-
-  /* Shift elements down */
-  for (i = pos; i < len; i++) {
-    MLuaValue v = MLuaTableGet(L, tbl, MakeInt((I32)(i + 1)));
-    MLuaTableSet(L, tbl, MakeInt((I32)i), v);
+  /* Raw array-part shift; out-of-range positions keep the old tolerant
+     behavior (remove nothing, return the read value). */
+  if (!MLuaTableArrayRemove(L, tbl, pos, &removed)) {
+    removed = MLuaTableGet(L, tbl, MakeInt((I32)pos));
   }
-
-  /* Remove last element */
-  MLuaTableSet(L, tbl, MakeInt((I32)len), MLUA_NIL);
+  UNUSED(i);
 
   MLuaPush(L, removed);
   return 1;
