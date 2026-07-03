@@ -357,12 +357,13 @@ static Bool TypedArraySet(MLuaState *L, MLuaTableHeader *th, Size index,
   }
 
   if (index == len + 1) {
-    /* Append; grow with the generic policy (x2 below 1024, then +256) */
+    /* Append; grow with the generic policy (x2 below 1024, then x1.5 -
+     * see ArraySet for why flat growth is quadratic) */
     if (index > th->ArraySize) {
       Size newSize = th->ArraySize ? th->ArraySize
                                    : (Size)MLUA_TABLE_INITIAL_ARRAY_SIZE;
       while (newSize < index) {
-        newSize = (newSize >= 1024) ? newSize + 256 : newSize * 2;
+        newSize = (newSize >= 1024) ? newSize + (newSize >> 1) : newSize * 2;
       }
       if (!TypedArrayGrow(L, th, newSize)) {
         return FALSE;
@@ -464,7 +465,12 @@ static Bool ArraySet(MLuaState *L, MLuaTableHeader *th, Size index,
     }
     while (newSize < index) {
       if (newSize >= 1024) {
-        newSize += 256;
+        /* Grow geometrically (x1.5): the old flat +256 made large appends
+         * quadratic - filling n slots reallocated n/256 times and copied
+         * O(n^2/512) values (a 500k-element fill did ~1950 reallocations
+         * and constant GC on the abandoned buffers). x1.5 keeps worst-case
+         * overshoot at 50% of the array, gentler on tiny heaps than x2. */
+        newSize += newSize >> 1;
       } else {
         newSize *= 2;
       }

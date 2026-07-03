@@ -334,6 +334,31 @@ test.describe("integer arithmetic and comparison edges", function()
     end)
 end)
 
+test.describe("large array append", function()
+    test.it("fills 200k sequential elements correctly", function()
+        -- Regression canary for growth policy: flat (+256) growth made this
+        -- quadratic (~800 reallocations); geometric growth does ~15.
+        local t = {}
+        for i = 1, 200000 do t[i] = i * 2 - 1 end
+        test.expect(#t).toBe(200000)
+        test.expect(t[1]).toBe(1)
+        test.expect(t[100000]).toBe(199999)
+        test.expect(t[200000]).toBe(399999)
+        local sum = 0
+        for i = 199990, 200000 do sum = sum + t[i] end
+        test.expect(sum).toBe(4399879)
+    end)
+
+    test.it("append stays correct across the 1024-slot policy boundary", function()
+        local t = {}
+        for i = 1, 3000 do t[i] = i end
+        for i = 1, 3000 do
+            if t[i] ~= i then test.expect(t[i]).toBe(i) end
+        end
+        test.expect(#t).toBe(3000)
+    end)
+end)
+
 test.describe("hash deletion", function()
     test.it("keeps other keys reachable after a delete", function()
         -- Regression: nilling a deleted node's Key terminated probe chains
