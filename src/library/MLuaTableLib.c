@@ -317,6 +317,13 @@ typedef struct {
   MLuaGCRef Comp;
   Bool HasComp;
   Bool Error;
+  /* Direct pointer into the table's generic array part, set ONLY for
+   * default-comparator sorts over a fully-array-resident sequence: the
+   * default compare (MLuaCompare) never allocates, so nothing can move
+   * while the sort runs and every element access skips the boxed-key
+   * generic table path. Custom comparators call back into Lua (GC can
+   * move the buffer), so they always take the table-access route. */
+  MLuaValue *Raw;
 } TableSortContext;
 
 static Bool TableSortCompare(MLuaState *L, TableSortContext *ctx, MLuaValue a,
@@ -351,12 +358,28 @@ static Bool TableSortCompare(MLuaState *L, TableSortContext *ctx, MLuaValue a,
   }
 }
 
-/* Helper: swap two table elements */
-static void TableSwap(MLuaState *L, MLuaValue tbl, Size i, Size j) {
-  MLuaValue a = MLuaTableGet(L, tbl, MakeInt((I32)i));
-  MLuaValue b = MLuaTableGet(L, tbl, MakeInt((I32)j));
-  MLuaTableSet(L, tbl, MakeInt((I32)i), b);
-  MLuaTableSet(L, tbl, MakeInt((I32)j), a);
+/* Element accessors: raw array slots when ctx->Raw is set, generic table
+ * access otherwise. */
+static MLuaValue SortGet(MLuaState *L, TableSortContext *ctx, Size i) {
+  if (ctx->Raw) {
+    return ctx->Raw[i - 1];
+  }
+  return MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)i));
+}
+
+static void SortSwap(MLuaState *L, TableSortContext *ctx, Size i, Size j) {
+  if (ctx->Raw) {
+    MLuaValue tmp = ctx->Raw[i - 1];
+    ctx->Raw[i - 1] = ctx->Raw[j - 1];
+    ctx->Raw[j - 1] = tmp;
+    return;
+  }
+  {
+    MLuaValue a = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)i));
+    MLuaValue b = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)j));
+    MLuaTableSet(L, ctx->Table.Value, MakeInt((I32)i), b);
+    MLuaTableSet(L, ctx->Table.Value, MakeInt((I32)j), a);
+  }
 }
 
 /* Hoare partition around a median-of-3 pivot. Returns j such that
@@ -377,33 +400,32 @@ static Size TablePartition(MLuaState *L, TableSortContext *ctx, Size lo,
   MLuaValue b;
 
   /* Order t[lo] <= t[mid] <= t[hi]; the ends double as scan sentinels. */
-  a = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)mid));
-  b = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)lo));
+  a = SortGet(L, ctx, mid);
+  b = SortGet(L, ctx, lo);
   if (TableSortCompare(L, ctx, a, b)) {
-    TableSwap(L, ctx->Table.Value, mid, lo);
+    SortSwap(L, ctx, mid, lo);
   }
-  a = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)hi));
-  b = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)mid));
+  a = SortGet(L, ctx, hi);
+  b = SortGet(L, ctx, mid);
   if (!ctx->Error && TableSortCompare(L, ctx, a, b)) {
-    TableSwap(L, ctx->Table.Value, hi, mid);
-    a = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)mid));
-    b = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)lo));
+    SortSwap(L, ctx, hi, mid);
+    a = SortGet(L, ctx, mid);
+    b = SortGet(L, ctx, lo);
     if (!ctx->Error && TableSortCompare(L, ctx, a, b)) {
-      TableSwap(L, ctx->Table.Value, mid, lo);
+      SortSwap(L, ctx, mid, lo);
     }
   }
   if (ctx->Error) {
     return lo;
   }
 
-  MLuaPushGCRef(L, &pivotRef,
-                MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)mid)));
+  MLuaPushGCRef(L, &pivotRef, SortGet(L, ctx, mid));
 
   i = lo;
   j = hi;
   for (;;) {
     for (;;) { /* scan right while t[i] < pivot */
-      a = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)i));
+      a = SortGet(L, ctx, i);
       if (ctx->Error || i >= hi ||
           !TableSortCompare(L, ctx, a, pivotRef.Value)) {
         break;
@@ -411,7 +433,7 @@ static Size TablePartition(MLuaState *L, TableSortContext *ctx, Size lo,
       i++;
     }
     for (;;) { /* scan left while pivot < t[j] */
-      b = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)j));
+      b = SortGet(L, ctx, j);
       if (ctx->Error || j <= lo ||
           !TableSortCompare(L, ctx, pivotRef.Value, b)) {
         break;
@@ -421,7 +443,7 @@ static Size TablePartition(MLuaState *L, TableSortContext *ctx, Size lo,
     if (ctx->Error || i >= j) {
       break;
     }
-    TableSwap(L, ctx->Table.Value, i, j);
+    SortSwap(L, ctx, i, j);
     i++;
     j--;
   }
@@ -471,6 +493,18 @@ static int TableSort(MLuaState *L) {
 
   ctx.HasComp = hasComp;
   ctx.Error = FALSE;
+  ctx.Raw = NULL;
+  if (!hasComp && IsTable(tbl)) {
+    MLuaTableHeader *th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl));
+#if MLUA_TABLE_NUM_ARRAYS
+    if (MLuaTableArrayKind(th) != MLUA_TABLE_ARRAY_NUM)
+#endif
+    {
+      if ((Size)th->ArrayLen == len) {
+        ctx.Raw = MLuaTableArrayData(th);
+      }
+    }
+  }
   MLuaPushGCRef(L, &ctx.Table, tbl);
   MLuaPushGCRef(L, &ctx.Comp, compFunc);
   if (len > 1) {
