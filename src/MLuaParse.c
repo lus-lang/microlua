@@ -724,6 +724,121 @@ typedef enum {
   PREC_POW      /* ^ */
 } Precedence;
 
+/* ---- Parse-time integer constant folding ---------------------------------
+ * Only integers fold, and only for ops whose integer semantics are exact and
+ * width-independent (ADD/SUB/MUL wrap two's-complement like the VM's I32
+ * path; MOD only when both operands are non-negative, keeping clear of the
+ * documented C-truncation divergence and of the b==0 runtime error). Floats
+ * NEVER fold: parse-time evaluation also runs on binary32 ports and folded
+ * constants cross the binary64 bytecode boundary, so a float fold could
+ * differ from the same expression evaluated at run time. */
+
+/* Read the integer literal loaded by the single 2-byte instruction at pos
+ * (OP_LOADINT, or OP_LOADK of an int constant). */
+static Bool LiteralIntAt(MLuaFuncState *fs, Size pos, I32 *out) {
+  MLuaProto *proto = fs->Proto;
+  U8 opb;
+
+  if (pos == (Size)-1 || pos + 2 > proto->CodeSize) {
+    return FALSE;
+  }
+  opb = proto->Code[pos];
+  if (opb == OP_LOADINT) {
+    *out = (I32)(I8)proto->Code[pos + 1];
+    return TRUE;
+  }
+  if (opb == OP_LOADK) {
+    MLuaValue k = proto->Constants[proto->Code[pos + 1]];
+    if (IsInt(k)) {
+      *out = MLuaGetIntVal(k);
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+/* Emit an integer literal exactly the way a source literal emits. */
+static void EmitIntLiteral(MLuaParser *p, I32 v) {
+  MLuaFuncState *fs = p->FS;
+  if (v >= -128 && v <= 127) {
+    MLuaEmitOpB(fs, OP_LOADINT, (U8)(I8)v);
+  } else {
+    int k = MLuaAddConstant(fs, MLuaMakeInt(p->L, v));
+    if (k < 0 || k > 255) {
+      Error(p, "too many constants in function");
+      return;
+    }
+    MLuaEmitOpB(fs, OP_LOADK, (U8)k);
+  }
+}
+
+/* If the two just-emitted instructions ending the code buffer are integer
+ * literals, retract them and emit the folded result. */
+static Bool TryFoldBinaryInt(MLuaParser *p, MLuaOpCode binOp) {
+  MLuaFuncState *fs = p->FS;
+  MLuaProto *proto = fs->Proto;
+  Size last = fs->LastInstrPos;
+  Size prev = fs->PrevInstrPos;
+  I32 a;
+  I32 b;
+  I32 r;
+
+  if (binOp != OP_ADD && binOp != OP_SUB && binOp != OP_MUL &&
+      binOp != OP_MOD) {
+    return FALSE;
+  }
+  if (last == (Size)-1 || prev == (Size)-1 || last != prev + 2 ||
+      proto->CodeSize != last + 2) {
+    return FALSE;
+  }
+  if (!LiteralIntAt(fs, prev, &a) || !LiteralIntAt(fs, last, &b)) {
+    return FALSE;
+  }
+
+  switch (binOp) {
+  case OP_ADD:
+    r = (I32)((U32)a + (U32)b);
+    break;
+  case OP_SUB:
+    r = (I32)((U32)a - (U32)b);
+    break;
+  case OP_MUL:
+    r = (I32)((U32)a * (U32)b);
+    break;
+  default: /* OP_MOD */
+    if (a < 0 || b <= 0) {
+      return FALSE;
+    }
+    r = a % b;
+    break;
+  }
+
+  proto->CodeSize = prev;
+  fs->LastInstrPos = (Size)-1;
+  fs->PrevInstrPos = (Size)-1;
+  EmitIntLiteral(p, r);
+  return TRUE;
+}
+
+/* Same for unary minus over one just-emitted integer literal. */
+static Bool TryFoldUnaryMinus(MLuaParser *p) {
+  MLuaFuncState *fs = p->FS;
+  MLuaProto *proto = fs->Proto;
+  Size last = fs->LastInstrPos;
+  I32 v;
+
+  if (last == (Size)-1 || proto->CodeSize != last + 2 ||
+      !LiteralIntAt(fs, last, &v)) {
+    return FALSE;
+  }
+
+  proto->CodeSize = last;
+  fs->LastInstrPos = (Size)-1;
+  fs->PrevInstrPos = (Size)-1;
+  EmitIntLiteral(p, (I32)(0U - (U32)v));
+  return TRUE;
+}
+
 static MLuaOpCode BinaryOp(MLuaTokenType t) {
   switch (t) {
   case TK_PLUS:
@@ -934,7 +1049,9 @@ static void ParsePrefix(MLuaParser *p) {
     Advance(p);
     ParseSubExpr(p, PREC_UNARY);
     AdjustTo1(p);
-    MLuaEmitOp(fs, OP_UNM);
+    if (!TryFoldUnaryMinus(p)) {
+      MLuaEmitOp(fs, OP_UNM);
+    }
     break;
 
   case TK_NOT:
@@ -1330,7 +1447,9 @@ static void ParseSubExpr(MLuaParser *p, Precedence minPrec) {
         MLuaEmitOp(fs, OP_SWAP);
       }
 
-      MLuaEmitOp(fs, binOp);
+      if (swap || !TryFoldBinaryInt(p, binOp)) {
+        MLuaEmitOp(fs, binOp);
+      }
       StackPop(p, 1); /* Two operands -> one result */
     }
   }
