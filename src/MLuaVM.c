@@ -1188,31 +1188,26 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       VM_BREAK;
     }
 
-    VM_CASE(OP_EQ): {
-      MLuaValue b = STACK_POP();
-      MLuaValue a = STACK_POP();
-      STACK_PUSH(MLuaCompare(L, OP_EQ, a, b) ? MLUA_TRUE : MLUA_FALSE);
-      VM_BREAK;
-    }
-
-    VM_CASE(OP_NEQ): {
-      MLuaValue b = STACK_POP();
-      MLuaValue a = STACK_POP();
-      STACK_PUSH(MLuaCompare(L, OP_NEQ, a, b) ? MLUA_TRUE : MLUA_FALSE);
-      VM_BREAK;
-    }
-
-    VM_CASE(OP_LT): {
-      MLuaValue b = STACK_POP();
-      MLuaValue a = STACK_POP();
-      STACK_PUSH(MLuaCompare(L, OP_LT, a, b) ? MLUA_TRUE : MLUA_FALSE);
-      VM_BREAK;
-    }
-
+    VM_CASE(OP_EQ):
+    VM_CASE(OP_NEQ):
+    VM_CASE(OP_LT):
     VM_CASE(OP_LE): {
       MLuaValue b = STACK_POP();
       MLuaValue a = STACK_POP();
-      STACK_PUSH(MLuaCompare(L, OP_LE, a, b) ? MLUA_TRUE : MLUA_FALSE);
+      Bool res;
+      /* Inline int-int fast path, mirroring MLuaCompare's integer branch
+       * exactly (same idiom as the arithmetic fast path above). */
+      if (IsInlineInt(a) && IsInlineInt(b)) {
+        I32 ia = GetInt(a);
+        I32 ib = GetInt(b);
+        res = (op == OP_EQ)    ? (ia == ib)
+              : (op == OP_NEQ) ? (ia != ib)
+              : (op == OP_LT)  ? (ia < ib)
+                               : (ia <= ib);
+      } else {
+        res = MLuaCompare(L, (MLuaOpCode)op, a, b);
+      }
+      STACK_PUSH(res ? MLUA_TRUE : MLUA_FALSE);
       VM_BREAK;
     }
 
@@ -1307,11 +1302,23 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       I8 offset = (I8)READ_BYTE();
       MLuaValue b = STACK_POP();
       MLuaValue a = STACK_POP();
-      MLuaOpCode cmp = (op == OP_JMPF_EQ)    ? OP_EQ
-                       : (op == OP_JMPF_NEQ) ? OP_NEQ
-                       : (op == OP_JMPF_LT)  ? OP_LT
-                                             : OP_LE;
-      if (!MLuaCompare(L, cmp, a, b)) {
+      Bool res;
+      if (IsInlineInt(a) && IsInlineInt(b)) {
+        /* Inline int-int fast path (see the compare opcodes) */
+        I32 ia = GetInt(a);
+        I32 ib = GetInt(b);
+        res = (op == OP_JMPF_EQ)    ? (ia == ib)
+              : (op == OP_JMPF_NEQ) ? (ia != ib)
+              : (op == OP_JMPF_LT)  ? (ia < ib)
+                                    : (ia <= ib);
+      } else {
+        MLuaOpCode cmp = (op == OP_JMPF_EQ)    ? OP_EQ
+                         : (op == OP_JMPF_NEQ) ? OP_NEQ
+                         : (op == OP_JMPF_LT)  ? OP_LT
+                                               : OP_LE;
+        res = MLuaCompare(L, cmp, a, b);
+      }
+      if (!res) {
         pc += offset;
       }
       VM_BREAK;
