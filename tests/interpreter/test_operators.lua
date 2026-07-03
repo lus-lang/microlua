@@ -81,6 +81,37 @@ test.describe("concatenation precedence", function()
     end)
 end)
 
+test.describe("float arithmetic canonicalization", function()
+    test.it("integral float results collapse to integers", function()
+        test.expect(2.5 + 2.5).toBe(5)
+        test.expect(2.5 + 2.5 == 5).toBeTrue()
+        test.expect(type(2.5 + 2.5)).toBe("number")
+        test.expect(7.5 - 2.5).toBe(5)
+        test.expect(2.5 * 4).toBe(10)
+        test.expect(1.25 * 8.0).toBe(10)
+    end)
+
+    test.it("fractional results stay floats", function()
+        -- Fractions built by integer division are exact binary values;
+        -- decimal literals are avoided here because the freestanding
+        -- float parser can be a final-ulp off (pre-existing, documented).
+        local half = 1 / 2
+        local quarter = 1 / 4
+        test.expect(half + quarter).toBe(3 / 4)
+        test.expect(half * half).toBe(quarter)
+        test.expect(7 / 2 - 5 / 4).toBe(9 / 4)
+        test.expect(half + quarter > 0).toBeTrue()
+        test.expect(type(half + quarter)).toBe("number")
+    end)
+
+    test.it("non-finite results stay floats", function()
+        local inf = 1e300 * 1e300
+        test.expect(inf > 1e308).toBeTrue()
+        local nan = inf - inf
+        test.expect(nan == nan).toBe(false)
+    end)
+end)
+
 test.describe("compare-branch fusion", function()
     test.it("statement conditions behave across all four comparisons", function()
         local hits = 0

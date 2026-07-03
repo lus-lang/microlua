@@ -1245,6 +1245,25 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
           VM_BREAK;
         }
       }
+#if MLUA_PTR_SIZE == 8
+      /* Inline double-double fast path (NaN-boxing only: floats live in
+       * the value word, so no allocation is possible here). The result is
+       * canonicalized exactly like MLuaMakeNumber: an integral value
+       * collapses back to an int, preserving 2.5+2.5 == 5 (integer). */
+      if (IsDouble(a) && IsDouble(b)) {
+        double da = GetDouble(a);
+        double db = GetDouble(b);
+        double r = (op == OP_ADD)   ? da + db
+                   : (op == OP_SUB) ? da - db
+                                    : da * db;
+        if (r == (double)(I32)r) {
+          STACK_PUSH(MakeInt((I32)r));
+        } else {
+          STACK_PUSH(MakeDouble(r));
+        }
+        VM_BREAK;
+      }
+#endif
       result = MLuaArith(L, (MLuaOpCode)op, a, b);
       VM_CHECK_NIL(result); /* Type error in arithmetic */
       STACK_PUSH(result);
