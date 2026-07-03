@@ -417,6 +417,34 @@ static int StringFind(MLuaState *L) {
     return 1;
   }
 
+  /* A pattern containing no magic characters is a literal: route it to
+   * the plain substring scan below instead of running the backtracking
+   * matcher at every position (PUC's strpbrk-SPECIALS check, inlined -
+   * no libc here). */
+  if (!plain) {
+    Size m;
+    Bool magic = FALSE;
+    for (m = 0; m < plen && !magic; m++) {
+      switch (pattern[m]) {
+      case '^':
+      case '$':
+      case '*':
+      case '+':
+      case '?':
+      case '.':
+      case '(':
+      case '[':
+      case '%':
+      case '-':
+        magic = TRUE;
+        break;
+      default:
+        break;
+      }
+    }
+    plain = !magic;
+  }
+
   /* Plain text search */
   if (plain) {
     for (i = init - 1; i + plen <= slen; i++) {
