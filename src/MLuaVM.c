@@ -608,8 +608,12 @@ void MLuaDumpOpProfile(MLuaState *L) {
 #define EVAL_TOP() (L->EvalStack[L->EvalTop - 1])
 #define EVAL_PEEK(n) (L->EvalStack[L->EvalTop - 1 - (n)])
 
-#define LOCAL_GET(slot) (L->Locals[L->LocalsBase + (slot)])
-#define LOCAL_SET(slot, v) (L->Locals[L->LocalsBase + (slot)] = (v))
+/* Local-slot access through RunVM's cached frame-base pointer: LocalsBase
+ * only changes at frame switches, which all funnel through RELOAD_FRAME,
+ * and the Locals arena is a pinned RAW buffer (never moved by the GC), so
+ * the cached pointer saves two dependent loads on every local access. */
+#define LOCAL_GET(slot) (locals[slot])
+#define LOCAL_SET(slot, v) (locals[slot] = (v))
 
 /* Stack macros now redirect to EvalStack */
 #define STACK_PUSH(v) EVAL_PUSH(v)
@@ -837,11 +841,17 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
   const U8 *pc;
   MLuaProto *proto;
   MLuaClosure *cl;
+  MLuaValue *locals;
+  const MLuaValue *consts;
 
   /* Load (or reload after resume) the top frame's execution registers
    * (shared out-of-line body: this runs at frame switches, not per
-   * instruction, and is expanded at many call sites) */
-#define RELOAD_FRAME() ReloadFrame(L, &pc, &proto, &cl)
+   * instruction, and is expanded at many call sites). locals/consts are
+   * derived caches: LocalsBase and proto only change at frame switches or
+   * a collection, and both events funnel through this reload. */
+#define RELOAD_FRAME()                                                         \
+  (ReloadFrame(L, &pc, &proto, &cl), locals = L->Locals + L->LocalsBase,       \
+   consts = proto->Constants)
 
 #if MLUA_VM_COMPUTED_GOTO
   /* Label-address table: opcodes not listed dispatch to the unknown-opcode
@@ -985,7 +995,7 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
     VM_CASE(OP_LOADK): {
       U8 k = READ_BYTE();
       if (k < proto->ConstantsSize) {
-        STACK_PUSH(proto->Constants[k]);
+        STACK_PUSH(consts[k]);
       } else {
         STACK_PUSH(MLUA_NIL);
       }
@@ -1040,7 +1050,7 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
     VM_CASE(OP_GETGLOBAL_K): {
       /* Fused LOADK B; GETGLOBAL */
       U8 k = READ_BYTE();
-      MLuaValue val = MLuaTableGetField(L, L->Globals, proto->Constants[k]);
+      MLuaValue val = MLuaTableGetField(L, L->Globals, consts[k]);
       STACK_PUSH(val);
       VM_BREAK;
     }
@@ -1049,7 +1059,7 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       /* Fused LOADK B; SWAP; SETGLOBAL */
       U8 k = READ_BYTE();
       MLuaValue val = STACK_POP();
-      MLuaTableSetField(L, L->Globals, proto->Constants[k], val);
+      MLuaTableSetField(L, L->Globals, consts[k], val);
       VM_BREAK;
     }
 
@@ -1148,7 +1158,7 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       U8 k = READ_BYTE();
       MLuaValue tbl = STACK_POP();
       MLuaValue result;
-      VM_TRY(MLuaTableGetSafe(L, tbl, proto->Constants[k], &result));
+      VM_TRY(MLuaTableGetSafe(L, tbl, consts[k], &result));
       STACK_PUSH(result);
       VM_BREAK;
     }
@@ -1158,7 +1168,7 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       U8 k = READ_BYTE();
       MLuaValue val = STACK_POP();
       MLuaValue tbl = STACK_TOP();
-      VM_TRY(MLuaTableSetSafe(L, tbl, proto->Constants[k], val));
+      VM_TRY(MLuaTableSetSafe(L, tbl, consts[k], val));
       VM_BREAK;
     }
 
@@ -1167,7 +1177,7 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       U8 k = READ_BYTE();
       MLuaValue val = STACK_POP();
       MLuaValue tbl = STACK_POP();
-      VM_TRY(MLuaTableSetSafe(L, tbl, proto->Constants[k], val));
+      VM_TRY(MLuaTableSetSafe(L, tbl, consts[k], val));
       VM_BREAK;
     }
 
@@ -1176,7 +1186,7 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       U8 k = READ_BYTE();
       MLuaValue tbl = STACK_POP();
       MLuaValue method;
-      VM_TRY(MLuaTableGetSafe(L, tbl, proto->Constants[k], &method));
+      VM_TRY(MLuaTableGetSafe(L, tbl, consts[k], &method));
       STACK_PUSH(method);
       STACK_PUSH(tbl);
       VM_BREAK;
