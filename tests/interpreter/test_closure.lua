@@ -226,4 +226,58 @@ test.describe("shadowing", function()
     end)
 end)
 
+test.describe("argument passing across the frame boundary", function()
+    test.it("extra args to fixed-arity functions are discarded", function()
+        local function fixed(a, b) return a, b end
+        local x, y = fixed(1, 2, 3, 4)
+        test.expect(x).toBe(1)
+        test.expect(y).toBe(2)
+    end)
+
+    test.it("missing args nil-fill", function()
+        local function fixed(a, b, c) return c end
+        test.expect(fixed(1)).toBe(nil)
+    end)
+
+    test.it("select('#') counts varargs exactly", function()
+        local function va(...) return select("#", ...) end
+        test.expect(va(10, 20, 30)).toBe(3)
+        test.expect(va()).toBe(0)
+        test.expect(va(nil)).toBe(1)
+        local function mixed(a, ...) return select("#", ...) end
+        test.expect(mixed(1, 2, 3)).toBe(2)
+        test.expect(mixed(1)).toBe(0)
+    end)
+
+    test.it("varargs forward through nested calls", function()
+        local function inner(...) return select("#", ...), ... end
+        local function outer(...) return inner(...) end
+        local n, a, b = outer("p", "q")
+        test.expect(n).toBe(2)
+        test.expect(a).toBe("p")
+        test.expect(b).toBe("q")
+    end)
+
+    test.it("coroutine resume passes args into fixed and vararg frames", function()
+        local co = coroutine.create(function(x, y)
+            local a, b = coroutine.yield(x + y)
+            return a * b
+        end)
+        local ok, v = coroutine.resume(co, 3, 4)
+        test.expect(ok).toBeTrue()
+        test.expect(v).toBe(7)
+        ok, v = coroutine.resume(co, 5, 6)
+        test.expect(ok).toBeTrue()
+        test.expect(v).toBe(30)
+    end)
+
+    test.it("errors unwind through mixed vararg/fixed frames", function()
+        local function boom(...) error("kaput") end
+        local function relay(a) return boom(a, a) end
+        local ok, err = pcall(relay, 1)
+        test.expect(ok).toBe(false)
+        test.expect(string.find(err, "kaput") ~= nil).toBeTrue()
+    end)
+end)
+
 assert(test.run())

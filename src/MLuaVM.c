@@ -652,14 +652,21 @@ static MLuaStatus PushFrame(MLuaState *L, Size funcPos, Size nargs) {
   }
 
   win = L->ArgsTop;
-  if (win + nargs > L->ArgsSize) {
-    L->ErrorMsg = "argument stack overflow";
-    return MLUA_ERRRUN;
-  }
 
-  /* Copy arguments into this frame's window */
-  for (i = 0; i < nargs; i++) {
-    L->Args[win + i] = L->EvalStack[funcPos + 1 + i];
+  /* Only a VARARG callee ever reads its Args window after this point
+   * (OP_VARARG is not emitted otherwise), so the EvalStack->Args copy is
+   * pure waste for the common fixed-arity call: those frames record an
+   * EMPTY window and their parameters load straight from the eval stack. */
+  if (proto->IsVararg) {
+    if (win + nargs > L->ArgsSize) {
+      L->ErrorMsg = "argument stack overflow";
+      return MLUA_ERRRUN;
+    }
+    for (i = 0; i < nargs; i++) {
+      L->Args[win + i] = L->EvalStack[funcPos + 1 + i];
+    }
+  } else {
+    nargs = 0; /* the recorded window is empty */
   }
 
   f = &L->Frames[L->FrameTop++];
@@ -670,13 +677,19 @@ static MLuaStatus PushFrame(MLuaState *L, Size funcPos, Size nargs) {
   f->ArgsBase = win;
   f->ArgsCount = nargs;
 
+  /* Initialize locals from the still-intact eval stack: parameters first,
+   * then nil. Extra args beyond NumLocals are discarded, missing ones
+   * nil-fill - identical to the old two-hop copy through Args. */
+  {
+    Size avail = L->EvalTop - (funcPos + 1);
+    for (i = 0; i < proto->NumLocals; i++) {
+      L->Locals[newBase + i] =
+          (i < avail) ? L->EvalStack[funcPos + 1 + i] : MLUA_NIL;
+    }
+  }
+
   /* Pop func+args; the callee's results will land at funcPos */
   L->EvalTop = funcPos;
-
-  /* Initialize locals: parameters first, then nil */
-  for (i = 0; i < proto->NumLocals; i++) {
-    L->Locals[newBase + i] = (i < nargs) ? L->Args[win + i] : MLUA_NIL;
-  }
 
   L->LocalsBase = newBase;
   L->LocalsTop = newBase + proto->NumLocals;
