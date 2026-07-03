@@ -336,6 +336,54 @@ TEST(GCCollect_PointerKeysSurviveCompaction) {
   MLuaPopGCRef(L, &tref);
 }
 
+/* A collection that shrinks the (weak) intern table must not recurse into a
+ * second full collection: the abandoned backing array is ordinary garbage
+ * for the NEXT cycle. One MLuaGCCollect call = exactly one cycle. */
+TEST(GCCollect_InternShrinkIsSingleCycle) {
+  MLuaState *L = MLuaStateInit(TestHeap, TEST_HEAP_SIZE);
+  U32 cyclesBefore;
+  char buf[32];
+  int i;
+  ASSERT_NE(L, NULL);
+
+  MLuaGCEnable(L, FALSE);
+
+  /* Intern enough distinct heap strings to grow the table well past its
+   * initial capacity, holding no references to any of them. */
+  for (i = 0; i < 600; i++) {
+    int n = i;
+    int p = 0;
+    buf[p++] = 'i';
+    buf[p++] = 'n';
+    buf[p++] = 't';
+    buf[p++] = 'e';
+    buf[p++] = 'r';
+    buf[p++] = 'n';
+    do {
+      buf[p++] = (char)('0' + (n % 10));
+      n /= 10;
+    } while (n > 0);
+    MLuaStringNew(L, buf, (Size)p);
+  }
+
+  /* The dead strings must have grown the intern table, or this test would
+   * pass without exercising the shrink path at all. */
+  {
+    Size capBefore = L->StringTableCap;
+    cyclesBefore = L->GCCycleCount;
+    MLuaGCCollect(L); /* drops the dead strings; the intern table shrinks */
+    ASSERT_GT(capBefore, L->StringTableCap);
+    ASSERT_EQ(L->GCCycleCount, cyclesBefore + 1);
+  }
+
+  /* Interning must still work against the migrated table. */
+  {
+    MLuaValue a = MLuaStringNew(L, "post-shrink-string", 18);
+    MLuaValue b = MLuaStringNew(L, "post-shrink-string", 18);
+    ASSERT_EQ(a, b); /* pointer equality == value equality */
+  }
+}
+
 /* ========================================================================== */
 /* Main                                                                       */
 /* ========================================================================== */
@@ -359,6 +407,7 @@ int main(void) {
   RUN_TEST(GCCollect_ReferencedOnStack);
   RUN_TEST(GCCollect_ReferencedByGCRef);
   RUN_TEST(GCCollect_PointerKeysSurviveCompaction);
+  RUN_TEST(GCCollect_InternShrinkIsSingleCycle);
 
   printf("\nMarking:\n");
   RUN_TEST(GCMark_NonPointer);

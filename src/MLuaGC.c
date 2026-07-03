@@ -906,13 +906,13 @@ GC_TRACE("[gc] done (top=%lu)\n", (unsigned long)L->HeapTop);
   MLuaGCVerifyHeap(L, "collect-end");
 #endif
 
-  /* A weak string table can be mostly tombstones after update/compact. If a
-   * smaller backing array is installed, run one cleanup collection so the old
-   * backing raw buffer does not remain retained until the next cycle. */
-  if (MLuaStringTableShrink(L)) {
-    MLuaGCCollect(L);
-    return;
-  }
+  /* A weak string table can be mostly tombstones after update/compact;
+   * install a smaller backing array when so. The abandoned old array is
+   * ordinary unreachable garbage: leaving it for the next allocation-driven
+   * cycle costs a bounded, table-sized sliver of heap for a while, whereas
+   * recursing into a second full collection here doubled the worst-case GC
+   * pause (mark + three heap walks, twice) just to reclaim that one buffer. */
+  (void)MLuaStringTableShrink(L);
 
   /* Update GC threshold based on live growth, not total heap capacity. */
   L->GCThreshold = MLuaNextGCThreshold(L, L->HeapTop);
