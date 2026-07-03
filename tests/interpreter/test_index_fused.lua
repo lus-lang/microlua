@@ -275,6 +275,32 @@ test.describe("constant-key field fusion (GETFIELD_K/SETFIELD_K)", function()
         test.expect(t.arr[1].v).toBe(9)
     end)
 
+    test.it("method calls through SELF_K", function()
+        local obj = { val = 10 }
+        function obj.get(self) return self.val end
+        function obj.add(self, n)
+            self.val = self.val + n
+            return self
+        end
+        test.expect(obj:get()).toBe(10)
+        test.expect(obj:add(5):get()).toBe(15) -- chained t:a():b()
+        -- methods resolved through the forward table
+        local proto = {}
+        function proto.kind(self) return self.name end
+        local inst = { name = "widget" }
+        table.forward(inst, proto)
+        test.expect(inst:kind()).toBe("widget")
+        -- method call on nil receiver raises
+        local ok = pcall(function()
+            local x = nil
+            return x:m()
+        end)
+        test.expect(ok).toBe(false)
+        -- arguments flow correctly after the receiver
+        function obj.sum3(self, a, b, c) return self.val + a + b + c end
+        test.expect(obj:sum3(1, 2, 3)).toBe(21)
+    end)
+
     test.it("field reads on non-tables raise", function()
         local ok = pcall(function()
             local x = nil

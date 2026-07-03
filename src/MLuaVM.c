@@ -873,6 +873,7 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       [OP_GETFIELD_K] = &&L_OP_GETFIELD_K,
       [OP_SETFIELD_K] = &&L_OP_SETFIELD_K,
       [OP_SETFIELD_K_POP] = &&L_OP_SETFIELD_K_POP,
+      [OP_SELF_K] = &&L_OP_SELF_K,
       [OP_POP] = &&L_OP_POP,
       [OP_DUP] = &&L_OP_DUP,
       [OP_SWAP] = &&L_OP_SWAP,
@@ -1163,6 +1164,17 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       MLuaValue val = STACK_POP();
       MLuaValue tbl = STACK_POP();
       VM_TRY(MLuaTableSetSafe(L, tbl, proto->Constants[k], val));
+      VM_BREAK;
+    }
+
+    VM_CASE(OP_SELF_K): {
+      /* Fused DUP; LOADK B; GETTABLE; SWAP: [t] -> [method, t] */
+      U8 k = READ_BYTE();
+      MLuaValue tbl = STACK_POP();
+      MLuaValue method;
+      VM_TRY(MLuaTableGetSafe(L, tbl, proto->Constants[k], &method));
+      STACK_PUSH(method);
+      STACK_PUSH(tbl);
       VM_BREAK;
     }
 

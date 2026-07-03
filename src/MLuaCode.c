@@ -82,6 +82,7 @@ static const U8 OpSizes[OP_COUNT] = {
     [OP_GETFIELD_K] = 2,
     [OP_SETFIELD_K] = 2,
     [OP_SETFIELD_K_POP] = 2,
+    [OP_SELF_K] = 2,
     [OP_GETTABLE_LL] = 2,
     [OP_SETTABLE_LL] = 2,
 };

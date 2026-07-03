@@ -87,6 +87,10 @@ typedef enum {
   OP_SETFIELD_K = 0x29,     /* 2B: t v → t : t[constants[B]] = v */
   OP_SETFIELD_K_POP = 0x2A, /* 2B: t v →   : t[constants[B]] = v */
 
+  /* Fused method-call receiver setup: t:m(...) needs [method, t] on the
+   * stack; this replaces DUP; LOADK m; GETTABLE; SWAP. */
+  OP_SELF_K = 0x2B, /* 2B: t → f t : f = t[constants[B]] */
+
   /* ===== Logic (0x30-0x34) ===== */
   OP_NOT = 0x30, /* 1B: v → bool   : Push true if v is nil/false */
   OP_EQ = 0x31,  /* 1B: a b → bool : Push a == b */

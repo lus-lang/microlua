@@ -1296,14 +1296,9 @@ static AccessInfo ParseSuffixForAssign(MLuaParser *p) {
                                p->Lex.Token.Value.String.Length);
       Advance(p);
 
-      /* [t] -> [func, t]: duplicate receiver, look up method, reorder */
-      MLuaEmitOp(fs, OP_DUP);
+      /* [t] -> [func, t]: fused receiver setup */
+      MLuaEmitOpB(fs, OP_SELF_K, (U8)methodK);
       StackPush(p, 1);
-      MLuaEmitOpB(fs, OP_LOADK, (U8)methodK);
-      StackPush(p, 1);
-      MLuaEmitOp(fs, OP_GETTABLE);
-      StackPop(p, 1);
-      MLuaEmitOp(fs, OP_SWAP);
 
       /* Arguments: (expr list), "string" or {table} */
       if (Check(p, TK_LPAREN)) {
