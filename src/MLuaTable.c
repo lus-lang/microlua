@@ -815,6 +815,40 @@ MLuaValue MLuaTableGet(MLuaState *L, MLuaValue tbl, MLuaValue key) {
   return MLUA_NIL;
 }
 
+/* String-keyed (field/global) accessors: a name constant can never be a
+ * positive integer, so these skip the array-part probe and go straight to
+ * the hash chain. Get keeps full Forward-chain semantics, including the
+ * dead-node miss falling through to the forward table; set writes the
+ * table directly (assignments never delegate). The hot path under
+ * GETGLOBAL_K/SETGLOBAL_K. */
+MLuaValue MLuaTableGetField(MLuaState *L, MLuaValue tbl, MLuaValue key) {
+  MLuaValue current = tbl;
+  int depth = 0;
+  const int MAX_DEPTH = 100;
+
+  while (IsTable(current) && depth < MAX_DEPTH) {
+    MLuaTableHeader *th = MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(current));
+    MLuaTableNode *node;
+    HashRefresh(L, th);
+    node = HashFind(th, key);
+    if (node && !IsNil(node->Value)) {
+      return node->Value;
+    }
+    current = th->Forward;
+    depth++;
+  }
+  return MLUA_NIL;
+}
+
+Bool MLuaTableSetField(MLuaState *L, MLuaValue tbl, MLuaValue key,
+                       MLuaValue value) {
+  if (!IsTable(tbl) || IsNil(key)) {
+    return FALSE;
+  }
+  return HashSet(L, MLUA_TABLEHEADER((MLuaGCHeader *)GetPtr(tbl)), key,
+                 value);
+}
+
 Bool MLuaTableSet(MLuaState *L, MLuaValue tbl, MLuaValue key, MLuaValue value) {
   MLuaGCHeader *gch;
   MLuaTableHeader *th;

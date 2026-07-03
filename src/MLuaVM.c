@@ -1040,7 +1040,7 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
     VM_CASE(OP_GETGLOBAL_K): {
       /* Fused LOADK B; GETGLOBAL */
       U8 k = READ_BYTE();
-      MLuaValue val = MLuaTableGet(L, L->Globals, proto->Constants[k]);
+      MLuaValue val = MLuaTableGetField(L, L->Globals, proto->Constants[k]);
       STACK_PUSH(val);
       VM_BREAK;
     }
@@ -1049,7 +1049,7 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       /* Fused LOADK B; SWAP; SETGLOBAL */
       U8 k = READ_BYTE();
       MLuaValue val = STACK_POP();
-      MLuaTableSet(L, L->Globals, proto->Constants[k], val);
+      MLuaTableSetField(L, L->Globals, proto->Constants[k], val);
       VM_BREAK;
     }
 

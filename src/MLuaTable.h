@@ -167,6 +167,12 @@ MLuaValue MLuaTableNew(MLuaState *L);
  */
 MLuaValue MLuaTableNewSized(MLuaState *L, Size arrayHint, Size hashHint);
 
+/* String-keyed fast paths (no array probe; get follows Forward). The key
+ * must not be a positive-integer value - name constants qualify. */
+MLuaValue MLuaTableGetField(MLuaState *L, MLuaValue tbl, MLuaValue key);
+Bool MLuaTableSetField(MLuaState *L, MLuaValue tbl, MLuaValue key,
+                       MLuaValue value);
+
 /*
  * Get a value from a table.
  * Follows forward chain if key not found.
