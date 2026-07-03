@@ -361,71 +361,106 @@ static void TableSwap(MLuaState *L, MLuaValue tbl, Size i, Size j) {
   MLuaTableSet(L, tbl, MakeInt((I32)j), a);
 }
 
-/* Quicksort partition */
+/* Hoare partition around a median-of-3 pivot. Returns j such that
+ * [lo..j] and [j+1..hi] are the two sides; with lo < hi, j is always in
+ * [lo, hi-1], so both sides are non-empty ranges and the caller always
+ * makes progress. Median-of-3 sinks sorted/reverse inputs' worst case, and
+ * Hoare splits runs of equal elements evenly (Lomuto degrades to O(n^2) on
+ * all-equal input). The i<hi / j>lo scan guards keep an inconsistent user
+ * comparator memory-safe: the result is then some permutation, never an
+ * out-of-range access. On comparator error, returns with ctx->Error set. */
 static Size TablePartition(MLuaState *L, TableSortContext *ctx, Size lo,
                            Size hi) {
   MLuaGCRef pivotRef;
-  MLuaValue pivot = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)hi));
-  Size i = lo;
+  Size mid = lo + (hi - lo) / 2;
+  Size i;
   Size j;
+  MLuaValue a;
+  MLuaValue b;
 
-  MLuaPushGCRef(L, &pivotRef, pivot);
-
-  for (j = lo; j < hi; j++) {
-    MLuaValue val = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)j));
-    if (TableSortCompare(L, ctx, val, pivotRef.Value)) {
-      TableSwap(L, ctx->Table.Value, i, j);
-      i++;
-    }
-    if (ctx->Error) {
-      MLuaPopGCRef(L, &pivotRef);
-      return i;
+  /* Order t[lo] <= t[mid] <= t[hi]; the ends double as scan sentinels. */
+  a = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)mid));
+  b = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)lo));
+  if (TableSortCompare(L, ctx, a, b)) {
+    TableSwap(L, ctx->Table.Value, mid, lo);
+  }
+  a = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)hi));
+  b = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)mid));
+  if (!ctx->Error && TableSortCompare(L, ctx, a, b)) {
+    TableSwap(L, ctx->Table.Value, hi, mid);
+    a = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)mid));
+    b = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)lo));
+    if (!ctx->Error && TableSortCompare(L, ctx, a, b)) {
+      TableSwap(L, ctx->Table.Value, mid, lo);
     }
   }
-  TableSwap(L, ctx->Table.Value, i, hi);
+  if (ctx->Error) {
+    return lo;
+  }
+
+  MLuaPushGCRef(L, &pivotRef,
+                MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)mid)));
+
+  i = lo;
+  j = hi;
+  for (;;) {
+    for (;;) { /* scan right while t[i] < pivot */
+      a = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)i));
+      if (ctx->Error || i >= hi ||
+          !TableSortCompare(L, ctx, a, pivotRef.Value)) {
+        break;
+      }
+      i++;
+    }
+    for (;;) { /* scan left while pivot < t[j] */
+      b = MLuaTableGet(L, ctx->Table.Value, MakeInt((I32)j));
+      if (ctx->Error || j <= lo ||
+          !TableSortCompare(L, ctx, pivotRef.Value, b)) {
+        break;
+      }
+      j--;
+    }
+    if (ctx->Error || i >= j) {
+      break;
+    }
+    TableSwap(L, ctx->Table.Value, i, j);
+    i++;
+    j--;
+  }
+
   MLuaPopGCRef(L, &pivotRef);
-  return i;
+  return (j < lo) ? lo : ((j >= hi) ? hi - 1 : j);
 }
 
-/* Quicksort recursive implementation (iterative via stack to avoid deep
- * recursion) */
+/* Iterative quicksort. Each partition pushes its LARGER side and loops on
+ * the smaller, so the pending segment halves with every stacked range:
+ * the stack never holds more than log2(length) ranges, and 32 ranges cover
+ * any 32-bit length. (The previous scheme pushed both sides and silently
+ * DROPPED ranges when its fixed stack filled, returning unsorted data.) */
 static void TableQuicksort(MLuaState *L, TableSortContext *ctx, Size lo,
                            Size hi) {
-  /* Use an explicit stack to avoid deep recursion */
   Size stack[64];
-  int top = -1;
+  int top = 0;
 
-  stack[++top] = lo;
-  stack[++top] = hi;
-
-  while (top >= 0 && !ctx->Error) {
-    Size high = stack[top--];
-    Size low = stack[top--];
-
-    if (low < high) {
-      Size p = TablePartition(L, ctx, low, high);
-
-      /* Push larger partition first (to minimize stack depth) */
-      if (p > 1 && p - 1 - low > high - p - 1) {
-        if (low < p - 1 && top < 62) {
-          stack[++top] = low;
-          stack[++top] = p - 1;
-        }
-        if (p + 1 < high && top < 62) {
-          stack[++top] = p + 1;
-          stack[++top] = high;
-        }
+  for (;;) {
+    while (lo < hi && !ctx->Error) {
+      Size p = TablePartition(L, ctx, lo, hi);
+      /* Sides: [lo..p] and [p+1..hi], both non-empty. */
+      if (p - lo < hi - p) {
+        stack[top++] = p + 1; /* push larger (right), iterate left */
+        stack[top++] = hi;
+        hi = p;
       } else {
-        if (p + 1 < high && top < 62) {
-          stack[++top] = p + 1;
-          stack[++top] = high;
-        }
-        if (p > 0 && low < p - 1 && top < 62) {
-          stack[++top] = low;
-          stack[++top] = p - 1;
-        }
+        stack[top++] = lo; /* push larger (left), iterate right */
+        stack[top++] = p;
+        lo = p + 1;
       }
     }
+    if (ctx->Error || top == 0) {
+      return;
+    }
+    hi = stack[--top];
+    lo = stack[--top];
   }
 }
 

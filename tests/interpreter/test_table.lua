@@ -35,6 +35,89 @@ test.describe("table.sort", function()
         table.sort(t)
         test.expect(t[1]).toBe(42)
     end)
+
+    test.it("sorts an already-sorted 10k array", function()
+        -- Worst case for a last-element-pivot scheme; median-of-3 keeps it
+        -- O(n log n) so this also guards against quadratic hangs.
+        local t = {}
+        for i = 1, 10000 do t[i] = i end
+        table.sort(t)
+        for i = 1, 10000 do
+            if t[i] ~= i then test.expect(t[i]).toBe(i) end
+        end
+        test.expect(t[10000]).toBe(10000)
+    end)
+
+    test.it("sorts a reverse-sorted 10k array", function()
+        local t = {}
+        for i = 1, 10000 do t[i] = 10001 - i end
+        table.sort(t)
+        for i = 1, 10000 do
+            if t[i] ~= i then test.expect(t[i]).toBe(i) end
+        end
+        test.expect(t[1]).toBe(1)
+    end)
+
+    test.it("sorts an all-equal 5k array", function()
+        -- Hoare partitioning splits equal runs evenly; Lomuto degrades to
+        -- O(n^2) here.
+        local t = {}
+        for i = 1, 5000 do t[i] = 7 end
+        table.sort(t)
+        test.expect(t[1]).toBe(7)
+        test.expect(t[5000]).toBe(7)
+    end)
+
+    test.it("sorts 30k random elements and keeps them a permutation", function()
+        -- Sized well past what the old fixed 64-entry range stack could
+        -- hold when it pushed both sides: it silently DROPPED ranges and
+        -- returned unsorted data.
+        local t = {}
+        local seed = 1
+        local sum = 0
+        for i = 1, 30000 do
+            seed = (seed * 1103 + 12345) % 100003
+            t[i] = seed
+            sum = sum + seed
+        end
+        table.sort(t)
+        local after = 0
+        for i = 1, 30000 do
+            after = after + t[i]
+            if i > 1 and t[i - 1] > t[i] then
+                test.expect(t[i - 1] <= t[i]).toBeTrue()
+            end
+        end
+        test.expect(after).toBe(sum)
+    end)
+
+    test.it("supports a custom descending comparator", function()
+        local t = { 3, 1, 4, 1, 5, 9, 2, 6 }
+        table.sort(t, function(a, b) return a > b end)
+        test.expect(t[1]).toBe(9)
+        test.expect(t[8]).toBe(1)
+        for i = 2, 8 do
+            test.expect(t[i - 1] >= t[i]).toBeTrue()
+        end
+    end)
+
+    test.it("propagates comparator errors", function()
+        local t = {}
+        for i = 1, 100 do t[i] = i * 3 % 17 end
+        local ok = pcall(table.sort, t, function() error("boom") end)
+        test.expect(ok).toBe(false)
+    end)
+
+    test.it("stays memory-safe with an inconsistent comparator", function()
+        local t = {}
+        for i = 1, 500 do t[i] = i end
+        -- A lying comparator may not produce an order, but must not crash
+        -- or lose elements.
+        pcall(table.sort, t, function() return true end)
+        local sum = 0
+        for i = 1, 500 do sum = sum + t[i] end
+        test.expect(sum).toBe(125250)
+    end)
 end)
 
 test.describe("table.concat", function()
