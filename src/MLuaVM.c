@@ -467,6 +467,7 @@ MLuaValue MLuaConcat(MLuaState *L, int count) {
   /* Concatenate 'count' values from top of stack into a single string */
   Size totalLen = 0;
   Bool allStrings = TRUE;
+  char scratch[128]; /* small-result assembly, see below */
   U8 *buffer;
   U8 *p;
   int i;
@@ -507,14 +508,20 @@ MLuaValue MLuaConcat(MLuaState *L, int count) {
     return MLuaStringConcatMany(L, &L->EvalStack[L->EvalTop - count], count);
   }
 
-  /* Allocate buffer */
-  buffer = (U8 *)MLuaAlloc(L, totalLen + 1);
-  if (!buffer) {
-    /* The nil sentinel only raises when ErrorMsg is set; a bare nil would
-     * flow onward as a value (e.g. silently deleting the target of
-     * `t[#t+1] = a .. b`). */
-    L->ErrorMsg = "out of memory";
-    return MLUA_NIL;
+  /* Assemble on the C stack when the result is small - the common
+   * `s = s .. i` loop shape - so each iteration stops leaving a throwaway
+   * RAW buffer behind for the GC. Large results still use the heap. */
+  if (totalLen + 1 <= sizeof(scratch)) {
+    buffer = (U8 *)scratch;
+  } else {
+    buffer = (U8 *)MLuaAlloc(L, totalLen + 1);
+    if (!buffer) {
+      /* The nil sentinel only raises when ErrorMsg is set; a bare nil
+       * would flow onward as a value (e.g. silently deleting the target
+       * of `t[#t+1] = a .. b`). */
+      L->ErrorMsg = "out of memory";
+      return MLUA_NIL;
+    }
   }
 
   /* Copy strings into buffer */
