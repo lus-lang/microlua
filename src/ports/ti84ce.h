@@ -78,6 +78,11 @@
  * so this knob costs it nothing.) */
 #define MLUA_PARSE_FOLD_INT 0
 
+/* Floats are binary32 (~7 digits): nothing on this port can produce an
+ * integer needing more than 32 bits of formatting, and 64-bit divide is
+ * an eZ80 library call. Emit digits through 32-bit arithmetic. */
+#define MLUA_FORMAT_INT64 0
+
 /* Math backend: the MLuaCore.h defaults follow MLUA_FLOAT_BITS, so this
  * port automatically gets the f-suffixed builtins (sinf, powf, ...). */
 
