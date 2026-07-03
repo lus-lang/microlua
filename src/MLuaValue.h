@@ -219,13 +219,22 @@ typedef UPtr MLuaValue;
                (U64)(idx)))
 #define GetLightFuncIndex(v) ((Size)((v) & NANBOX_PAYLOAD_MASK))
 
-/* Double: stored directly (no encoding needed) */
+/* Double: stored directly (no encoding needed) - except NaNs. A hardware
+ * NaN can be 0xFFF8000000000000 (the x86 default NaN, e.g. inf-inf), which
+ * is exactly the NaN-box tag base: stored raw it aliases MLUA_NIL, turning
+ * a NaN result into nil. Every NaN canonicalizes to the positive quiet NaN,
+ * which the box range excludes (high 16 bits 0x7FF8 < 0xFFF8). */
+#define MLUA_CANONICAL_NAN ((U64)0x7FF8000000000000ULL)
 static inline MLuaValue MakeDouble(double d) {
   union {
     double d;
     U64 u;
   } conv;
   conv.d = d;
+  if ((conv.u & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL &&
+      (conv.u & 0x000FFFFFFFFFFFFFULL) != 0) {
+    conv.u = MLUA_CANONICAL_NAN;
+  }
   return (MLuaValue)conv.u;
 }
 static inline double GetDouble(MLuaValue v) {
