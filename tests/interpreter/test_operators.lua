@@ -176,4 +176,45 @@ test.describe("compare-branch fusion", function()
     end)
 end)
 
+test.describe("integer division and modulo edges", function()
+    -- These pin the VM's inline int MOD/DIV fast path against MLuaArith's
+    -- semantics: C-truncated MOD, %0 -> 0 (documented divergence from
+    -- reference Lua), and the MLUA_INT_MIN pair that traps in hardware if
+    -- either path forgets its guard.
+    local INT_MIN = -0x7FFFFFFF - 1
+
+    test.it("truncated modulo on negatives", function()
+        test.expect(7 % 3).toBe(1)
+        test.expect(-7 % 3).toBe(-1)
+        test.expect(7 % -3).toBe(1)
+        test.expect(-7 % -3).toBe(-1)
+    end)
+
+    test.it("modulo by zero yields 0 (documented divergence)", function()
+        local z = 0
+        test.expect(5 % z).toBe(0)
+        test.expect(INT_MIN % z).toBe(0)
+    end)
+
+    test.it("INT_MIN % -1 is 0, INT_MIN / -1 goes float", function()
+        local m1 = -1
+        test.expect(INT_MIN % m1).toBe(0)
+        -- quotient 2^31 does not fit I32: must take the float path, and
+        -- 2^31 is exactly representable so the value is exact
+        test.expect(INT_MIN / m1 == 2147483648).toBeTrue()
+    end)
+
+    test.it("evenly-dividing int division stays integer-exact", function()
+        test.expect(12 / 4).toBe(3)
+        test.expect(-12 / 4).toBe(-3)
+        test.expect(12 / -4).toBe(-3)
+        test.expect(INT_MIN / 2).toBe(-1073741824)
+    end)
+
+    test.it("fractional division takes the float path", function()
+        test.expect(7 / 2).toBe(3.5)
+        test.expect(-7 / 2).toBe(-3.5)
+    end)
+end)
+
 assert(test.run())

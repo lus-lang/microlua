@@ -75,6 +75,12 @@
  * scale. Revisit with CEmu timings if bench_str ever shows GC dominance. */
 #define MLUA_GC_HEADROOM_DIV 0
 
+/* The %-and-/ inline fast path costs ~264 B inside RunVM on eZ80 -- too
+ * dear at ~350 B of launch headroom, and DIV/MOD are library calls here
+ * anyway so the win is only MLuaArith's dispatch overhead. Revisit with
+ * CEmu bench_int timings if headroom ever frees up. */
+#define MLUA_VM_INT_DIVMOD_FASTPATH 0
+
 /* MLUA_TABLE_NUM_ARRAYS is NOT set here: the typed-array code measures
  * ~2.8 KB of eZ80 image, which fits the runner target (its makefile opts
  * in) but would leave the full repl build under 1.3 KB of launch headroom.

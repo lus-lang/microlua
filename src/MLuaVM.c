@@ -334,7 +334,13 @@ MLuaValue MLuaArith(MLuaState *L, MLuaOpCode op, MLuaValue a, MLuaValue b) {
     case OP_MUL:
       return MLuaMakeInt(L, ia * ib);
     case OP_MOD:
-      return ib != 0 ? MLuaMakeInt(L, ia % ib) : MakeInt(0);
+      /* MLUA_INT_MIN % -1 is mathematically 0 but traps on x86 (the
+       * paired quotient overflows I32) -- hardware UB, not a semantic
+       * choice, so answer it explicitly. */
+      if (ib == 0 || (ia == MLUA_INT_MIN && ib == -1)) {
+        return MakeInt(0);
+      }
+      return MLuaMakeInt(L, ia % ib);
     case OP_UNM:
       return MLuaMakeInt(L, -ia);
     default:
@@ -1283,7 +1289,34 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
     VM_CASE(OP_POW): {
       MLuaValue b = STACK_POP();
       MLuaValue a = STACK_POP();
-      MLuaValue result = MLuaArith(L, (MLuaOpCode)op, a, b);
+      MLuaValue result;
+      /*
+       * Inline int-int fast path mirroring the OP_ADD block. Guards:
+       * ib == 0 keeps the divide-by-zero semantics centralized in
+       * MLuaArith, and MLUA_INT_MIN / -1 falls through (its quotient
+       * overflows I32; MLuaArith guards the same pair). MOD's result is
+       * always inline (|r| < |ib|); DIV stays here only when it divides
+       * evenly (quotient magnitude <= |ia|, inline as well) -- fractional
+       * quotients take MLuaArith's float path. POW never enters. The
+       * expressions match MLuaArith's integer semantics (C-truncated).
+       */
+#if MLUA_VM_INT_DIVMOD_FASTPATH
+      if (op != OP_POW && IsInlineInt(a) && IsInlineInt(b)) {
+        I32 ia = GetInt(a);
+        I32 ib = GetInt(b);
+        if (ib != 0 && !(ia == MLUA_INT_MIN && ib == -1)) {
+          if (op == OP_MOD) {
+            STACK_PUSH(MakeInt((I32)(ia % ib)));
+            VM_BREAK;
+          }
+          if (ia % ib == 0) {
+            STACK_PUSH(MakeInt((I32)(ia / ib)));
+            VM_BREAK;
+          }
+        }
+      }
+#endif
+      result = MLuaArith(L, (MLuaOpCode)op, a, b);
       VM_CHECK_NIL(result); /* Type error in arithmetic */
       STACK_PUSH(result);
       VM_BREAK;

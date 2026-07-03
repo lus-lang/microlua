@@ -112,6 +112,15 @@
 #define MLUA_PORT_MEMFUNCS 0
 #endif
 
+/* Inline int-int fast path for the % and / VM handlers (mirrors the one
+ * ADD/SUB/MUL always have). Worth ~10-15% on modulo-heavy loops; costs a
+ * couple hundred bytes inside the dispatch loop, so image-tight ports can
+ * compile it out -- semantics are identical either way (the slow path is
+ * the same MLuaArith). */
+#ifndef MLUA_VM_INT_DIVMOD_FASTPATH
+#define MLUA_VM_INT_DIVMOD_FASTPATH 1
+#endif
+
 #ifndef MLUA_ALIGNMENT
 #define MLUA_ALIGNMENT 8
 #endif
