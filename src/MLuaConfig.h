@@ -36,17 +36,6 @@
 #define MLUA_PROFILE_OPS 0
 #endif
 
-/* Computed-goto dispatch (GNU C labels-as-values). Replaces the dispatch
- * switch with a 256-entry label table: one indirect jump per instruction
- * instead of a bounds-checked jump table, typically 10-20% on dispatch-bound
- * code. Costs ~1-2 KB of label table + duplicated dispatch tails, so
- * size-constrained ports should measure before opting in. Off by default;
- * requires GCC or Clang. */
-/* Parse-time fusion of compare+branch pairs (a < b in if/while/repeat
- * conditions) into the OP_JMPF_* opcodes. The VM handlers are always
- * compiled - any v6 runtime runs any v6 bytecode - so this knob only
- * trades the emitter's code size against fused output on ports whose
- * image cannot afford it. */
 /* Parse-time integer constant folding (60*60*24, -5, ...). Pure emitter
  * feature with exact runtime-identical semantics; the knob exists for
  * ports whose image cannot afford the folding code. */
@@ -54,12 +43,13 @@
 #define MLUA_PARSE_FOLD_INT 1
 #endif
 
+/* Parse-time fusion of compare+branch pairs (a < b in if/while/repeat
+ * conditions) into the OP_JMPF_* opcodes. The VM handlers are always
+ * compiled - any v6 runtime runs any v6 bytecode - so this knob only
+ * trades the emitter's code size against fused output on ports whose
+ * image cannot afford it. */
 #ifndef MLUA_PARSE_FUSE_COMPARE
 #define MLUA_PARSE_FUSE_COMPARE 1
-#endif
-
-#ifndef MLUA_VM_COMPUTED_GOTO
-#define MLUA_VM_COMPUTED_GOTO 0
 #endif
 
 #ifndef MLUA_PTR_SIZE
@@ -67,6 +57,21 @@
 #define MLUA_PTR_SIZE 8
 #else
 #define MLUA_PTR_SIZE 4
+#endif
+#endif
+
+/* Computed-goto dispatch (GNU C labels-as-values). Replaces the dispatch
+ * switch with a 256-entry label table: one indirect jump per instruction
+ * instead of a bounds-checked jump table, typically 10-20% on dispatch-bound
+ * code, for ~1-2 KB of label table + duplicated dispatch tails. Default ON
+ * for GCC/Clang 64-bit hosts (they have the image room); size-constrained
+ * 32-bit ports choose per port header (the TI-84 CE opts in, having traded
+ * the pack engine for it). */
+#ifndef MLUA_VM_COMPUTED_GOTO
+#if (defined(__GNUC__) || defined(__clang__)) && MLUA_PTR_SIZE == 8
+#define MLUA_VM_COMPUTED_GOTO 1
+#else
+#define MLUA_VM_COMPUTED_GOTO 0
 #endif
 #endif
 
