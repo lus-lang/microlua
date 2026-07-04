@@ -23,6 +23,11 @@ in this directory), or `-Dport_header=path/to/board.h` — or define
 | `MLUA_ENABLE_DUMP` | `1` | `0` drops the bytecode serializer (`MLuaDumpFunction`, `string.dump`) for ports with no way to store or transmit dumped chunks. Loading bytecode (`MLuaUndump`) is unaffected. |
 | `MLUA_ENABLE_PACK` | `1` | `0` drops `string.pack`/`packsize`/`unpack` (the binary format engine) for ports with no byte-oriented I/O to speak of; worth several KB of image on small targets. |
 | `MLUA_VM_COMPUTED_GOTO` | `0` | `1` dispatches through a GNU-C label table (one indirect jump per instruction, no bounds check). Needs GCC/Clang; costs ~1–2 KB of table + dispatch tails, so size-constrained ports should measure before opting in. |
+| `MLUA_MEM_WORDWISE` | `1` on GCC/Clang, else `0` | Word-at-a-time bodies in `MemCpy`/`MemMove`/`MemSet` (pointer-width blocks when src/dst are co-aligned). Big on string/GC-heavy hosts; opt out where the native word is narrower than `UPtr` (the eZ80 pays ~0.2–0.4 KB of image for slower code). |
+| `MLUA_PORT_MEMFUNCS` | `0` | `1` suppresses the portable `MemCpy`/`MemMove`/`MemSet` definitions so the port links its own (e.g. an eZ80 `LDIR` implementation) — same pattern as the `Math*` hooks. |
+| `MLUA_PARSE_FUSE_LOCALS` | `1` | Parse-time fusion of adjacent local reads (`GETLOCAL2`) and `x = x + expr` accumulator stores (`ADD_SET`). Emission-only; ~640 B of parser code. The TI-84 CE turns emission off. |
+| `MLUA_VM_FUSED_LOCALS_OPS` | `1` | Compiles the `GETLOCAL2`/`ADD_SET` handlers (~530 B in the dispatch loop). With `0`, `MLuaUndump` rejects chunks containing those opcodes deterministically at load — recompile them with `MLUA_PARSE_FUSE_LOCALS=0`. |
+| `MLUA_VM_INT_DIVMOD_FASTPATH` | `1` | Inline int-int fast path in the `%`/`/` VM handlers (ADD/SUB/MUL always have one). ~10–15% on modulo-heavy loops for a couple hundred bytes inside the dispatch loop; identical semantics off (same `MLuaArith` slow path). The TI-84 CE opts out for image headroom. |
 | `MLUA_PROFILE_OPS` | `0` | `1` counts every dispatched opcode; `MLuaDumpOpProfile` reports the counts through the output callback. Diagnostic builds only. |
 
 ## Arenas and GC (default constrained state)
@@ -37,6 +42,7 @@ in this directory), or `-Dport_header=path/to/board.h` — or define
 | `MLUA_THREAD_ARGS_SIZE` | `32` | Per-coroutine argument slots. |
 | `MLUA_THREAD_FRAMES_SIZE` | `16` | Per-coroutine frame depth. |
 | `MLUA_DEFAULT_GC_THRESHOLD_PERCENT` | `75` | Heap-fill percent that triggers a collection. |
+| `MLUA_GC_HEADROOM_DIV` | `4` | Headroom-proportional pacing: the per-cycle garbage allowance is at least free-heap/DIV on top of the live-growth percentage. Collapses accumulator-loop collection counts in roomy heaps; degenerates to the classic formula in tight ones. `0` compiles the term out (the TI-84 CE keeps its exact historical pacing). |
 | `MLUA_PARSE_MAX_DEPTH` | `256` | Parser recursion bound (C-stack depth, roughly one `ParseExpr` frame per level). Lower it on targets with a small C stack. |
 | `MLUA_STACKTRACE_BUF_SIZE` | `2048` | Static BSS buffer the runtime-error stack trace is built into. Writes are clamped and the result is always NUL-terminated, so smaller buffers just truncate deep traces (one frame line runs ~20–40 bytes). |
 | `MLUA_STRING_TABLE_INITIAL_SIZE` | `64` | Initial intern-table capacity in slots (one `MLuaValue` each); also the floor the post-GC shrink pass rehashes down to. Power of two. |

@@ -334,7 +334,13 @@ MLuaValue MLuaArith(MLuaState *L, MLuaOpCode op, MLuaValue a, MLuaValue b) {
     case OP_MUL:
       return MLuaMakeInt(L, ia * ib);
     case OP_MOD:
-      return ib != 0 ? MLuaMakeInt(L, ia % ib) : MakeInt(0);
+      /* MLUA_INT_MIN % -1 is mathematically 0 but traps on x86 (the
+       * paired quotient overflows I32) -- hardware UB, not a semantic
+       * choice, so answer it explicitly. */
+      if (ib == 0 || (ia == MLUA_INT_MIN && ib == -1)) {
+        return MakeInt(0);
+      }
+      return MLuaMakeInt(L, ia % ib);
     case OP_UNM:
       return MLuaMakeInt(L, -ia);
     default:
@@ -514,7 +520,7 @@ MLuaValue MLuaConcat(MLuaState *L, int count) {
   if (totalLen + 1 <= sizeof(scratch)) {
     buffer = (U8 *)scratch;
   } else {
-    buffer = (U8 *)MLuaAlloc(L, totalLen + 1);
+    buffer = (U8 *)MLuaAllocNC(L, totalLen + 1);
     if (!buffer) {
       /* The nil sentinel only raises when ErrorMsg is set; a bare nil
        * would flow onward as a value (e.g. silently deleting the target
@@ -816,6 +822,18 @@ static Bool TryArraySetFast(MLuaValue tbl, MLuaValue key, MLuaValue val) {
       MLuaTableArrayData(th)[i - 1] = val;
       return TRUE;
     }
+    /* Append without growth: the shape sequential fills take on every
+     * iteration that doesn't grow (growth is geometric, so almost all of
+     * them). Only past the first element (ArrayLen >= 1): a store into a
+     * virgin array must keep taking MLuaTableSet, where the typed-NUM
+     * promotion decision lives -- and NUM arrays themselves keep
+     * ArrayLen == 0, so they can never reach this arm either. */
+    if (i >= 1 && (U32)i == th->ArrayLen + 1 && (U32)i <= th->ArraySize &&
+        th->ArrayLen >= 1) {
+      MLuaTableArrayData(th)[i - 1] = val;
+      th->ArrayLen = (U32)i;
+      return TRUE;
+    }
 #if MLUA_TABLE_NUM_ARRAYS
     if (MLuaTableArrayKind(th) == MLUA_TABLE_ARRAY_NUM) {
       return MLuaTableNumSetFast(th, i, val);
@@ -920,6 +938,10 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       [OP_UNM] = &&L_OP_UNM,
       [OP_LEN] = &&L_OP_LEN,
       [OP_CONCAT] = &&L_OP_CONCAT,
+#if MLUA_VM_FUSED_LOCALS_OPS
+      [OP_GETLOCAL2] = &&L_OP_GETLOCAL2,
+      [OP_ADD_SET] = &&L_OP_ADD_SET,
+#endif
       [OP_JMP] = &&L_OP_JMP,
       [OP_JMPF] = &&L_OP_JMPF,
       [OP_JMPT] = &&L_OP_JMPT,
@@ -1037,6 +1059,48 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
       LOCAL_SET(slot, MLUA_NIL);
       VM_BREAK;
     }
+
+#if MLUA_VM_FUSED_LOCALS_OPS
+    VM_CASE(OP_GETLOCAL2): {
+      /* Parser-fused pair of adjacent local reads (slots nibble-packed) */
+      U8 slots = READ_BYTE();
+      STACK_PUSH(LOCAL_GET(slots >> 4));
+      STACK_PUSH(LOCAL_GET(slots & 0x0F));
+      VM_BREAK;
+    }
+
+    VM_CASE(OP_ADD_SET): {
+      /* Parser-fused ADD;SETLOCAL tail (accumulator assignments). Same
+       * fast paths as OP_ADD; the result lands in a local, not the
+       * stack. */
+      U8 slot = READ_BYTE();
+      MLuaValue b = STACK_POP();
+      MLuaValue a = STACK_POP();
+      MLuaValue result;
+      if (IsInlineInt(a) && IsInlineInt(b)) {
+        I32 r = GetInt(a) + GetInt(b);
+        if (r >= MLUA_INLINE_INT_MIN && r <= MLUA_INLINE_INT_MAX) {
+          LOCAL_SET(slot, MakeInt(r));
+          VM_BREAK;
+        }
+      }
+#if MLUA_PTR_SIZE == 8
+      if (IsDouble(a) && IsDouble(b)) {
+        double r = GetDouble(a) + GetDouble(b);
+        if (r == (double)(I32)r) {
+          LOCAL_SET(slot, MakeInt((I32)r));
+        } else {
+          LOCAL_SET(slot, MakeDouble(r));
+        }
+        VM_BREAK;
+      }
+#endif
+      result = MLuaArith(L, OP_ADD, a, b);
+      VM_CHECK_NIL(result); /* Type error in arithmetic */
+      LOCAL_SET(slot, result);
+      VM_BREAK;
+    }
+#endif /* MLUA_VM_FUSED_LOCALS_OPS */
 
     VM_CASE(OP_GETGLOBAL): {
       /* Stack-based: pops key, pushes _G[key] */
@@ -1283,7 +1347,34 @@ static MLuaStatus RunVM(MLuaState *L, Size baseFrame) {
     VM_CASE(OP_POW): {
       MLuaValue b = STACK_POP();
       MLuaValue a = STACK_POP();
-      MLuaValue result = MLuaArith(L, (MLuaOpCode)op, a, b);
+      MLuaValue result;
+      /*
+       * Inline int-int fast path mirroring the OP_ADD block. Guards:
+       * ib == 0 keeps the divide-by-zero semantics centralized in
+       * MLuaArith, and MLUA_INT_MIN / -1 falls through (its quotient
+       * overflows I32; MLuaArith guards the same pair). MOD's result is
+       * always inline (|r| < |ib|); DIV stays here only when it divides
+       * evenly (quotient magnitude <= |ia|, inline as well) -- fractional
+       * quotients take MLuaArith's float path. POW never enters. The
+       * expressions match MLuaArith's integer semantics (C-truncated).
+       */
+#if MLUA_VM_INT_DIVMOD_FASTPATH
+      if (op != OP_POW && IsInlineInt(a) && IsInlineInt(b)) {
+        I32 ia = GetInt(a);
+        I32 ib = GetInt(b);
+        if (ib != 0 && !(ia == MLUA_INT_MIN && ib == -1)) {
+          if (op == OP_MOD) {
+            STACK_PUSH(MakeInt((I32)(ia % ib)));
+            VM_BREAK;
+          }
+          if (ia % ib == 0) {
+            STACK_PUSH(MakeInt((I32)(ia / ib)));
+            VM_BREAK;
+          }
+        }
+      }
+#endif
+      result = MLuaArith(L, (MLuaOpCode)op, a, b);
       VM_CHECK_NIL(result); /* Type error in arithmetic */
       STACK_PUSH(result);
       VM_BREAK;

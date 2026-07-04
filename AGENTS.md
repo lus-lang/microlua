@@ -227,43 +227,62 @@ size into `bench/RESULTS.md`. It auto-detects a local `lua5.5`/`lua` (verified `
   machinery that doesn't fit the footprint. Tests use exact binary fractions
   (`1/4`) instead of decimal literals where it matters.
 
-## Status (2026-07-03, follow-up perf/footprint pass landed)
+- Direct callee-register entry at OP_CALL (skipping RELOAD_FRAME's
+  re-derivation): measured 2% on `fib`, under pass 4's 10%-per-row bar.
+  fib's remaining ~2.3x is PushFrame/PopFrame bookkeeping vs Lua's register
+  windows; a frame-window redesign is EvalTop-class risk and stays out.
+- A MOD_SET sibling of ADD_SET (for `x = (x + y) % k` tails, the matrix
+  fold): projects ~8% on one row for another opcode + always-compiled
+  handler and more eZ80 bytes; below the bar.
+- Per-instruction GC safepoint trimming (back-edge/call-only checks): the
+  every-instruction check is a documented load-bearing invariant and every
+  allocation site would need a fresh audit; not attempted.
 
-All supported build-variant suites are green locally: debug, freestanding
-release, generic32, bytecode-only, true 32-bit (`cross/x86-multilib.ini`),
-the narrow-config variants, and the new knob variants (folding/fusion off,
-shift-xor hashing, 32-bit formatting). Current bytecode retires the dead
-OP_GLOOP_SETUP slot and includes five fused opcodes (SETGLOBAL_K, GETFIELD_K,
-SETFIELD_K, SETFIELD_K_POP, SELF_K) plus four compare+branch opcodes
-(JMPF_EQ/NEQ/LT/LE); older `.mlu` chunks must be recompiled and the runner's
-SMOKE.8xv fixture was regenerated.
+## Status (2026-07-03, perf pass 4 landed: geomean 3.24x -> 1.37x vs Lua 5.5)
 
-Host bench (bench/bench.py vs Lua 5.5): geomean 3.24x, from 7.05x at the
-pass baseline; `sort` (0.94x) and `tableconcat` (0.76x) now beat reference
-Lua outright, and `sieve` fell from 149x to 3.5x (table array growth was
-quadratic above 1024 slots — now x1.5 geometric, costing some min-heap
-headroom on array-heavy workloads by design). Five correctness bugs were
-fixed en route, each with pinned regressions: hash-part deletion orphaned
-probe chains (dead-node scheme now), the compactor broke address-hashed
-table keys (GCFLAG_HASHSTALE + rehash-on-access), table.sort could silently
-drop ranges from its fixed stack (bounded push-larger scheme now, plus
-median-of-3/Hoare for the quadratic inputs), `..` dropped float operands
-outright and corrupted INT_MIN, and on the NaN-boxing path a hardware NaN
-(0xFFF8...) aliased MLUA_NIL (MakeDouble canonicalizes NaNs now). Pattern
-escapes of magic characters (`%.`, `%%`) also never matched — fixed.
+All build-variant suites are green: debug, freestanding release, generic32,
+bytecode-only, true 32-bit (`cross/x86-multilib.ini`), the knob variants
+(folding/fusion off, shift-xor hashing, 32-bit formatting, byte-wise Mem*,
+locals-fusion + handlers off). The bytecode format gained GETLOCAL2 and
+ADD_SET (parser-fused local pair reads / accumulator stores); older `.mlu`
+chunks must be recompiled, and the CE SMOKE.8xv + benchmark fixtures were
+regenerated. A port may compile the fused handlers out
+(MLUA_VM_FUSED_LOCALS_OPS=0); MLuaUndump then rejects fused chunks
+deterministically at load (tests/fused_ops_fence.py pins this).
 
-Parser features are knob-gated for image-tight ports (`MLUA_PARSE_FOLD_INT`
-off on the CE repl, `MLUA_PARSE_FUSE_COMPARE` on everywhere); the fused-op
-VM handlers are always compiled so any v6 runtime runs any v6 chunk.
-New 8/16-bit enabler knobs (defaults preserve current behavior):
-print/format buffer sizes, per-library MLUA_ENABLE_*LIB, RAM floors
-(MLUA_MIN_HEAP_SIZE, MLUA_DEFAULT_LOCALS_SIZE, GC pacing floors),
-MLUA_HASH_SHIFT_XOR, MLUA_FORMAT_INT64 (0 on the CE: -417 B/target), and
-the inline-int/short-string limits now derive from the word width.
+Host bench (bench/bench.py vs Lua 5.5, -Oz build, algorithmic wins only):
+geomean 1.37x from 3.24x. Wins: tableconcat 0.61x, sort 0.82x, strbuild
+0.91x; near-parity: strjoin 1.07x, strscan 1.14x, loop 1.99x. Still above
+2x: fib 2.33x (call-frame machinery), sieve 2.38x / matrix 2.12x (dispatch
+density); the measured-and-rejected next steps are documented above. The
+pass ladder: word-wise Mem* (3.23->2.01), no-clear alloc (->1.91),
+headroom GC pacing (->1.46, min-heap column unchanged), int %-/ fast path
++ append arm (->1.42), fused-locals superinstructions (->1.37).
 
-CE images: repl 139,642 B (~136.4 KB, ceiling ~137 KB), runner 107,711 B
-(~105.2 KB). All four CE benchmarks re-verified at-or-below their recorded
-values with exact checksums via deterministic CEmu screen-CRC gates
-(control-run-learned PASS-screen CRCs; wrapper pattern in the session
-scratchpad). CE size/perf regressions are checked with `tools/map_size.py`
-and the CEmu procedure in platform/ti84ce/README.md.
+Four correctness bugs were found by the pass's new stress tests and fixed
+with pinned regressions, all pre-existing: (1) the intern table could hand
+out UN-INTERNED strings under transient OOM -- ('k'..i) ~= ('k'..i) --
+via a shrink-path occupancy miscount plus a resize-failure bail
+(GC_InternSurvivesResizeOOM); (2) a GC at a safepoint inside a RUNNING
+coroutine wiped the heap: MLuaFirstObjOffset derived the carve boundary
+from context-switched register sizes (now a creation-time constant,
+MLuaState.CarveEnd); (3) the same window also collected the running
+coroutine's own exec buffers (MarkRoots now roots them) and
+MLuaThreadResume wrote thread state through raw pointers moved by the GC
+(GC_CollectInsideRunningCoroutine); (4) INT_MIN % -1 trapped on x86 in
+MLuaArith (now answers 0; test_operators pins the family). Debug builds
+poison no-clear allocations with 0xAB so zero-fill reliance fails loudly.
+
+CE images: repl 140,529 B (~137.2 KB), runner 108,497 B (~106 KB); both
+launch and pass the checked-in Cesium autotests in CEmu. NOTE: the plain
+autotest.json (direct Asm( launch) requires an OS <= 5.4 ROM -- OS 5.5+
+refuses Asm( at any size, which is NOT a size-ceiling signal. All four CE
+benchmarks re-verified in CEmu with exact checksums and land FASTER than
+the previous recordings: bench_int 16.0s (was 19.9), bench_list 18.8s
+(19.8), bench_str 5.2s (6.8), mandel compute 39.8s (52.7) + draw 1.3s
+(1.7); platform/ti84ce/README.md carries the new table. The TI-BASIC
+column was re-run the same day on the same ROM and came back identical
+(161/121+5/20/11 s, checksums exact) -- the comparison baseline is stable. The CEmu wrapper
+lives in platform/ti84ce/tools/ (runbench.py + *_run.json + fixtures/).
+CE size/perf regressions are checked with `tools/map_size.py` against
+.baselines-pass4/*.map.

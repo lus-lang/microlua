@@ -67,6 +67,23 @@
 #define MLUA_PARSE_FUSE_COMPARE 1
 #endif
 
+/* Parse-time fusion of adjacent local reads (GETLOCAL2) and accumulator
+ * stores (ADD_SET, the ADD;SETLOCAL tail of `x = x + expr`). Cuts 2-3
+ * dispatches from the hottest loop shapes. Emission-only knob; whether
+ * the HANDLERS exist is MLUA_VM_FUSED_LOCALS_OPS below. */
+#ifndef MLUA_PARSE_FUSE_LOCALS
+#define MLUA_PARSE_FUSE_LOCALS 1
+#endif
+
+/* Compile the GETLOCAL2/ADD_SET handlers themselves. Default on: any v7
+ * runtime then runs any v7 chunk. An image-tight port may set 0 to drop
+ * the handlers (and usually MLUA_PARSE_FUSE_LOCALS with them); chunks
+ * that CONTAIN the fused opcodes are then rejected deterministically at
+ * load by MLuaUndump, never at run time. */
+#ifndef MLUA_VM_FUSED_LOCALS_OPS
+#define MLUA_VM_FUSED_LOCALS_OPS 1
+#endif
+
 #ifndef MLUA_PTR_SIZE
 #if defined(__LP64__) || defined(_WIN64)
 #define MLUA_PTR_SIZE 8
@@ -88,6 +105,37 @@
 #else
 #define MLUA_VM_COMPUTED_GOTO 0
 #endif
+#endif
+
+/* Word-at-a-time bodies in MemCpy/MemMove/MemSet. The byte loops move one
+ * byte per iteration, which dominates string/GC-heavy workloads on hosts;
+ * the word paths copy pointer-width blocks when source and destination are
+ * co-aligned. Needs GNU C for the may_alias word type (all supported
+ * toolchains). Ports whose native word is narrower than UPtr should opt
+ * out: on the eZ80 (24-bit ALU, 32-bit UPtr) the word ops lower to slower
+ * multi-byte sequences and cost ~0.2-0.4 KB of image. */
+#ifndef MLUA_MEM_WORDWISE
+#if defined(__GNUC__) || defined(__clang__)
+#define MLUA_MEM_WORDWISE 1
+#else
+#define MLUA_MEM_WORDWISE 0
+#endif
+#endif
+
+/* A port can define MLUA_PORT_MEMFUNCS to 1 and link its own
+ * MemCpy/MemMove/MemSet (e.g. an eZ80 LDIR implementation), suppressing the
+ * portable definitions in MLuaCore.c -- same pattern as the Math* hooks. */
+#ifndef MLUA_PORT_MEMFUNCS
+#define MLUA_PORT_MEMFUNCS 0
+#endif
+
+/* Inline int-int fast path for the % and / VM handlers (mirrors the one
+ * ADD/SUB/MUL always have). Worth ~10-15% on modulo-heavy loops; costs a
+ * couple hundred bytes inside the dispatch loop, so image-tight ports can
+ * compile it out -- semantics are identical either way (the slow path is
+ * the same MLuaArith). */
+#ifndef MLUA_VM_INT_DIVMOD_FASTPATH
+#define MLUA_VM_INT_DIVMOD_FASTPATH 1
 #endif
 
 #ifndef MLUA_ALIGNMENT
@@ -173,6 +221,19 @@
 #endif
 #ifndef MLUA_GC_RESERVE_MAX
 #define MLUA_GC_RESERVE_MAX 8192
+#endif
+
+/* Headroom-proportional GC pacing: the garbage allowance per cycle is at
+ * least (free heap) / MLUA_GC_HEADROOM_DIV in addition to the live-growth
+ * percentage above. In a roomy heap (host default 16 MB) this collapses
+ * accumulator loops from thousands of full mark-compacts to a handful --
+ * compaction cost scales with LIVE bytes, so letting garbage pile up in
+ * space nobody else can use is strictly cheaper. In a tight heap the term
+ * degenerates below the live-growth allowance and pacing is bit-identical
+ * to the classic formula. 0 disables the term entirely (compiles out;
+ * ports with tens-of-KB heaps keep their exact historical pacing). */
+#ifndef MLUA_GC_HEADROOM_DIV
+#define MLUA_GC_HEADROOM_DIV 4
 #endif
 
 #ifndef MLUA_DEFAULT_ARGS_SIZE

@@ -176,4 +176,100 @@ test.describe("compare-branch fusion", function()
     end)
 end)
 
+test.describe("integer division and modulo edges", function()
+    -- These pin the VM's inline int MOD/DIV fast path against MLuaArith's
+    -- semantics: C-truncated MOD, %0 -> 0 (documented divergence from
+    -- reference Lua), and the MLUA_INT_MIN pair that traps in hardware if
+    -- either path forgets its guard.
+    local INT_MIN = -0x7FFFFFFF - 1
+
+    test.it("truncated modulo on negatives", function()
+        test.expect(7 % 3).toBe(1)
+        test.expect(-7 % 3).toBe(-1)
+        test.expect(7 % -3).toBe(1)
+        test.expect(-7 % -3).toBe(-1)
+    end)
+
+    test.it("modulo by zero yields 0 (documented divergence)", function()
+        local z = 0
+        test.expect(5 % z).toBe(0)
+        test.expect(INT_MIN % z).toBe(0)
+    end)
+
+    test.it("INT_MIN % -1 is 0, INT_MIN / -1 goes float", function()
+        local m1 = -1
+        test.expect(INT_MIN % m1).toBe(0)
+        -- quotient 2^31 does not fit I32: must take the float path, and
+        -- 2^31 is exactly representable so the value is exact
+        test.expect(INT_MIN / m1 == 2147483648).toBeTrue()
+    end)
+
+    test.it("evenly-dividing int division stays integer-exact", function()
+        test.expect(12 / 4).toBe(3)
+        test.expect(-12 / 4).toBe(-3)
+        test.expect(12 / -4).toBe(-3)
+        test.expect(INT_MIN / 2).toBe(-1073741824)
+    end)
+
+    test.it("fractional division takes the float path", function()
+        test.expect(7 / 2).toBe(3.5)
+        test.expect(-7 / 2).toBe(-3.5)
+    end)
+end)
+
+test.describe("fused locals shapes", function()
+    -- Exercises the GETLOCAL2 / ADD_SET parser fusions through their edge
+    -- paths: error propagation out of the fused add, captured (upvalue)
+    -- accumulators, and pair reads inside and/or (which must NOT fuse
+    -- across the branch the short-circuit inserts).
+    test.it("accumulator sum over two locals", function()
+        local a, b = 3, 4
+        local s = 0
+        s = s + a
+        s = s + b
+        s = s + (a + b)
+        test.expect(s).toBe(14)
+    end)
+
+    test.it("fused add raises on non-numbers", function()
+        local s = 0
+        local bad = "x"
+        local ok = pcall(function()
+            local t = 0
+            t = t + bad
+            return t
+        end)
+        test.expect(ok).toBeFalse()
+        test.expect(s).toBe(0)
+    end)
+
+    test.it("captured accumulator keeps upvalue semantics", function()
+        local count = 0
+        local function bump(n)
+            count = count + n
+        end
+        bump(2); bump(3)
+        test.expect(count).toBe(5)
+    end)
+
+    test.it("short-circuit between local reads stays correct", function()
+        local x, y = false, 7
+        local r = x or y
+        test.expect(r).toBe(7)
+        local p, q = 1, nil
+        test.expect(p and q).toBe(nil)
+    end)
+
+    test.it("float and mixed adds through the fused store", function()
+        local f = 0.5
+        local g = 0.25 -- decimal literal only compared against itself
+        f = f + f      -- 1.0 -> canonicalizes to int 1
+        test.expect(f).toBe(1)
+        local m = 2
+        m = m + 0.5
+        test.expect(m).toBe(2.5)
+        test.expect(g + g == 2 * g).toBeTrue()
+    end)
+end)
+
 assert(test.run())

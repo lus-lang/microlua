@@ -6,6 +6,13 @@
 #include "MLuaString.h"
 #include "MLuaGC.h"
 
+/* The intern-table probe masks instead of taking modulo, which requires the
+ * capacity to stay a power of two through every transition: the initial
+ * size (a port knob), the *2 growth, and the /2-toward-initial shrink. */
+MLUA_STATIC_ASSERT((MLUA_STRING_TABLE_INITIAL_SIZE &
+                    (MLUA_STRING_TABLE_INITIAL_SIZE - 1)) == 0,
+                   "intern table capacity must be a power of two");
+
 /* ========================================================================== */
 /* String Hash (FNV-1a)                                                       */
 /* ========================================================================== */
@@ -100,10 +107,13 @@ static MLuaValue *StringTableFind(MLuaState *L, const char *str, Size len,
     return NULL;
   }
 
-  index = hash % L->StringTableCap;
+  /* Capacity is a power of two (initial size static-asserted at the top of
+   * this file, growth and shrink are *2 / /2), so masking replaces the two
+   * modulos on this hot probe -- every intern passes through here. */
+  index = hash & (L->StringTableCap - 1);
 
   for (i = 0; i < L->StringTableCap; i++) {
-    Size slot = (index + i) % L->StringTableCap;
+    Size slot = (index + i) & (L->StringTableCap - 1);
     v = L->StringTable[slot];
 
     if (IsNil(v)) {
@@ -193,10 +203,18 @@ static Bool StringTableInsert(MLuaState *L, MLuaValue strVal,
   /* Check if resize needed */
   threshold = (L->StringTableCap * MLUA_STRING_TABLE_LOAD_FACTOR) / 100;
   if (L->StringTableCount >= threshold) {
-    if (!StringTableResize(L)) {
-      return FALSE;
+    if (StringTableResize(L)) {
+      hint = NULL; /* the table was rebuilt; the old probe is meaningless */
     }
-    hint = NULL;
+    /* On resize failure (transient OOM: the heap may be full of
+     * collectable garbage, and allocations never collect) fall through
+     * and insert into the CURRENT table -- the load factor leaves it
+     * free slots, at degraded probe cost, and the next collection's
+     * shrink pass rebuilds it. Refusing the insert instead would hand
+     * out an un-interned string and silently break pointer equality
+     * (==, table keys); only a genuinely slotless table may fail below.
+     * The probe hint stays valid: a failed resize allocates nothing
+     * that could move the table. */
   }
 
   if (!hint) {
@@ -243,7 +261,14 @@ Bool MLuaStringTableShrink(MLuaState *L) {
   }
 
   if (newCap * 2 >= oldCap) {
-    L->StringTableCount = liveCount;
+    /* No rebuild: the table keeps its tombstones, so the load-factor
+     * count must keep counting them. StringTableCount tracks OCCUPIED
+     * slots (live + tombstones; tombstone reuse doesn't increment it),
+     * and it is already correct here. Overwriting it with the live-only
+     * count let a churned table fill to 100% occupied while staying
+     * under the resize threshold -- inserts then found no slot, no
+     * resize fired, and MLuaStringNew handed out un-interned strings,
+     * silently breaking pointer equality (`('k'..i) ~= ('k'..i)`). */
     return FALSE;
   }
 
@@ -342,7 +367,7 @@ MLuaValue MLuaStringNew(MLuaState *L, const char *str, Size len) {
   }
   totalDataSize = headerSize + len + 1; /* +1 for null terminator */
 
-  gch = MLuaAllocObject(L, OBJTYPE_STRING, totalDataSize);
+  gch = MLuaAllocObjectNC(L, OBJTYPE_STRING, totalDataSize);
   if (!gch) {
     /* Callers propagate the nil sentinel; without ErrorMsg it would pass
      * VM_CHECK_NIL and flow onward as an ordinary nil value. */
@@ -360,8 +385,13 @@ MLuaValue MLuaStringNew(MLuaState *L, const char *str, Size len) {
 
   result = MakePtr(gch);
 
-  /* Insert into string table, reusing the probe from the dedup miss */
-  StringTableInsert(L, result, existing);
+  /* Insert into string table, reusing the probe from the dedup miss. A
+   * failed insert (heap AND table full) must raise: returning the string
+   * un-interned would silently break pointer equality (==, table keys). */
+  if (!StringTableInsert(L, result, existing)) {
+    L->ErrorMsg = "out of memory";
+    return MLUA_NIL;
+  }
 
   return result;
 }
@@ -525,7 +555,7 @@ MLuaValue MLuaStringConcat(MLuaState *L, MLuaValue a, MLuaValue b) {
   totalLen = lenA + lenB;
 
   /* Allocate temporary buffer on heap for concatenation */
-  buf = (char *)MLuaAlloc(L, totalLen + 1);
+  buf = (char *)MLuaAllocNC(L, totalLen + 1);
   if (!buf) {
     L->ErrorMsg = "out of memory";
     return MLUA_NIL;
@@ -591,8 +621,8 @@ MLuaValue MLuaStringConcatMany(MLuaState *L, const MLuaValue *vals, int count) {
    * alias across operands. No GC runs inside an allocation (safepoint model),
    * so the operand pointers stay valid throughout.
    */
-  gch = MLuaAllocObject(L, OBJTYPE_STRING,
-                        sizeof(MLuaStringHeader) + totalLen + 1);
+  gch = MLuaAllocObjectNC(L, OBJTYPE_STRING,
+                            sizeof(MLuaStringHeader) + totalLen + 1);
   if (!gch) {
     L->ErrorMsg = "out of memory";
     return MLUA_NIL;
@@ -655,6 +685,9 @@ MLuaValue MLuaStringConcatMany(MLuaState *L, const MLuaValue *vals, int count) {
   if (slot && IsPtr(*slot)) {
     return *slot;
   }
-  StringTableInsert(L, result, slot);
+  if (!StringTableInsert(L, result, slot)) {
+    L->ErrorMsg = "out of memory"; /* un-interned strings must not escape */
+    return MLUA_NIL;
+  }
   return result;
 }

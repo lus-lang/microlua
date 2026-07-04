@@ -63,6 +63,33 @@
  * the switch's bounds check + jump on every instruction. */
 #define MLUA_VM_COMPUTED_GOTO 1
 
+/* Word-wise Mem* stays off: UPtr is 32-bit but the eZ80 ALU is 24-bit, so
+ * the word loads/stores lower to slower multi-byte sequences while adding
+ * ~0.2-0.4 KB of image. The byte loops (or a future LDIR implementation
+ * via MLUA_PORT_MEMFUNCS) are the right shape for this machine. */
+#define MLUA_MEM_WORDWISE 0
+
+/* Keep the classic live-growth-only GC pacing: with a few tens of KB of
+ * heap the headroom term would only widen transient peaks that this
+ * device cannot afford, for collections that are already cheap at this
+ * scale. Revisit with CEmu timings if bench_str ever shows GC dominance. */
+#define MLUA_GC_HEADROOM_DIV 0
+
+/* The %-and-/ inline fast path costs ~264 B inside RunVM on eZ80 -- too
+ * dear at ~350 B of launch headroom, and DIV/MOD are library calls here
+ * anyway so the win is only MLuaArith's dispatch overhead. Revisit with
+ * CEmu bench_int timings if headroom ever frees up. */
+#define MLUA_VM_INT_DIVMOD_FASTPATH 0
+
+/* Locals-fusion EMISSION off: ~640 B of parser code for fused output
+ * that on-calc-typed sources rarely amortize. The GETLOCAL2/ADD_SET
+ * HANDLERS stay compiled (v7 contract: PC-compiled fused chunks run
+ * on-calc); at ~530 B of RunVM the repl image still launches -- verified
+ * via the checked-in Cesium autotest at 140,529 B. Note the plain
+ * autotest.json (direct Asm( launch) needs an OS <= 5.4 ROM; on 5.5+
+ * the OS refuses Asm( at ANY size, which is not a ceiling signal. */
+#define MLUA_PARSE_FUSE_LOCALS 0
+
 /* MLUA_TABLE_NUM_ARRAYS is NOT set here: the typed-array code measures
  * ~2.8 KB of eZ80 image, which fits the runner target (its makefile opts
  * in) but would leave the full repl build under 1.3 KB of launch headroom.

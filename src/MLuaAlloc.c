@@ -38,6 +38,16 @@ Size MLuaNextGCThreshold(MLuaState *L, Size used) {
   if (growth < MLUA_GC_GROWTH_FLOOR) {
     growth = MLUA_GC_GROWTH_FLOOR;
   }
+#if MLUA_GC_HEADROOM_DIV
+  /* Headroom term (see MLuaConfig.h): with lots of free heap, allow more
+   * garbage per cycle -- compaction cost scales with live bytes, not
+   * garbage, so fewer collections do strictly less total work. Tight
+   * heaps take the classic live-growth allowance above unchanged. */
+  if (L->HeapSize > used &&
+      growth < (L->HeapSize - used) / MLUA_GC_HEADROOM_DIV) {
+    growth = (L->HeapSize - used) / MLUA_GC_HEADROOM_DIV;
+  }
+#endif
   threshold = used + growth;
   if (threshold > ceiling) {
     threshold = ceiling;
@@ -113,12 +123,13 @@ static void InitStateCommon(MLuaState *L, Size heapSize) {
 }
 
 Size MLuaFirstObjOffset(MLuaState *L) {
-  Size off = ALIGN_UP(sizeof(MLuaState), MLUA_ALIGNMENT);
-  off += ALIGN_UP(L->EvalStackSize * sizeof(MLuaValue), MLUA_ALIGNMENT);
-  off += ALIGN_UP(L->LocalsSize * sizeof(MLuaValue), MLUA_ALIGNMENT);
-  off += ALIGN_UP(L->ArgsSize * sizeof(MLuaValue), MLUA_ALIGNMENT);
-  off += ALIGN_UP(L->FrameCap * sizeof(MLuaFrame), MLUA_ALIGNMENT);
-  return off;
+  /* The carve boundary is fixed at state creation. It must NOT be derived
+   * from L->EvalStackSize/LocalsSize/ArgsSize/FrameCap: while a coroutine
+   * runs, LoadCtx installs the COROUTINE's (differently sized) buffers in
+   * those registers, and a GC inside the coroutine would then walk the
+   * heap from a bogus start -- reading garbage "headers", computing no
+   * forwarding addresses, and wiping the live heap on compact. */
+  return L->CarveEnd;
 }
 
 MLuaState *MLuaNewConstrainedState(void *memory, Size size) {
@@ -198,6 +209,7 @@ MLuaState *MLuaNewConstrainedState(void *memory, Size size) {
   L->FrameCap = MLUA_DEFAULT_FRAMES_SIZE;
   L->FrameTop = 0;
   L->HeapTop += framesBytes;
+  L->CarveEnd = L->HeapTop; /* first heap object starts here, forever */
   L->HeapPeak = L->HeapTop;
 #ifdef MLUA_MEMORY_DIAGNOSTICS
   L->AllocCount = 0;
@@ -442,7 +454,7 @@ void MLuaGetMemoryStats(MLuaState *L, MLuaMemoryStats *out) {
  * Every constrained-mode allocation is header-prefixed by the callers
  * below, so the GC's linear heap walk always lands on valid headers.
  */
-static void *CoreAlloc(MLuaState *L, Size size) {
+static void *CoreAlloc(MLuaState *L, Size size, Bool clear) {
   Size aligned;
   Size newTop;
   void *ptr;
@@ -454,7 +466,7 @@ static void *CoreAlloc(MLuaState *L, Size size) {
   /* Vector mode: use custom allocator */
   if (L->AllocFunc) {
     ptr = L->AllocFunc(L, L->AllocCtx, size);
-    if (ptr) {
+    if (ptr && clear) {
       MemSet(ptr, 0, size);
     }
     return ptr;
@@ -496,13 +508,26 @@ static void *CoreAlloc(MLuaState *L, Size size) {
     L->HeapPeak = L->HeapTop;
   }
 
-  /* Zero-initialize the allocation */
-  MemSet(ptr, 0, aligned);
+  /* Zero-initialize the allocation (skipped for the NC entry points --
+   * their callers overwrite the payload; padding tail bytes are never
+   * read, the heap walk steps header to header by CachedSize) */
+  if (clear) {
+    MemSet(ptr, 0, aligned);
+  }
+#ifdef MLUA_MEMORY_DIAGNOSTICS
+  else {
+    /* Poison NC allocations in diagnostic builds: any caller that reads
+     * before writing (i.e. silently relied on the zero fill) sees 0xAB
+     * garbage and fails its tests deterministically instead of passing
+     * by accident on a zeroed heap. */
+    MemSet(ptr, 0xAB, aligned);
+  }
+#endif
 
   return ptr;
 }
 
-void *MLuaAlloc(MLuaState *L, Size size) {
+static void *AllocRaw(MLuaState *L, Size size, Bool clear) {
   MLuaGCHeader *header;
   Size totalSize;
 
@@ -525,7 +550,7 @@ void *MLuaAlloc(MLuaState *L, Size size) {
   if (ALIGN_UP(totalSize, MLUA_ALIGNMENT) > (Size)0xFFFFFFFFU) {
     return NULL;
   }
-  header = (MLuaGCHeader *)CoreAlloc(L, totalSize);
+  header = (MLuaGCHeader *)CoreAlloc(L, totalSize, clear);
   if (!header) {
     return NULL;
   }
@@ -537,11 +562,18 @@ void *MLuaAlloc(MLuaState *L, Size size) {
   return MLUA_OBJDATA(header);
 }
 
+void *MLuaAlloc(MLuaState *L, Size size) { return AllocRaw(L, size, TRUE); }
+
+void *MLuaAllocNC(MLuaState *L, Size size) {
+  return AllocRaw(L, size, FALSE);
+}
+
 /* ========================================================================== */
 /* GC-Managed Object Allocation                                               */
 /* ========================================================================== */
 
-MLuaGCHeader *MLuaAllocObject(MLuaState *L, U8 objType, Size dataSize) {
+static MLuaGCHeader *AllocObject(MLuaState *L, U8 objType, Size dataSize,
+                                 Bool clear) {
   Size totalSize;
   MLuaGCHeader *header;
 
@@ -554,7 +586,7 @@ MLuaGCHeader *MLuaAllocObject(MLuaState *L, U8 objType, Size dataSize) {
     return NULL;
   }
 
-  header = (MLuaGCHeader *)CoreAlloc(L, totalSize);
+  header = (MLuaGCHeader *)CoreAlloc(L, totalSize, clear);
   if (!header) {
     return NULL;
   }
@@ -566,6 +598,14 @@ MLuaGCHeader *MLuaAllocObject(MLuaState *L, U8 objType, Size dataSize) {
   header->Forward = NULL;
 
   return header;
+}
+
+MLuaGCHeader *MLuaAllocObject(MLuaState *L, U8 objType, Size dataSize) {
+  return AllocObject(L, objType, dataSize, TRUE);
+}
+
+MLuaGCHeader *MLuaAllocObjectNC(MLuaState *L, U8 objType, Size dataSize) {
+  return AllocObject(L, objType, dataSize, FALSE);
 }
 
 /* ========================================================================== */

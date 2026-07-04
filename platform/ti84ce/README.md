@@ -4,11 +4,11 @@ Two programs built with the [CE C/C++ Toolchain](https://github.com/CE-Programmi
 
 | Program | Directory | Contents |
 |---|---|---|
-| `MLUA.8xp` (~59 KB) | `repl/` | Full build: runs Lua **source or bytecode** appvars, on-calc **REPL** |
+| `MLUA.8xp` (~60 KB) | `repl/` | Full build: runs Lua **source or bytecode** appvars, on-calc **REPL** |
 | `MLUAR.8xp` (~47 KB) | `runner/` | Bytecode-only runner (no compiler); smallest footprint. Ships **typed float arrays** (`MLUA_TABLE_NUM_ARRAYS`): a table of floats retains ~4 bytes/element instead of ~20, so float-heavy workloads fit the 48 KB heap. The repl build skips this (~2.8 KB of image it can't spare). |
 
 Both include the `gfx` / `key` / `timer` calculator bindings and ship as a
-single compressed `.8xp` (zx0; the decompressed image is ~110-139 KB of
+single compressed `.8xp` (zx0; the decompressed image is ~108-141 KB of
 eZ80 code).
 
 ## Building
@@ -88,15 +88,20 @@ architecture says it should:
 
 | benchmark | workload | TI-BASIC | MicroLua | winner |
 |---|---|---|---|---|
-| `bench_int` | scalar integer loop, 20k iterations | 161 s | 19.9 s | **MicroLua 8.1x** |
-| `mandel` | 32x24 Mandelbrot floats, compute | 121 s | 52.7 s | **MicroLua 2.3x** |
-| `mandel` | draw phase (one pixel/cell) | 5 s | 1.7 s | **MicroLua 2.9x** |
-| `bench_list` | 60 element-wise passes over 500-element lists | 20 s | 19.8 s | **MicroLua 1.01x** |
-| `bench_str` | build 1000-char string by 500 appends + scan | 11 s | 6.8 s | **MicroLua 1.6x** |
+| `bench_int` | scalar integer loop, 20k iterations | 161 s | 16.0 s | **MicroLua 10.1x** |
+| `mandel` | 32x24 Mandelbrot floats, compute | 121 s | 39.8 s | **MicroLua 3.0x** |
+| `mandel` | draw phase (one pixel/cell) | 5 s | 1.3 s | **MicroLua 3.8x** |
+| `bench_list` | 60 element-wise passes over 500-element lists | 20 s | 18.8 s | **MicroLua 1.06x** |
+| `bench_str` | build 1000-char string by 500 appends + scan | 11 s | 5.2 s | **MicroLua 2.1x** |
 
-MicroLua now wins every row (re-verified 2026-07-03 after the follow-up
-perf pass via deterministic CEmu screen-CRC gates at these values +2%;
-recompile old `.mlu` appvars). `bench_list` is TI-BASIC's best case --
+MicroLua wins every row. BOTH columns were re-measured 2026-07-03 on the
+same CEmu ROM: the TI-BASIC times came back identical to the previous
+recordings (the OS interpreter is unchanged, which also validates the
+measurement setup), while the MicroLua side improved across the board
+from perf pass 4 (no-clear allocator, append fast arm, fused-locals
+opcodes). Screens carry exact checksums on both sides; the regression
+gate is these values +2%; recompile old `.mlu` appvars after the pass
+(the bytecode format changed). `bench_list` is TI-BASIC's best case --
 `L1L2+L1` is one dispatch into vectorized OS assembly -- and the fused
 indexing opcodes (`GETTABLE_LL`/`SETTABLE_LL`), the array-window fast
 paths, and computed-goto dispatch bring per-element bytecode to parity
@@ -117,11 +122,15 @@ verifies the tokenization. The Lua side runs from source appvars via MLUA.
   hungriest residents (~24 bytes retained per integer element).
 - Program image: decompressed into user RAM at launch; the practical
   ceiling is ~137 KB once the VAT and the LibLoad library copies are
-  accounted for. The full build sits at ~136.4 KB after the 2026-07 perf
-  pass (fused opcodes, correctness fixes) - `MLUA_ENABLE_PACK=0` and
-  `MLUA_PARSE_FOLD_INT=0` keep it under the ceiling while
-  `MLUA_VM_COMPUTED_GOTO=1` and compare-branch fusion stay on, being
-  worth more per byte here. Measure
+  accounted for, though the exact limit depends on what else occupies RAM
+  (the pass-4 build launches at 137.2 KB via Cesium in CEmu). The full
+  build sits at ~137.2 KB after perf pass 4 (fused-opcode handlers,
+  correctness fixes) - `MLUA_ENABLE_PACK=0`, `MLUA_PARSE_FOLD_INT=0` and
+  `MLUA_PARSE_FUSE_LOCALS=0` buy the room while `MLUA_VM_COMPUTED_GOTO=1`,
+  compare-branch fusion, and the fused-locals HANDLERS stay on, being
+  worth more per byte here. Note: on OS 5.5+ the direct `Asm(` launch is
+  refused at ANY size (use Cesium/arTIfiCE); only the Cesium autotests
+  are a valid launch check on such ROMs. Measure
   with `python3 ../../tools/map_size.py bin/MLUA.map` (image size, largest
   symbols, and `--diff old.map new.map` for per-symbol deltas against a
   saved baseline map).

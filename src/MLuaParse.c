@@ -628,8 +628,10 @@ static Bool HasLaterLocalRead(MLuaProto *proto, Size start, U8 slot) {
         proto->Code[pc + 1] == slot) {
       return TRUE;
     }
-    /* Fused indexing reads two locals through its packed nibbles */
-    if ((op == OP_GETTABLE_LL || op == OP_SETTABLE_LL) &&
+    /* Fused indexing and fused pair reads consume two locals through
+     * their packed nibbles */
+    if ((op == OP_GETTABLE_LL || op == OP_SETTABLE_LL ||
+         op == OP_GETLOCAL2) &&
         ((proto->Code[pc + 1] >> 4) == slot ||
          (proto->Code[pc + 1] & 0x0F) == slot)) {
       return TRUE;
@@ -752,6 +754,73 @@ static void AdjustTo1(MLuaParser *p) {
   }
 }
 
+#if MLUA_PARSE_FUSE_LOCALS
+/*
+ * If the code buffer ends with `GETLOCAL a` (slot <= 15) and slot b also
+ * fits a nibble, retract it and emit the fused pair read. Safe under the
+ * same reasoning as TryRetractLocalPair -- a bare local read emits
+ * nothing else, so nothing can sit between the two loads -- plus the
+ * explicit patched-target guard: an already-patched jump landing at the
+ * second read's position would land inside the fused operand otherwise.
+ * (A target AT the first read stays valid: the fused op begins there and
+ * performs the same two pushes.)
+ */
+static Bool TryFuseLocalPairRead(MLuaFuncState *fs, U8 b) {
+  MLuaProto *proto = fs->Proto;
+  Size last = fs->LastInstrPos;
+  U8 a;
+
+  if (last == (Size)-1 || proto->CodeSize != last + 2) {
+    return FALSE;
+  }
+  if (proto->Code[last] != OP_GETLOCAL || b > 15) {
+    return FALSE;
+  }
+  a = proto->Code[last + 1];
+  if (a > 15) {
+    return FALSE;
+  }
+  if (fs->MaxPatchTarget >= last + 1) {
+    return FALSE;
+  }
+  proto->CodeSize = last;
+  fs->LastInstrPos = (Size)-1;
+  fs->PrevInstrPos = (Size)-1;
+  MLuaEmitOpB(fs, OP_GETLOCAL2, (U8)((a << 4) | b));
+  return TRUE;
+}
+
+/*
+ * If the just-parsed assignment RHS ends in a bare OP_ADD, retract it and
+ * emit the fused add-and-store. Rejected when an already-patched jump
+ * lands at the current end of code (it would expect the ADD's result on
+ * the stack with the SETLOCAL still to come; after fusion that boundary
+ * is inside the fused instruction).
+ */
+static Bool TryFuseAddSet(MLuaFuncState *fs, U8 slot) {
+  MLuaProto *proto = fs->Proto;
+  Size last = fs->LastInstrPos;
+
+  if (last == (Size)-1 || proto->CodeSize != last + 1) {
+    return FALSE;
+  }
+  if (proto->Code[last] != OP_ADD) {
+    return FALSE;
+  }
+  if (fs->MaxPatchTarget >= proto->CodeSize) {
+    return FALSE;
+  }
+  proto->CodeSize = last;
+  fs->LastInstrPos = (Size)-1;
+  fs->PrevInstrPos = (Size)-1;
+  MLuaEmitOpB(fs, OP_ADD_SET, slot);
+  return TRUE;
+}
+#else
+#define TryFuseLocalPairRead(fs, b) (FALSE)
+#define TryFuseAddSet(fs, slot) (FALSE)
+#endif /* MLUA_PARSE_FUSE_LOCALS */
+
 /*
  * Emit the read of a named variable using full lexical resolution.
  */
@@ -761,7 +830,9 @@ static void EmitGetVar(MLuaParser *p, const char *name, Size len) {
 
   switch (ResolveVar(p, fs, name, len, &idx)) {
   case VAR_LOCAL:
-    MLuaEmitOpB(fs, OP_GETLOCAL, (U8)idx);
+    if (!TryFuseLocalPairRead(fs, (U8)idx)) {
+      MLuaEmitOpB(fs, OP_GETLOCAL, (U8)idx);
+    }
     break;
   case VAR_UPVAL:
     MLuaEmitOpB(fs, OP_GETUPVAL, (U8)idx);
@@ -1205,7 +1276,21 @@ static Bool TryRetractLocalPair(MLuaFuncState *fs, U8 *slots) {
   U8 t;
   U8 k;
 
-  if (last == (Size)-1 || prev == (Size)-1) {
+  if (last == (Size)-1) {
+    return FALSE;
+  }
+
+  /* The pair-read fusion usually gets there first: a fused GETLOCAL2
+   * ending the buffer IS the pair, already nibble-packed. */
+  if (proto->Code[last] == OP_GETLOCAL2 && proto->CodeSize == last + 2) {
+    *slots = proto->Code[last + 1];
+    proto->CodeSize = last;
+    fs->LastInstrPos = (Size)-1;
+    fs->PrevInstrPos = (Size)-1;
+    return TRUE;
+  }
+
+  if (prev == (Size)-1) {
     return FALSE;
   }
   /* The pair must be adjacent and must end the code buffer */
@@ -1627,7 +1712,9 @@ static void ParseAssignment(MLuaParser *p, const char *name, Size len) {
 
   switch (ResolveVar(p, fs, name, len, &idx)) {
   case VAR_LOCAL:
-    MLuaEmitOpB(fs, OP_SETLOCAL, (U8)idx);
+    if (!TryFuseAddSet(fs, (U8)idx)) {
+      MLuaEmitOpB(fs, OP_SETLOCAL, (U8)idx);
+    }
     break;
   case VAR_UPVAL:
     MLuaEmitOpB(fs, OP_SETUPVAL, (U8)idx);

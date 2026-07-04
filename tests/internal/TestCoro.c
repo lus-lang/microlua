@@ -276,6 +276,143 @@ TEST(GC_HeapShrinksAfterChurn) {
   ASSERT(after < before);
 }
 
+/*
+ * Non-zeroed allocations (MLuaAllocNC / MLuaAllocObjectNC) under real GC
+ * pressure: accumulator concat and array growth allocate through the NC
+ * paths, the 96 KB heap forces collections mid-loop, and the compactor
+ * relocates freshly NC-allocated objects (including their uninitialized
+ * padding tails). Exact final contents pin that no byte the runtime reads
+ * was left to garbage.
+ */
+TEST(GC_NoClearAllocSurvivesCompaction) {
+  MLuaState *L = NewState();
+  ASSERT_NE(L, NULL);
+
+  /* Accumulator concat: every step allocates the result via the NC path;
+   * dead predecessors force repeated compaction in 96 KB. 400 iterations
+   * of "xy" -> 800 chars + digits interleaved for content variety. */
+  const char *concat = "local s = ''\n"
+                       "for i = 1, 400 do s = s .. (i % 10) .. 'y' end\n"
+                       "result = #s\n";
+  ASSERT(RunAndCheckInt(L, concat, 800));
+
+  /* Array + hash growth through the NC paths, with churn so collections
+   * interleave; verify content integrity element by element. */
+  const char *tables = "local t = {}\n"
+                       "for i = 1, 2000 do t[i] = i * 3 end\n"
+                       "local h = {}\n"
+                       "for i = 1, 300 do h['k' .. i] = i end\n"
+                       "local sum = 0\n"
+                       "for i = 1, 2000 do sum = sum + (t[i] - i * 3) end\n"
+                       "for i = 1, 300 do sum = sum + (h['k' .. i] - i) end\n"
+                       "result = sum\n";
+  ASSERT(RunAndCheckInt(L, tables, 0));
+
+  /* string.rep / reverse / upper build through MLuaAllocNC scratch */
+  const char *strfns = "local r = string.rep('ab', 200)\n"
+                       "local v = string.reverse(r)\n"
+                       "local u = string.upper(r)\n"
+                       "result = #v + #u + (string.sub(v, 1, 2) == 'ba' and 1 or 0)\n"
+                       "         + (string.sub(u, 1, 2) == 'AB' and 1 or 0)\n";
+  ASSERT(RunAndCheckInt(L, strfns, 802));
+}
+
+/*
+ * Pins the intern-table OOM fallback: when the heap is too full of
+ * collectable garbage for the intern table to resize (allocations never
+ * collect), new strings must still intern into the not-yet-grown table --
+ * NEVER escape un-interned. The historical failure returned textually
+ * equal strings as distinct values, so `('k'..i) == ('k'..i)` went false
+ * and table lookups by rebuilt keys silently missed (seen on generic32 at
+ * a 96 KB limit; this workload recreates that pressure).
+ */
+TEST(GC_InternSurvivesResizeOOM) {
+  MLuaState *L = NewState();
+  ASSERT_NE(L, NULL);
+
+  const char *src = "local s = ''\n"
+                    "for i = 1, 400 do s = s .. (i % 10) .. 'y' end\n"
+                    "local t = {}\n"
+                    "for i = 1, 2000 do t[i] = i * 3 end\n"
+                    "local h = {}\n"
+                    "local badeq, badhit = 0, 0\n"
+                    "for i = 1, 300 do\n"
+                    "  h['k' .. i] = i\n"
+                    "  if ('k' .. i) ~= ('k' .. i) then badeq = badeq + 1 end\n"
+                    "  if h['k' .. i] ~= i then badhit = badhit + 1 end\n"
+                    "end\n"
+                    "for i = 1, 300 do\n"
+                    "  if h['k' .. i] ~= i then badhit = badhit + 1 end\n"
+                    "end\n"
+                    "result = badeq * 1000 + badhit\n";
+  ASSERT(RunAndCheckInt(L, src, 0));
+}
+
+/*
+ * Behavioral pin for headroom-proportional GC pacing: the same accumulator
+ * loop must collect at most a handful of times in a roomy 1 MB heap (the
+ * headroom term hands out MBs of allowance per cycle) while still
+ * collecting -- repeatedly -- in the tight 96 KB heap. Guards against the
+ * headroom term silently regressing to per-50KB collections in big heaps,
+ * and against it suppressing collections where they are load-bearing.
+ */
+#define ROOMY_HEAP_SIZE (1024 * 1024)
+static U8 RoomyHeap[ROOMY_HEAP_SIZE] MLUA_ALIGNAS(MLUA_ALIGNMENT);
+
+TEST(GC_HeadroomPacing) {
+  const char *churn = "local s = ''\n"
+                      "for i = 1, 2000 do s = s .. (i % 10) .. 'y' end\n"
+                      "result = #s\n";
+
+  {
+    MLuaState *L = MLuaStateInit(RoomyHeap, ROOMY_HEAP_SIZE);
+    ASSERT_NE(L, NULL);
+    MLuaOpenLibs(L);
+    ASSERT(RunAndCheckInt(L, churn, 4000));
+#if MLUA_GC_HEADROOM_DIV
+    /* ~4 MB of transient allocation through a 1 MB heap: the headroom
+     * allowance (~250 KB/cycle at DIV=4) bounds collections to ~20;
+     * classic live-growth pacing (~3 KB/cycle here) needed hundreds. */
+    ASSERT(L->GCCycleCount < 50);
+#endif
+    ASSERT(L->GCCycleCount > 0);
+  }
+
+  {
+    MLuaState *L = NewState(); /* tight 96 KB heap */
+    ASSERT_NE(L, NULL);
+    ASSERT(RunAndCheckInt(L, churn, 4000));
+    /* Tight heaps must still collect aggressively */
+    ASSERT(L->GCCycleCount > 5);
+  }
+}
+
+/*
+ * Collections at safepoints INSIDE a running coroutine. Historically fatal
+ * twice over: MLuaFirstObjOffset derived the carve boundary from L's
+ * context-switched array sizes (so the heap walk started at a bogus
+ * offset, computed no forwarding addresses, and compact wiped the live
+ * heap), and MarkRoots never marked the running coroutine's own
+ * Eval/Locals/Args/Frames heap buffers (so they were collected out from
+ * under the executing VM). Either way the next RELOAD_FRAME dereferenced
+ * garbage. The accumulator loop below allocates enough inside the
+ * coroutine to force several collections while it is the current thread.
+ */
+TEST(GC_CollectInsideRunningCoroutine) {
+  MLuaState *L = NewState();
+  ASSERT_NE(L, NULL);
+
+  const char *src = "local co = coroutine.create(function()\n"
+                    "  local s = ''\n"
+                    "  for i = 1, 1500 do s = s .. (i % 10) .. 'z' end\n"
+                    "  return #s\n"
+                    "end)\n"
+                    "local ok, len = coroutine.resume(co)\n"
+                    "result = (ok and 1 or 0) * len\n";
+  ASSERT(RunAndCheckInt(L, src, 3000));
+  ASSERT(L->GCCycleCount > 0); /* the loop must actually have collected */
+}
+
 /* ========================================================================== */
 /* Main                                                                       */
 /* ========================================================================== */
@@ -296,6 +433,10 @@ int main(void) {
   RUN_TEST(GC_SuspendedCoroutineSurvivesCompaction);
   RUN_TEST(GC_ExplicitCollectWithGCRef);
   RUN_TEST(GC_HeapShrinksAfterChurn);
+  RUN_TEST(GC_NoClearAllocSurvivesCompaction);
+  RUN_TEST(GC_InternSurvivesResizeOOM);
+  RUN_TEST(GC_HeadroomPacing);
+  RUN_TEST(GC_CollectInsideRunningCoroutine);
 
   printf("Results: %d passed, %d failed\n", TestsPassed, TestsFailed);
   return TestsFailed > 0 ? 1 : 0;

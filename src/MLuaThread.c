@@ -230,6 +230,14 @@ int MLuaThreadResume(MLuaState *L, MLuaValue thread, const MLuaValue *argv,
     L->CCallDepth--;
   }
 
+  /* A collection at a safepoint inside the coroutine may have MOVED the
+   * thread objects: the GC updates L->CurrentThread and every Resumer
+   * link, but not these C locals. Re-derive both before touching them --
+   * writing through the stale th would update a dead copy (Status stuck
+   * RUNNING, Ctx snapshot lost) while the live object goes untouched. */
+  th = L->CurrentThread;
+  prev = th->Resumer;
+
   if (status != MLUA_OK && status != MLUA_YIELD) {
     const char *msg = L->ErrorMsg ? L->ErrorMsg : "error";
     th->ErrorValue = MLuaStringNew(L, msg, StrLen(msg));

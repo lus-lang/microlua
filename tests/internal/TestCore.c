@@ -83,6 +83,102 @@ TEST(MemMove_OverlapBackward) {
   ASSERT_EQ(MemCmp(buf, "23456789", 8), 0);
 }
 
+/*
+ * Alignment/overlap matrix for the word-wise Mem* bodies: every (dst
+ * offset, src offset, length) combination around the word size, against
+ * reference results, with guard bytes fencing both ends of the window.
+ * Exercises co-aligned and misaligned pairs, head/body/tail splits, and
+ * both MemMove directions at overlap distances around one word.
+ */
+#define MATRIX_WORD ((int)sizeof(void *))
+#define MATRIX_SPAN (6 * MATRIX_WORD)
+#define GUARD 4
+
+TEST(MemCpy_Matrix) {
+  unsigned char src[MATRIX_SPAN + 2 * GUARD];
+  unsigned char dst[MATRIX_SPAN + 2 * GUARD];
+  int dOff, sOff, len, i;
+
+  for (dOff = 0; dOff <= 2 * MATRIX_WORD + 2; dOff++) {
+    for (sOff = 0; sOff <= 2 * MATRIX_WORD + 2; sOff++) {
+      for (len = 0; len <= 3 * MATRIX_WORD + 2; len++) {
+        for (i = 0; i < MATRIX_SPAN + 2 * GUARD; i++) {
+          src[i] = (unsigned char)(0x40 + (i & 0x3F));
+          dst[i] = 0xAA;
+        }
+        MemCpy(dst + GUARD + dOff, src + GUARD + sOff, (Size)len);
+        for (i = 0; i < len; i++) {
+          ASSERT_EQ(dst[GUARD + dOff + i], src[GUARD + sOff + i]);
+        }
+        for (i = 0; i < GUARD + dOff; i++) {
+          ASSERT_EQ(dst[i], 0xAA);
+        }
+        for (i = GUARD + dOff + len; i < MATRIX_SPAN + 2 * GUARD; i++) {
+          ASSERT_EQ(dst[i], 0xAA);
+        }
+      }
+    }
+  }
+}
+
+TEST(MemSet_Matrix) {
+  unsigned char dst[MATRIX_SPAN + 2 * GUARD];
+  int dOff, len, i;
+
+  for (dOff = 0; dOff <= 2 * MATRIX_WORD + 2; dOff++) {
+    for (len = 0; len <= 3 * MATRIX_WORD + 2; len++) {
+      for (i = 0; i < MATRIX_SPAN + 2 * GUARD; i++) {
+        dst[i] = 0xAA;
+      }
+      MemSet(dst + GUARD + dOff, 0x5C, (Size)len);
+      for (i = 0; i < GUARD + dOff; i++) {
+        ASSERT_EQ(dst[i], 0xAA);
+      }
+      for (i = 0; i < len; i++) {
+        ASSERT_EQ(dst[GUARD + dOff + i], 0x5C);
+      }
+      for (i = GUARD + dOff + len; i < MATRIX_SPAN + 2 * GUARD; i++) {
+        ASSERT_EQ(dst[i], 0xAA);
+      }
+    }
+  }
+}
+
+TEST(MemMove_OverlapMatrix) {
+  unsigned char buf[MATRIX_SPAN + 2 * GUARD];
+  unsigned char ref[MATRIX_SPAN + 2 * GUARD];
+  int base, delta, len, i;
+
+  /* delta spans both directions through +/- (word+1); base walks the
+   * window across word boundaries so every alignment pairing occurs */
+  for (base = 0; base <= MATRIX_WORD; base++) {
+    for (delta = -(MATRIX_WORD + 1); delta <= MATRIX_WORD + 1; delta++) {
+      for (len = 0; len <= 3 * MATRIX_WORD + 2; len++) {
+        int srcAt = GUARD + MATRIX_WORD + 1 + base;
+        int dstAt = srcAt + delta;
+        for (i = 0; i < MATRIX_SPAN + 2 * GUARD; i++) {
+          buf[i] = (unsigned char)(0x40 + (i & 0x3F));
+          ref[i] = buf[i];
+        }
+        /* Reference result via a disjoint scratch copy */
+        {
+          unsigned char scratch[MATRIX_SPAN + 2 * GUARD];
+          for (i = 0; i < len; i++) {
+            scratch[i] = ref[srcAt + i];
+          }
+          for (i = 0; i < len; i++) {
+            ref[dstAt + i] = scratch[i];
+          }
+        }
+        MemMove(buf + dstAt, buf + srcAt, (Size)len);
+        for (i = 0; i < MATRIX_SPAN + 2 * GUARD; i++) {
+          ASSERT_EQ(buf[i], ref[i]);
+        }
+      }
+    }
+  }
+}
+
 TEST(MemCmp_Equal) {
   char a[] = "hello";
   char b[] = "hello";
@@ -166,6 +262,9 @@ int main(void) {
   RUN_TEST(MemMove_NoOverlap);
   RUN_TEST(MemMove_OverlapForward);
   RUN_TEST(MemMove_OverlapBackward);
+  RUN_TEST(MemCpy_Matrix);
+  RUN_TEST(MemSet_Matrix);
+  RUN_TEST(MemMove_OverlapMatrix);
   RUN_TEST(MemCmp_Equal);
   RUN_TEST(MemCmp_Less);
   RUN_TEST(MemCmp_Greater);

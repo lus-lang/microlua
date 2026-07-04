@@ -489,4 +489,46 @@ test.describe("hash deletion", function()
     end)
 end)
 
+test.describe("sequential append fast path", function()
+    -- Pins the VM's no-growth append arm in TryArraySetFast (t[i] = v with
+    -- i == #t + 1 and spare capacity, through the locals-indexed
+    -- SETTABLE_LL shape): appends, overwrites, #t bookkeeping, and the
+    -- hole rule must all behave exactly like the generic path.
+    test.it("interleaves appends, overwrites and length reads", function()
+        local t = {}
+        for i = 1, 100 do
+            t[i] = i * 7
+            test.expect(#t).toBe(i)
+            if i % 10 == 0 then
+                t[i / 2 + 1] = -1 -- overwrite inside the window (i is even: exact int)
+            end
+        end
+        test.expect(#t).toBe(100)
+        test.expect(t[100]).toBe(700)
+        test.expect(t[6]).toBe(-1)
+        test.expect(t[99]).toBe(99 * 7)
+    end)
+
+    test.it("still rejects holes past the append point", function()
+        local t = {}
+        for i = 1, 5 do t[i] = i end
+        local ok = pcall(function() t[100] = true end)
+        test.expect(ok).toBeFalse()
+        test.expect(#t).toBe(5)
+    end)
+
+    test.it("appends across the geometric growth boundary", function()
+        -- growth is x1.5 above 1024: cross several boundaries and verify
+        -- contents (growth iterations take the slow path, the rest the
+        -- fast arm; the two must interleave seamlessly)
+        local t = {}
+        local n = 3000
+        for i = 1, n do t[i] = n - i end
+        test.expect(#t).toBe(n)
+        local sum = 0
+        for i = 1, n do sum = sum + (t[i] - (n - i)) end
+        test.expect(sum).toBe(0)
+    end)
+end)
+
 assert(test.run())
