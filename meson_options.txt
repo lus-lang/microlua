@@ -6,7 +6,7 @@ option('compiler',
 
 option('port',
     type: 'combo',
-    choices: ['default', 'generic64', 'generic32', 'cortex-m', 'riscv32', 'ti84ce'],
+    choices: ['default', 'generic64', 'generic32', 'cortex-m', 'riscv32', 'ti84ce', 'irix-mips'],
     value: 'default',
     description: 'Built-in MicroLua port configuration preset'
 )

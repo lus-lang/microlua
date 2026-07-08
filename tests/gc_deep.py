@@ -15,6 +15,8 @@ import resource
 import subprocess
 import sys
 
+import _wrap
+
 DEPTH = 40000
 STACK_LIMIT = 512 * 1024  # far less than DEPTH * any plausible frame size
 
@@ -30,7 +32,7 @@ def main():
     if len(sys.argv) < 2:
         sys.stderr.write("usage: gc_deep.py <mlua>\n")
         return 1
-    mlua = sys.argv[1]
+    mlua = _wrap.mlua_cmd(sys.argv[1])
 
     source = (
         f"local t = false "
@@ -42,7 +44,7 @@ def main():
     # ~150 B/link on 64-bit -> ~6 MB live; a 12 MB limit forces collections
     # while the full chain is reachable, so the marker walks all of it.
     result = subprocess.run(
-        [mlua, "--memory-limit", str(12 * 1024 * 1024), "-e", source],
+        [*mlua, "--memory-limit", str(12 * 1024 * 1024), "-e", source],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,

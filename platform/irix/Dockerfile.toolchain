@@ -1,0 +1,9 @@
+FROM --platform=linux/amd64 debian:jessie
+
+RUN printf 'deb http://archive.debian.org/debian jessie main\ndeb http://archive.debian.org/debian-security jessie/updates main\n' > /etc/apt/sources.list \
+ && apt-get -o Acquire::Check-Valid-Until=false update \
+ && apt-get install -y --force-yes build-essential file bzip2 patch zlib1g-dev \
+ && apt-get clean
+
+COPY build.sh /build.sh
+RUN chmod +x /build.sh

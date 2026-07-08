@@ -4,6 +4,8 @@ import os
 import shutil
 import subprocess
 import sys
+
+import _wrap
 import tempfile
 
 
@@ -18,6 +20,13 @@ def run(cmd, **kwargs):
 
 
 def main(argv):
+    if _wrap.wrapped():
+        # Cross run through an exe wrapper: the nested `meson setup` below
+        # would configure a NATIVE build that cannot match the cross
+        # configuration under test. Covered by the native suites instead.
+        sys.stderr.write("skipped: exe-wrapper cross run\n")
+        return 77
+
     if len(argv) != 3:
         print("usage: bytecode_only_build.py SOURCE_ROOT MLUA_EXE", file=sys.stderr)
         return 2

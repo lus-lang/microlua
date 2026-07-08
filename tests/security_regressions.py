@@ -4,9 +4,11 @@ import os
 import subprocess
 import sys
 
+import _wrap
+
 
 def run_lua(mlua, source, args=None, timeout=5):
-    cmd = [mlua]
+    cmd = _wrap.mlua_cmd(mlua)
     if args:
         cmd.extend(args)
     cmd.extend(["-e", source])

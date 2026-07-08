@@ -1,3 +1,4 @@
 builddir*/
 bench/RESULTS.md
 .DS_Store
+tests/__pycache__/
