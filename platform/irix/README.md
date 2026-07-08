@@ -69,15 +69,17 @@ byte-identical to the host build — the correctness gate):
 | workload | Indigo2 | Apple M-series host | ratio |
 |---|---|---|---|
 | fib | 33.6 s | 0.304 s | 111x |
+| listops | 6.1 s | 0.036 s | 169x |
 | loop | 28.7 s | 0.142 s | 202x |
 | matrix | 5.1 s | 0.032 s | 159x |
 | sieve | 6.1 s | 0.039 s | 156x |
 | sort | 3.1 s | 0.023 s | 135x |
 | strbuild | 4.3 s | 0.009 s | 478x |
 | strjoin | 12.9 s | 0.019 s | 679x |
+| strscan | 3.6 s | 0.010 s | 360x |
 | tableconcat | 1.2 s | 0.006 s | 200x |
 
-Geomean ≈ 217x — consistent with three decades of single-thread progress.
+Geomean ≈ 222x — consistent with three decades of single-thread progress.
 The perf-pass-4 runtime is measurably faster on this hardware too: fib was
 47.5 s user on the pre-pass build, 33.6 s after (1.41x).
 
