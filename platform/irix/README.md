@@ -60,3 +60,40 @@ Full interpreter + smoke suites pass on the Indigo2, including the
 cross-endian bytecode path: `.mlu` compiled on a little-endian host runs
 on the big-endian box (and vice versa) through `MLuaUndump`'s endianness
 handling.
+
+## Benchmarks (Indigo2, R4400 @ 150 MHz, 2026-07-07)
+
+`bench/workloads/` on the box (best of 3, csh `time` user seconds, output
+byte-identical to the host build — the correctness gate):
+
+| workload | Indigo2 | Apple M-series host | ratio |
+|---|---|---|---|
+| fib | 33.6 s | 0.304 s | 111x |
+| loop | 28.7 s | 0.142 s | 202x |
+| matrix | 5.1 s | 0.032 s | 159x |
+| sieve | 6.1 s | 0.039 s | 156x |
+| sort | 3.1 s | 0.023 s | 135x |
+| strbuild | 4.3 s | 0.009 s | 478x |
+| strjoin | 12.9 s | 0.019 s | 679x |
+| tableconcat | 1.2 s | 0.006 s | 200x |
+
+Geomean ≈ 217x — consistent with three decades of single-thread progress.
+The perf-pass-4 runtime is measurably faster on this hardware too: fib was
+47.5 s user on the pre-pass build, 33.6 s after (1.41x).
+
+The same computations as the TI-84 Plus CE benchmark pairs
+(`platform/ti84ce/examples/`, self-timed, integer-exact checksums all
+matching) put the three MicroLua targets on one line — the 1993
+workstation sits roughly geometrically halfway between a 2015 calculator
+and a 2024 laptop:
+
+| benchmark | TI-84 CE (eZ80 48 MHz) | Indigo2 (R4400 150 MHz) | M-series host |
+|---|---|---|---|
+| bench_int | 16.0 s | 90 ms | 0.53 ms |
+| bench_list | 18.8 s | 130 ms | 0.64 ms |
+| bench_str | 5.2 s | 40 ms | 0.13 ms |
+| mandel compute | 39.8 s | 410 ms | 0.92 ms |
+
+(Indigo2/host times self-reported through an `os.clock`-based
+`timer.millis` shim; CE times from `platform/ti84ce/README.md`, measured
+in CEmu on OS 5.7.)
