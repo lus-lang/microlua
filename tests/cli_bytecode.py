@@ -3,6 +3,8 @@
 import os
 import subprocess
 import sys
+
+import _wrap
 import tempfile
 
 
@@ -19,7 +21,7 @@ def main(argv):
             f.write("print('must not execute')\nreturn 42\n")
 
         run = subprocess.run(
-            [mlua, "-o", out, src],
+            [*_wrap.mlua_cmd(mlua), "-o", out, src],
             cwd=td,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

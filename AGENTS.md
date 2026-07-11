@@ -20,7 +20,7 @@ ninja -C builddir
 ```
 
 - Port/build knobs live in `src/MLuaConfig.h`. Use Meson `-Dport=generic64`,
-  `generic32`, `cortex-m`, `riscv32`, or `ti84ce` for built-in presets, or
+  `generic32`, `cortex-m`, `riscv32`, `ti84ce`, or `irix-mips` for built-in presets, or
   `-Dport_header=path/to/header.h` to supply one board-specific header. That
   header may override pointer size, alignment, default stack/frame sizes, GC
   threshold, fixed-width type source, native float subtype/width, math hooks,
@@ -32,6 +32,13 @@ ninja -C builddir
   CEmu's autotester (see `platform/ti84ce/README.md`); the `canary_ez80`
   guard test compiles every core TU with `ez80-clang` when CEdev is
   installed.
+- `platform/irix/` is a complete OS port (SGI IRIX 6.5, big-endian MIPS
+  n32; preset `src/ports/irix_mips.h`). Compilation is cross (a from-source
+  gcc 4.7.4 in Docker) but the final link MUST use the native SGI ld on the
+  box — GNU ld output does not run on IRIX (see `platform/irix/README.md`).
+  The `canary_irix` guard test compiles every core TU when the cross gcc is
+  on PATH; `cross/mips-be-qemu.ini` (or `tools/mips_be_docker.sh` on macOS)
+  runs the full suite big-endian under qemu without the hardware.
 - Source compilation is controlled by Meson `-Dcompiler=true|false`. When false,
   `libmicrolua.a` must not contain `MLuaLex`/`MLuaParse` symbols and callers must
   use `MLuaLoadBytecode` / `MLuaDoBytecode` or `MLuaLoadBuffer` / `MLuaDoBuffer`
@@ -286,3 +293,8 @@ column was re-run the same day on the same ROM and came back identical
 lives in platform/ti84ce/tools/ (runbench.py + *_run.json + fixtures/).
 CE size/perf regressions are checked with `tools/map_size.py` against
 .baselines-pass4/*.map.
+
+The SGI IRIX 6.5 port (2026-07-07, `-Dport=irix-mips`, `platform/irix/`) is
+verified on Indigo2 hardware (R4400, big-endian mips3/n32): full interpreter
++ smoke sweep, cross-endian bytecode both directions. Big-endian coverage
+runs without the hardware via `cross/mips-be-qemu.ini`.

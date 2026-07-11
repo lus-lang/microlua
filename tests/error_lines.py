@@ -13,6 +13,8 @@ Exit codes follow meson's convention: 0 = pass, 1 = fail.
 import os
 import subprocess
 import sys
+
+import _wrap
 import tempfile
 
 # The nil-index error is raised on line 12 of this script (1-based).
@@ -38,7 +40,7 @@ ERROR_LINE = 12
 
 def run(mlua, args):
     return subprocess.run(
-        [mlua] + args,
+        mlua + args,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -51,7 +53,7 @@ def main():
     if len(sys.argv) < 2:
         sys.stderr.write("usage: error_lines.py <mlua>\n")
         return 1
-    mlua = sys.argv[1]
+    mlua = _wrap.mlua_cmd(sys.argv[1])
 
     probe = run(mlua, ["-e", "local x return x.y"])
     if probe.returncode == 0:

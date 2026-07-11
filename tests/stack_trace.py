@@ -14,6 +14,8 @@ import re
 import subprocess
 import sys
 
+import _wrap
+
 # Line numbers print as digits, or `?` in MLUA_ENABLE_LINEINFO=0 builds.
 TRACE_LINE = re.compile(r"^\t.+:(\d+|\?): in (function|main chunk)$")
 
@@ -22,11 +24,11 @@ def main():
     if len(sys.argv) < 2:
         sys.stderr.write("usage: stack_trace.py <mlua>\n")
         return 1
-    mlua = sys.argv[1]
+    mlua = _wrap.mlua_cmd(sys.argv[1])
 
     source = "local function f(n) return 1 + f(n + 1) end f(1)"
     result = subprocess.run(
-        [mlua, "-e", source],
+        [*mlua, "-e", source],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,

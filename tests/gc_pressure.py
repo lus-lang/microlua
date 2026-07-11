@@ -14,10 +14,12 @@ Exit codes follow meson's convention: 0 = pass, 1 = fail.
 import subprocess
 import sys
 
+import _wrap
+
 
 def run_lua(mlua, source, limit, timeout=30):
     return subprocess.run(
-        [mlua, "--memory-limit", str(limit), "-e", source],
+        [*mlua, "--memory-limit", str(limit), "-e", source],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -42,7 +44,7 @@ def main():
     if len(sys.argv) < 2:
         sys.stderr.write("usage: gc_pressure.py <mlua>\n")
         return 1
-    mlua = sys.argv[1]
+    mlua = _wrap.mlua_cmd(sys.argv[1])
     failed = 0
 
     # Live data above the old saturation point (20 DISTINCT ~2 KB strings;

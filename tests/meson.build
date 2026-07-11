@@ -163,3 +163,11 @@ test('canary_ez80', python_prog,
            '-DMLUA_PORT_HEADER="ports/ti84ce.h"'] + canary_ez80_args,
     suite: 'guard',
 )
+# IRIX 6.5 / MIPS n32 (big-endian R4400 workstation): an ordinary 32-bit ABI,
+# but the toolchain is a from-source gcc 4.7 cross build (see platform/irix/)
+# whose vintage front end is itself worth a canary.
+test('canary_irix', python_prog,
+    args: [cross_canary, 'mips-sgi-irix6.5-gcc', cross_srcroot, '4', '4', '8',
+           '-DMLUA_PORT_HEADER="ports/irix_mips.h"'],
+    suite: 'guard',
+)
